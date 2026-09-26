@@ -12,11 +12,21 @@ interface LabelView {
   marking: { text: string; color: string | null };
 }
 
+interface ValidationAnswer {
+  valid: boolean;
+  label: unknown;
+}
+
 const DEMO_SPIFS = path.join(import.meta.dirname, '..', '..', 'deploy', 'spif');
 const EXAMPLE_SPIFS = path.join(import.meta.dirname, 'fixtures', 'example');
 const BROKEN_SPIFS = path.join(import.meta.dirname, 'fixtures', 'broken');
 const REFERENCE_LABEL = readFileSync(path.join(import.meta.dirname, 'fixtures', 'reference-label.xml'), 'utf8');
 const FIXED_NOW = (): Date => new Date('2026-09-26T12:00:00Z');
+
+function validationAnswerOf(body: unknown): ValidationAnswer {
+  assert.ok(typeof body === 'object' && body !== null && 'valid' in body && typeof body.valid === 'boolean', 'expected a validation answer');
+  return { valid: body.valid, label: 'label' in body ? body.label : null };
+}
 
 // Whitespace between and inside tags carries no meaning here.
 function compactXml(xml: string): string {
@@ -31,7 +41,21 @@ function compactXml(xml: string): string {
 async function listLabels(server: FastifyInstance, policy: string): Promise<LabelView[]> {
   const response = await server.inject({ method: 'GET', url: `/policies/${policy}/labels` });
   assert.equal(response.statusCode, 200);
-  return response.json();
+  const body: unknown = response.json();
+  assert.ok(Array.isArray(body), 'expected a label list');
+  return body as LabelView[]; // SAFETY: the service's label views; each test compares the fields it names
+}
+
+// The label of a validation or document-label answer.
+function labelOf(body: unknown): LabelView {
+  assert.ok(typeof body === 'object' && body !== null && 'label' in body, 'expected an answer with a label');
+  return body.label as LabelView; // SAFETY: the service's label view; each test compares the fields it names
+}
+
+// The XML of a serialization answer.
+function xmlOf(body: unknown): string {
+  assert.ok(typeof body === 'object' && body !== null && 'xml' in body && typeof body.xml === 'string', 'expected an answer with XML');
+  return body.xml;
 }
 
 describe('policy API with the demo SPIF', () => {
@@ -103,10 +127,10 @@ describe('label validation with the reference EXAMPLE SPIF', () => {
     await server.close();
   });
 
-  async function validate(body: Record<string, unknown>, lang?: string): Promise<{ statusCode: number; json: Record<string, unknown> }> {
+  async function validate(body: Record<string, unknown>, lang?: string): Promise<{ statusCode: number; json: ValidationAnswer }> {
     const query = lang === undefined ? '' : `?lang=${lang}`;
     const response = await server.inject({ method: 'POST', url: `/policies/EXAMPLE/labels/validate${query}`, payload: body });
-    return { statusCode: response.statusCode, json: response.json() };
+    return { statusCode: response.statusCode, json: validationAnswerOf(response.json()) };
   }
 
   const referenceLabel = {
@@ -121,12 +145,12 @@ describe('label validation with the reference EXAMPLE SPIF', () => {
     const { statusCode, json } = await validate(referenceLabel);
     assert.equal(statusCode, 200);
     assert.equal(json.valid, true);
-    assert.deepEqual((json.label as LabelView).marking.text, 'EXAMPLE RESTRICTED ALPHA REL TO XAA, XBB');
+    assert.deepEqual(labelOf(json).marking.text, 'EXAMPLE RESTRICTED ALPHA REL TO XAA, XBB');
   });
 
   it('renders the marking in another language when the SPIF has phrases for it', async () => {
     const { json } = await validate(referenceLabel, 'fr');
-    assert.deepEqual((json.label as LabelView).marking.text, 'EXAMPLE RESTREINT ALPHA REL TO XAA, XBB');
+    assert.deepEqual(labelOf(json).marking.text, 'EXAMPLE RESTREINT ALPHA REL TO XAA, XBB');
   });
 
   it('refuses a category excluded at the classification', async () => {
@@ -158,7 +182,7 @@ describe('label validation with the reference EXAMPLE SPIF', () => {
   it('matches names without regard to case and answers with the SPIF spelling', async () => {
     const { json } = await validate({ classification: 'restricted', categories: [{ tagSet: 'releasable to', values: ['xaa'] }] });
     assert.equal(json.valid, true);
-    assert.deepEqual((json.label as LabelView).categories, [{ tagSet: 'Releasable To', type: 'PERMISSIVE', values: ['XAA'] }]);
+    assert.deepEqual(labelOf(json).categories, [{ tagSet: 'Releasable To', type: 'PERMISSIVE', values: ['XAA'] }]);
   });
 });
 
@@ -184,7 +208,7 @@ describe('ADatP-4774 serialization', () => {
       payload: { code: 'EXAMPLE:2/1.1/2.1+2' },
     });
     assert.equal(response.statusCode, 200);
-    assert.equal(compactXml(response.json().xml), compactXml(REFERENCE_LABEL));
+    assert.equal(compactXml(xmlOf(response.json())), compactXml(REFERENCE_LABEL));
   });
 
   it('serializes a demo label with its policy OID and typed category', async () => {
@@ -195,7 +219,7 @@ describe('ADatP-4774 serialization', () => {
     });
     assert.equal(response.statusCode, 200);
     assert.equal(
-      compactXml(response.json().xml),
+      compactXml(xmlOf(response.json())),
       compactXml(`<slab:originatorConfidentialityLabel xmlns:slab="urn:nato:stanag:4774:confidentialitymetadatalabel:1:0" ReviewDateTime="2031-09-26T00:00:00Z">
         <slab:ConfidentialityInformation>
           <slab:PolicyIdentifier URI="urn:oid:2.25.166231019600111174217682845337071458325">DEMO-FR</slab:PolicyIdentifier>
@@ -236,22 +260,23 @@ describe('document label rollup with the demo SPIF', () => {
     await highWaterMark.close();
   });
 
-  async function documentLabel(server: FastifyInstance, base: string, portions: string[]): Promise<Record<string, unknown>> {
+  async function documentLabel(server: FastifyInstance, base: string, portions: string[]): Promise<{ label: LabelView; moreRestrictivePortions: unknown }> {
     const response = await server.inject({
       method: 'POST',
       url: '/policies/DEMO-FR/document-label',
       payload: { base, portions },
     });
     assert.equal(response.statusCode, 200);
-    return response.json();
+    const body: unknown = response.json();
+    return { label: labelOf(body), moreRestrictivePortions: typeof body === 'object' && body !== null && 'moreRestrictivePortions' in body ? body.moreRestrictivePortions : null };
   }
 
   it('keeps the base label and flags a more restrictive portion under the clear-parts rule', async () => {
     const result = await documentLabel(clearParts, 'DEMO-FR:2/2.1', ['DEMO-FR:2/1.1']);
     assert.equal(result.moreRestrictivePortions, true);
-    assert.equal((result.label as LabelView).code, 'DEMO-FR:2/2.1/3.1');
+    assert.equal(result.label.code, 'DEMO-FR:2/2.1/3.1');
     assert.equal(
-      (result.label as LabelView).marking.text,
+      result.label.marking.text,
       'DIFFUSION RESTREINTE – DIFFUSION OTAN – CONTIENT DES PORTIONS PLUS RESTRICTIVES',
     );
   });
@@ -272,7 +297,7 @@ describe('document label rollup with the demo SPIF', () => {
   ];
   for (const [base, portions, expected] of clearPartsCases) {
     it(`clear-parts: ${base} with [${portions.join(', ')}] gives ${expected}`, async () => {
-      assert.equal(((await documentLabel(clearParts, base, portions)).label as LabelView).code, expected);
+      assert.equal((await documentLabel(clearParts, base, portions)).label.code, expected);
     });
   }
 
@@ -286,7 +311,7 @@ describe('document label rollup with the demo SPIF', () => {
   ];
   for (const [base, portions, expected] of highWaterMarkCases) {
     it(`high-water-mark: ${base} with [${portions.join(', ')}] gives ${expected}`, async () => {
-      assert.equal(((await documentLabel(highWaterMark, base, portions)).label as LabelView).code, expected);
+      assert.equal((await documentLabel(highWaterMark, base, portions)).label.code, expected);
     });
   }
 
@@ -332,7 +357,7 @@ describe('ADatP-4778.2 document label part', () => {
     assert.equal(response.statusCode, 200);
     const oid = '2.25.283505922519774543341581604402970826256';
     assert.equal(
-      compactXml(response.json().xml),
+      compactXml(xmlOf(response.json())),
       compactXml(`<mb:BindingInformation xmlns:mb="urn:nato:stanag:4778:bindinginformation:1:0" xmlns:xmime="http://www.w3.org/2005/05/xmlmime">
         <mb:MetadataBindingContainer>
           <mb:MetadataBinding Id="mb-document">
@@ -378,7 +403,7 @@ describe('ADatP-4778.2 document label part', () => {
       url: '/policies/EXAMPLE/document-label',
       payload: { base: 'EXAMPLE:1', portions: [] },
     });
-    const uris = [...String(response.json().xml).matchAll(/DataReference URI="([^"]+)"/g)].map((match) => match[1]);
+    const uris = [...xmlOf(response.json()).matchAll(/DataReference URI="([^"]+)"/g)].map((match) => match[1]);
     assert.deepEqual(uris, [
       'pack:///word/document.xml',
       'pack:///word/styles.xml',
