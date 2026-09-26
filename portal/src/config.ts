@@ -1,3 +1,5 @@
+import type { OidcSettings } from './auth/oidc.ts';
+
 export interface PortalConfig {
   domain: string;
   portalPublicUrl: string;
@@ -8,13 +10,15 @@ export interface PortalConfig {
   documentsDirectory: string;
   templatesDirectory: string;
   port: number;
+  oidc: OidcSettings;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
   const domain = requireEnv(env, 'DOMAIN');
+  const portalPublicUrl = `https://portail.${domain}`;
   return {
     domain,
-    portalPublicUrl: `https://portail.${domain}`,
+    portalPublicUrl,
     docsPublicUrl: `https://docs.${domain}`,
     portalInternalUrl: env.PORTAL_INTERNAL_URL ?? 'http://portal:3000',
     onlyofficeInternalUrl: env.ONLYOFFICE_INTERNAL_URL ?? 'http://onlyoffice',
@@ -22,6 +26,14 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
     templatesDirectory: env.TEMPLATES_DIR ?? '/templates',
     port: Number(env.PORT ?? '3000'),
+    oidc: {
+      issuer: requireEnv(env, 'OIDC_ISSUER'),
+      clientId: requireEnv(env, 'OIDC_CLIENT_ID'),
+      clientSecret: requireEnv(env, 'OIDC_CLIENT_SECRET'),
+      scopes: env.OIDC_SCOPES ?? 'openid profile email',
+      redirectUri: `${portalPublicUrl}/auth/callback`,
+      postLogoutRedirectUri: `${portalPublicUrl}/`,
+    },
   };
 }
 
