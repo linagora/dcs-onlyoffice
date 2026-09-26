@@ -25,8 +25,8 @@ export async function waitForEditorReady(page: Page): Promise<void> {
 }
 
 interface EditorPageConfig {
-  document: { key: string };
-  editorConfig: { user: { id: string; name: string } };
+  document: { key: string; permissions: { edit: boolean } };
+  editorConfig: { mode: string; user: { id: string; name: string } };
 }
 
 export async function editorPageConfig(page: Page): Promise<EditorPageConfig> {
