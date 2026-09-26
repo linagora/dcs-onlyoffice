@@ -38,3 +38,19 @@ export async function pluginInfoIdentity(frame: Frame): Promise<PluginInfoIdenti
     };
   });
 }
+
+// Calls an editor method from the plugin's frame, as the plugin itself does.
+export async function executeEditorMethod(frame: Frame, name: string, parameters: unknown[]): Promise<unknown> {
+  return frame.evaluate(
+    async ({ name, parameters }) =>
+      new Promise((resolve) => {
+        const scope = window as {
+          Asc?: { plugin?: { executeMethod?: (method: string, args: unknown[], callback: (result: unknown) => void) => void } };
+        };
+        scope.Asc?.plugin?.executeMethod?.(name, parameters, (result) => {
+          resolve(result ?? null);
+        });
+      }),
+    { name, parameters },
+  );
+}
