@@ -1,6 +1,6 @@
 import type { OfficeApi } from './office-api.ts';
 import { runCommand } from './onlyoffice.ts';
-import { fetchAdatp4774, fetchDocumentLabel, type LabelView } from './policy.ts';
+import { type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, type LabelView } from './policy.ts';
 
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 export const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
@@ -124,7 +124,11 @@ export async function insertPortion(portion: NewPortion): Promise<boolean> {
   const { label } = portion;
   const [labelXml, documentLabel] = await Promise.all([
     fetchAdatp4774(label.policy, label.code),
-    fetchDocumentLabel(label.policy, portion.baseLabelCode, [...portion.existingLabelCodes, label.code]),
+    fetchDocumentLabel({
+      policy: label.policy,
+      baseLabelCode: portion.baseLabelCode,
+      portionLabelCodes: [...portion.existingLabelCodes, label.code],
+    }),
   ]);
   const id = crypto.randomUUID();
   const tag: PortionTag = { v: 1, id, label: label.code };
@@ -147,11 +151,11 @@ export async function insertPortion(portion: NewPortion): Promise<boolean> {
 }
 
 // Rewrites the document label from the base label and the portions' labels.
-export async function writeDocumentLabel(policy: string, baseLabelCode: string, portionLabelCodes: string[]): Promise<boolean> {
-  const documentLabel = await fetchDocumentLabel(policy, baseLabelCode, portionLabelCodes);
+export async function writeDocumentLabel(request: DocumentLabelRequest): Promise<boolean> {
+  const documentLabel = await fetchDocumentLabel(request);
   const done = await runCommand(
     replacePartsCommand,
-    { replacements: documentLabelReplacements(documentLabel.xml, baseLabelCode, documentLabel.label.code) },
+    { replacements: documentLabelReplacements(documentLabel.xml, request.baseLabelCode, documentLabel.label.code) },
     false,
     (result) => (result === true ? true : null),
   );

@@ -1,5 +1,6 @@
 import type { JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { logProblem } from './log.ts';
 import type { LabelView } from './policy.ts';
 
 export interface PortionFormProps {
@@ -32,7 +33,10 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
     }
     setBusy(true);
     setFailed(false);
-    const inserted = await onInsert(selected, text).catch(() => false);
+    const inserted = await onInsert(selected, text).catch((error: unknown) => {
+      logProblem('Inserting a portion', error);
+      return false;
+    });
     setBusy(false);
     setFailed(!inserted);
     if (inserted) {

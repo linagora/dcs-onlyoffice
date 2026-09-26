@@ -62,14 +62,21 @@ export interface DocumentLabel {
   xml: string;
 }
 
+// What a document label is computed from.
+export interface DocumentLabelRequest {
+  policy: string;
+  baseLabelCode: string;
+  portionLabelCodes: string[];
+}
+
 // Document label computed from the base label and the portions' labels, with
 // its ADatP-4778.2 binding part.
-export async function fetchDocumentLabel(policy: string, base: string, portions: string[]): Promise<DocumentLabel> {
-  const response = await fetch(`${RELAY}/policies/${encodeURIComponent(policy)}/document-label`, {
+export async function fetchDocumentLabel(request: DocumentLabelRequest): Promise<DocumentLabel> {
+  const response = await fetch(`${RELAY}/policies/${encodeURIComponent(request.policy)}/document-label`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base, portions }),
+    body: JSON.stringify({ base: request.baseLabelCode, portions: request.portionLabelCodes }),
   });
   if (!response.ok) {
     throw new Error(`The policy service could not compute the document label (${response.status})`);
