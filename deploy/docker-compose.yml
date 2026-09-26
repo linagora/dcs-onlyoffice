@@ -78,6 +78,7 @@ services:
     environment:
       SPIF_DIR: /spif
       MARKING_LANGUAGE: ${MARKING_LANGUAGE:-fr}
+      ROLLUP_RULE: ${ROLLUP_RULE:-clear-parts}
     volumes:
       - ./spif:/spif:ro
     healthcheck:
