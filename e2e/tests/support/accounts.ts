@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { type Browser, expect, type Page } from '@playwright/test';
 
 export interface DemoAccount {
   login: string;
@@ -24,4 +24,13 @@ export async function signIn(page: Page, account: DemoAccount): Promise<void> {
   await expect(page).toHaveURL(/\/\/idp\./);
   await fillIdpLoginForm(page, account);
   await expect(page.getByText(`Signed in as ${account.name}`)).toBeVisible();
+}
+
+// A second, independent browser session, for co-editing scenarios.
+export async function signedInPage(browser: Browser, account: DemoAccount): Promise<Page> {
+  const domain = process.env.DOMAIN ?? 'dcs.test';
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: `https://portail.${domain}` });
+  const page = await context.newPage();
+  await signIn(page, account);
+  return page;
 }
