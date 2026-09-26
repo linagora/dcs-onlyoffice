@@ -15,6 +15,9 @@ services:
     volumes:
       - onlyoffice-data:/var/www/onlyoffice/Data
       - onlyoffice-logs:/var/log/onlyoffice
+      # Loaded after the configuration the entrypoint rewrites. Disables the
+      # 5-minute DNS cache, which kept a recreated portal's old address.
+      - ./onlyoffice/local-production-linux.json:/etc/onlyoffice/documentserver/local-production-linux.json:ro
     healthcheck:
       # The entrypoint generates the fonts and restarts the editing services
       # after nginx already answers; its last step tails the logs. The bracket
