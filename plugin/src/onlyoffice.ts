@@ -11,11 +11,15 @@ export interface PluginInfo {
 type CommandCallback = (result: unknown) => void;
 
 interface AscPlugin {
+  guid?: string;
   init?: () => void;
   button?: (id: number) => void;
   info?: PluginInfo;
   callCommand?: (command: () => unknown, isClose: boolean, isCalc: boolean, callback: CommandCallback) => void;
+  executeMethod?: (name: string, parameters: unknown[], callback: CommandCallback) => boolean;
   attachEvent?: (name: string, handler: (payload: unknown) => void) => void;
+  attachContextMenuClickEvent?: (id: string, handler: () => void) => void;
+  attachToolbarMenuClickEvent?: (id: string, handler: () => void) => void;
 }
 
 interface AscRuntime {
@@ -99,4 +103,69 @@ function sendCommand(command: () => unknown, scope: Record<string, unknown>, rec
       resolve(result);
     });
   });
+}
+
+export function callEditorMethod(name: string, parameters: unknown[]): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const plugin = window.Asc?.plugin;
+    if (plugin?.executeMethod === undefined) {
+      reject(new Error('The editor cannot run methods yet'));
+      return;
+    }
+    plugin.executeMethod(name, parameters, (result) => {
+      resolve(result ?? null);
+    });
+  });
+}
+
+export interface MenuEntry {
+  id: string;
+  text: string;
+}
+
+// The editor waits for every plugin listening to onContextMenuShow, so the
+// plugin answers each time, possibly with no entry.
+export function offerContextMenu(entries: () => MenuEntry[], onClick: (id: string) => void): boolean {
+  const plugin = window.Asc?.plugin;
+  if (plugin?.attachEvent === undefined || plugin.attachContextMenuClickEvent === undefined) {
+    return false;
+  }
+  plugin.attachEvent('onContextMenuShow', () => {
+    callEditorMethod('AddContextMenuItem', [{ guid: plugin.guid, items: entries() }]).catch(() => null);
+  });
+  for (const entry of entries()) {
+    plugin.attachContextMenuClickEvent(entry.id, () => {
+      onClick(entry.id);
+    });
+  }
+  return true;
+}
+
+export interface ToolbarButton {
+  id: string;
+  text: string;
+  hint: string;
+  icon: string;
+}
+
+// Buttons added to the standard "Insert" tab of the text editor.
+export async function addInsertTabButton(button: ToolbarButton, onClick: () => void): Promise<boolean> {
+  const plugin = window.Asc?.plugin;
+  if (plugin?.attachToolbarMenuClickEvent === undefined) {
+    return false;
+  }
+  plugin.attachToolbarMenuClickEvent(button.id, onClick);
+  await callEditorMethod('AddToolbarMenuItem', [
+    {
+      guid: plugin.guid,
+      tabs: [
+        {
+          id: 'ins',
+          text: 'Insert',
+          items: [{ id: button.id, type: 'big-button', text: button.text, hint: button.hint, icons: button.icon, lockInViewMode: true }],
+        },
+      ],
+    },
+  ]);
+  return true;
 }

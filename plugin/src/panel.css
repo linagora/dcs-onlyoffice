@@ -98,8 +98,28 @@ legend,
 }
 
 .portion-item {
-  padding: 6px 0;
   border-bottom: 1px solid var(--border-divider, #dfdfdf);
+}
+
+.portion-item[aria-current='true'] {
+  background: var(--highlight-button-hover, #e0e0e0);
+}
+
+.portion-select {
+  display: block;
+  width: 100%;
+  padding: 6px 4px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hint {
+  margin: 0 0 6px;
+  color: var(--text-secondary, #6b6b6b);
 }
 
 .portion-marking {
@@ -110,6 +130,7 @@ legend,
 }
 
 .portion-text {
+  display: block;
   margin: 4px 0 0;
   white-space: pre-wrap;
 }

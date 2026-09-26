@@ -2,11 +2,11 @@ import type { JSX } from 'preact';
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import { DocumentLabel } from './DocumentLabel.tsx';
 import { type Identity, resolveIdentity } from './identity.ts';
-import { onEditorEvent, type PluginInfo } from './onlyoffice.ts';
+import { addInsertTabButton, callEditorMethod, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
 import { fetchDefaultPolicyLabels, fetchDocumentLabel, type LabelView } from './policy.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList } from './PortionList.tsx';
-import { type DocumentState, insertPortion, readDocumentState, writeDocumentLabel } from './portions.ts';
+import { type DocumentState, insertPortion, parsePortionTag, readDocumentState, type StoredPortion, writeDocumentLabel } from './portions.ts';
 
 export interface PanelProps {
   pluginReady: Promise<PluginInfo>;
@@ -15,6 +15,17 @@ export interface PanelProps {
 type Loadable<T> = { status: 'loading' } | { status: 'failed'; reason: string } | { status: 'loaded'; value: T };
 
 const REFRESH_INTERVAL_MS = 3_000;
+const INSERT_ENTRY_ID = 'dcs-insert-portion';
+const INSERT_BUTTON_ID = 'dcs-insert-portion-button';
+
+// The editor's content-control events carry the control, whose tag names the
+// portion.
+function portionIdOf(control: unknown): string | null {
+  if (typeof control !== 'object' || control === null || !('Tag' in control) || typeof control.Tag !== 'string') {
+    return null;
+  }
+  return parsePortionTag(control.Tag)?.id ?? null;
+}
 
 function sameState(left: DocumentState, right: DocumentState): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -28,6 +39,8 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const labels = useLoadable<LabelView[]>(fetchDefaultPolicyLabels, []);
   const [documentState, setDocumentState] = useState<DocumentState | null>(null);
   const [documentLabel, setDocumentLabel] = useState<LabelView | null>(null);
+  const [activePortionId, setActivePortionId] = useState<string | null>(null);
+  const [insertionRequested, setInsertionRequested] = useState(false);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
   const policy = labelList[0]?.policy ?? null;
@@ -51,6 +64,12 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
         };
         onEditorEvent('onDocumentContentReady', refreshQuietly);
         onEditorEvent('onChangeContentControl', refreshQuietly);
+        onEditorEvent('onFocusContentControl', (control) => {
+          setActivePortionId(portionIdOf(control));
+        });
+        onEditorEvent('onBlurContentControl', () => {
+          setActivePortionId(null);
+        });
         // Co-authors' changes to Custom XML parts raise no plugin event, so the
         // panel also rereads the document regularly.
         timer = setInterval(refreshQuietly, REFRESH_INTERVAL_MS);
@@ -96,6 +115,29 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     };
   }, [policy, baseLabelCode, documentState, readOnly]);
 
+  // Entry points in the editor's own menus lead to the panel's form.
+  useEffect(() => {
+    if (readOnly) {
+      return;
+    }
+    const request = (): void => {
+      setInsertionRequested(true);
+    };
+    pluginReady
+      .then(async () => {
+        offerContextMenu(() => [{ id: INSERT_ENTRY_ID, text: 'Insert protected portion' }], request);
+        return addInsertTabButton(
+          { id: INSERT_BUTTON_ID, text: 'Protected portion', hint: 'Insert a protected portion', icon: 'resources/icon.svg' },
+          request,
+        );
+      })
+      .catch(() => false);
+  }, [pluginReady, readOnly]);
+
+  const selectPortion = (portion: StoredPortion): void => {
+    callEditorMethod('SelectContentControl', [portion.internalId]).catch(() => null);
+  };
+
   const insert = async (label: LabelView, text: string): Promise<boolean> => {
     if (baseLabelCode === null) {
       return false;
@@ -108,6 +150,9 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       existingLabelCodes: current.portions.map((portion) => portion.labelCode),
     });
     await refresh();
+    if (inserted) {
+      setInsertionRequested(false);
+    }
     return inserted;
   };
 
@@ -157,12 +202,12 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
           {!readOnly && (
             <section aria-labelledby="new-portion-title">
               <h2 id="new-portion-title">New protected portion</h2>
-              <PortionForm labels={labelList} onInsert={insert} />
+              <PortionForm labels={labelList} insertionRequested={insertionRequested} onInsert={insert} />
             </section>
           )}
         </>
       )}
-      <PortionList portions={portions} labels={labelList} />
+      <PortionList portions={portions} labels={labelList} activePortionId={activePortionId} onSelect={selectPortion} />
     </main>
   );
 }
