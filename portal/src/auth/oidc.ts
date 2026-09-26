@@ -77,29 +77,6 @@ export class OidcClient {
     };
   }
 
-  // Online refresh tokens die with the IdP session: a failure means the user
-  // has to sign in again.
-  async refresh(tokens: SessionTokens): Promise<SessionTokens | null> {
-    if (tokens.refreshToken === null) {
-      return null;
-    }
-    const configuration = await this.#getConfiguration();
-    try {
-      const refreshed = await client.refreshTokenGrant(configuration, tokens.refreshToken);
-      return {
-        accessToken: refreshed.access_token,
-        refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
-        idToken: refreshed.id_token ?? tokens.idToken,
-        accessTokenExpiresAt: refreshed.expires_in === undefined ? null : Date.now() + refreshed.expires_in * 1000,
-      };
-    } catch (error: unknown) {
-      if (error instanceof client.ResponseBodyError) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
   async endSessionUrl(idToken: string | null): Promise<URL> {
     const configuration = await this.#getConfiguration();
     const parameters: Record<string, string> = { post_logout_redirect_uri: this.#settings.postLogoutRedirectUri };

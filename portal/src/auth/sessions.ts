@@ -8,6 +8,8 @@ export interface UserIdentity {
   groups: string[];
 }
 
+// Tokens never leave the portal: the browser only holds the session cookie.
+// The ID token serves as the hint of RP-initiated logout.
 export interface SessionTokens {
   accessToken: string;
   refreshToken: string | null;
@@ -64,15 +66,6 @@ export class SessionStore {
       this.#sessions.delete(id);
       return null;
     }
-    return session;
-  }
-
-  updateTokens(id: string, tokens: SessionTokens): Session | null {
-    const session = this.findSession(id);
-    if (session === null) {
-      return null;
-    }
-    session.tokens = tokens;
     return session;
   }
 
