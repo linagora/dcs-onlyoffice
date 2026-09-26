@@ -16,6 +16,8 @@ export interface DocumentTemplate {
 
 export type SaveKind = 'session-ended' | 'forced';
 
+export const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
 interface DocumentMetadata {
   epoch: string;
   version: number;
