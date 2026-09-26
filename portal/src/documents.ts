@@ -33,6 +33,8 @@ export async function listDocuments(directory: string): Promise<StoredDocument[]
   return documents.filter((document): document is StoredDocument => document !== null);
 }
 
+// A document seeded without metadata gets it on first lookup, so that its key
+// stays stable from then on.
 export async function findDocument(directory: string, id: string): Promise<StoredDocument | null> {
   if (!DOCUMENT_ID_PATTERN.test(id)) {
     return null;
