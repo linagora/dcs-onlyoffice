@@ -2,7 +2,7 @@ import { createReadStream, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fastifyCookie } from '@fastify/cookie';
 import { fastifyStatic } from '@fastify/static';
-import { fastify, type FastifyInstance } from 'fastify';
+import { fastify, type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { OidcClient } from './auth/oidc.ts';
 import { refreshBindingReferences } from './binding.ts';
 import { registerAuth, requireSession } from './auth/routes.ts';
@@ -16,7 +16,7 @@ import {
   type SaveKind,
   saveDocumentContent,
 } from './documents.ts';
-import { buildEditorConfig, type EditorPlugin, signEditorConfig } from './editor-config.ts';
+import { buildEditorConfig, type EditorMode, type EditorPlugin, signEditorConfig } from './editor-config.ts';
 import {
   type CallbackPayload,
   readVerifiedCallback,
@@ -47,6 +47,15 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     root: path.join(import.meta.dirname, '..', 'public'),
     prefix: '/static/',
   });
+  // The editor derives the plugin's base URL by cutting "config.json" out of
+  // this URL, so the read-only variant (EditorPlugin.viewConfigUrl) keeps the
+  // same path and differs by its query.
+  app.get<{ Querystring: { mode?: string } }>('/plugin/config.json', async (request, reply) =>
+    reply
+      .header('Access-Control-Allow-Origin', config.docsPublicUrl)
+      .type('application/json; charset=utf-8')
+      .send(request.query.mode === 'view' ? viewModeManifest(config) : readPluginManifest(config)),
+  );
   // The editor, on the Document Server's origin, fetches the plugin
   // configuration with an XHR; the plugin page itself runs on this origin.
   app.register(fastifyStatic, {
@@ -94,14 +103,14 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.redirect(`/documents/${document.id}/edit`, 303);
   });
 
-  app.get<{ Params: DocumentParams }>('/documents/:id/edit', async (request, reply) => {
+  const openEditor = (mode: EditorMode) => async (request: FastifyRequest<{ Params: DocumentParams }>, reply: FastifyReply): Promise<FastifyReply> => {
     const document = await findDocument(config.documentsDirectory, request.params.id);
     if (document === null) {
       return reply.code(404).send({ error: 'Document not found' });
     }
     const { user } = requireSession(request);
     const editorConfig = await signEditorConfig(
-      buildEditorConfig(document, { id: user.id, name: user.name }, plugin, config),
+      buildEditorConfig(document, { id: user.id, name: user.name }, plugin, mode, config),
       config.onlyofficeJwtSecret,
     );
     return reply.type('text/html; charset=utf-8').send(
@@ -111,7 +120,9 @@ export function buildServer(config: PortalConfig): FastifyInstance {
         editorConfig,
       }),
     );
-  });
+  };
+  app.get<{ Params: DocumentParams }>('/documents/:id/edit', openEditor('edit'));
+  app.get<{ Params: DocumentParams }>('/documents/:id/view', openEditor('view'));
 
   app.get<{ Params: DocumentParams }>('/documents/:id/download', async (request, reply) => {
     const document = await findDocument(config.documentsDirectory, request.params.id);
@@ -170,12 +181,31 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
 type CallbackOutcome = 'saved' | 'ignored' | 'failed';
 
-function loadEditorPlugin(config: PortalConfig): EditorPlugin {
+function readPluginManifest(config: PortalConfig): Record<string, unknown> {
   const manifest: unknown = JSON.parse(readFileSync(path.join(config.pluginDirectory, 'config.json'), 'utf8'));
   if (typeof manifest !== 'object' || manifest === null || !('guid' in manifest) || typeof manifest.guid !== 'string') {
     throw new Error(`The plugin configuration in ${config.pluginDirectory} has no guid`);
   }
-  return { guid: manifest.guid, configUrl: `${config.portalPublicUrl}/plugin/config.json` };
+  return manifest as Record<string, unknown>; // SAFETY: object with a guid checked above
+}
+
+function loadEditorPlugin(config: PortalConfig): EditorPlugin {
+  return {
+    guid: String(readPluginManifest(config).guid),
+    configUrl: `${config.portalPublicUrl}/plugin/config.json`,
+    viewConfigUrl: `${config.portalPublicUrl}/plugin/config.json?mode=view`,
+  };
+}
+
+function viewModeManifest(config: PortalConfig): Record<string, unknown> {
+  const manifest = readPluginManifest(config);
+  const variations = Array.isArray(manifest.variations) ? manifest.variations : [];
+  return {
+    ...manifest,
+    variations: variations.map((variation: unknown) =>
+      typeof variation === 'object' && variation !== null ? { ...variation, type: 'panel' } : variation,
+    ),
+  };
 }
 
 // With JWT enabled, the Document Server signs its requests to the document URL.
