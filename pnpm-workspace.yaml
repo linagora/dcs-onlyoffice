@@ -1,0 +1,4 @@
+packages:
+  - portal
+  - e2e
+  - deploy/demo
