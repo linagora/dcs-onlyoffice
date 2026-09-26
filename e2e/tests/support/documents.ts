@@ -24,20 +24,41 @@ export async function waitForEditorReady(page: Page): Promise<void> {
   await expect(page.locator('body')).toHaveAttribute('data-document-ready', 'true', { timeout: 180_000 });
 }
 
-export async function editorDocumentKey(page: Page): Promise<string> {
+interface EditorPageConfig {
+  document: { key: string };
+  editorConfig: { user: { id: string; name: string } };
+}
+
+export async function editorPageConfig(page: Page): Promise<EditorPageConfig> {
   const config: unknown = JSON.parse((await page.locator('#editor-config').textContent()) ?? 'null');
-  if (
-    typeof config !== 'object' ||
-    config === null ||
-    !('document' in config) ||
-    typeof config.document !== 'object' ||
-    config.document === null ||
-    !('key' in config.document) ||
-    typeof config.document.key !== 'string'
-  ) {
-    throw new Error('The editor page carries no document key');
+  if (!isEditorPageConfig(config)) {
+    throw new Error('The editor page carries no editor configuration');
   }
-  return config.document.key;
+  return config;
+}
+
+export async function editorDocumentKey(page: Page): Promise<string> {
+  return (await editorPageConfig(page)).document.key;
+}
+
+function isEditorPageConfig(value: unknown): value is EditorPageConfig {
+  if (typeof value !== 'object' || value === null || !('document' in value) || !('editorConfig' in value)) {
+    return false;
+  }
+  const { document, editorConfig } = value;
+  return (
+    typeof document === 'object' &&
+    document !== null &&
+    'key' in document &&
+    typeof document.key === 'string' &&
+    typeof editorConfig === 'object' &&
+    editorConfig !== null &&
+    'user' in editorConfig &&
+    typeof editorConfig.user === 'object' &&
+    editorConfig.user !== null &&
+    'id' in editorConfig.user &&
+    'name' in editorConfig.user
+  );
 }
 
 export async function typeInDocument(page: Page, text: string): Promise<void> {
