@@ -22,14 +22,25 @@ export interface EditorConfig {
     mode: 'edit' | 'view';
     user: EditorUser;
     coEditing: { mode: 'fast'; change: boolean };
+    plugins: { autostart: string[]; pluginsData: string[] };
   };
+}
+
+export interface EditorPlugin {
+  guid: string;
+  configUrl: string;
 }
 
 export interface SignedEditorConfig extends EditorConfig {
   token: string;
 }
 
-export function buildEditorConfig(document: StoredDocument, user: EditorUser, config: PortalConfig): EditorConfig {
+export function buildEditorConfig(
+  document: StoredDocument,
+  user: EditorUser,
+  plugin: EditorPlugin,
+  config: PortalConfig,
+): EditorConfig {
   const documentUrl = `${config.portalInternalUrl}/internal/documents/${document.id}`;
   return {
     document: {
@@ -46,6 +57,7 @@ export function buildEditorConfig(document: StoredDocument, user: EditorUser, co
       mode: 'edit',
       user,
       coEditing: { mode: 'fast', change: false },
+      plugins: { autostart: [plugin.guid], pluginsData: [plugin.configUrl] },
     },
   };
 }

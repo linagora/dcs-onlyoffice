@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { OidcSettings } from './auth/oidc.ts';
 
 export interface PortalConfig {
@@ -9,6 +10,7 @@ export interface PortalConfig {
   onlyofficeJwtSecret: string;
   documentsDirectory: string;
   templatesDirectory: string;
+  pluginDirectory: string;
   port: number;
   oidc: OidcSettings;
 }
@@ -25,6 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     onlyofficeJwtSecret: requireEnv(env, 'ONLYOFFICE_JWT_SECRET'),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
     templatesDirectory: env.TEMPLATES_DIR ?? '/templates',
+    pluginDirectory: env.PLUGIN_DIR ?? path.join(import.meta.dirname, '..', 'plugin-dist'),
     port: Number(env.PORT ?? '3000'),
     oidc: {
       issuer: requireEnv(env, 'OIDC_ISSUER'),
