@@ -1,6 +1,20 @@
 import { jwtVerify, SignJWT, type JWTPayload } from 'jose';
 
-export type CallbackStatus = 1 | 2 | 3 | 4 | 6 | 7;
+// Statuses of the Document Server's save callbacks.
+export const CALLBACK_STATUS = {
+  editing: 1,
+  readyForSaving: 2,
+  savingError: 3,
+  closedWithoutChanges: 4,
+  forceSaved: 6,
+  forceSavingError: 7,
+} as const;
+
+export type CallbackStatus = (typeof CALLBACK_STATUS)[keyof typeof CALLBACK_STATUS];
+
+// Answers the Document Server expects from a callback handler.
+export const CALLBACK_RECEIVED = { error: 0 } as const;
+export const CALLBACK_FAILED = { error: 1 } as const;
 
 export interface CallbackPayload {
   key: string;
@@ -10,7 +24,10 @@ export interface CallbackPayload {
 
 export type ForceSaveOutcome = 'accepted' | 'no-changes' | 'unknown-document' | 'failed';
 
-const CALLBACK_STATUSES: readonly number[] = [1, 2, 3, 4, 6, 7];
+const CALLBACK_STATUSES: readonly number[] = Object.values(CALLBACK_STATUS);
+
+// Error codes in the command service's answers.
+const COMMAND_ERROR = { none: 0, unknownKey: 1, notModified: 4 } as const;
 
 export async function signOnlyofficeToken(payload: Record<string, unknown>, secret: string): Promise<string> {
   return new SignJWT(payload).setProtectedHeader({ alg: 'HS256', typ: 'JWT' }).sign(encodeSecret(secret));
@@ -69,11 +86,11 @@ export async function requestForceSave(
   const result: unknown = await response.json();
   const error = isRecord(result) && typeof result.error === 'number' ? result.error : null;
   switch (error) {
-    case 0:
+    case COMMAND_ERROR.none:
       return 'accepted';
-    case 4:
+    case COMMAND_ERROR.notModified:
       return 'no-changes';
-    case 1:
+    case COMMAND_ERROR.unknownKey:
       return 'unknown-document';
     default:
       return 'failed';
@@ -91,17 +108,14 @@ export function toInternalUrl(fileUrl: string, onlyofficeInternalUrl: string): s
 }
 
 function parseCallbackPayload(value: unknown): CallbackPayload | null {
-  if (!isRecord(value) || typeof value.key !== 'string' || typeof value.status !== 'number') {
+  if (!isRecord(value) || typeof value.key !== 'string' || typeof value.status !== 'number' || !isCallbackStatus(value.status)) {
     return null;
   }
-  if (!CALLBACK_STATUSES.includes(value.status)) {
-    return null;
-  }
-  return {
-    key: value.key,
-    status: value.status as CallbackStatus, // SAFETY: membership checked above
-    url: typeof value.url === 'string' ? value.url : null,
-  };
+  return { key: value.key, status: value.status, url: typeof value.url === 'string' ? value.url : null };
+}
+
+function isCallbackStatus(value: number): value is CallbackStatus {
+  return CALLBACK_STATUSES.includes(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

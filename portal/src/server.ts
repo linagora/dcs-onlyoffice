@@ -19,6 +19,9 @@ import {
 import { buildEditorConfig, type EditorMode, type EditorPlugin, signEditorConfig } from './editor-config.ts';
 import {
   bearerToken,
+  CALLBACK_FAILED,
+  CALLBACK_RECEIVED,
+  CALLBACK_STATUS,
   type CallbackPayload,
   readVerifiedCallback,
   requestForceSave,
@@ -167,14 +170,14 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     );
     if (callback === null) {
       request.log.warn({ documentId: request.params.id }, 'Rejected an unsigned or invalid callback');
-      return reply.code(401).send({ error: 1 });
+      return reply.code(401).send(CALLBACK_FAILED);
     }
     const saved = await storeCallbackFile(config, request.params.id, callback);
     if (saved === 'failed') {
       request.log.error({ documentId: request.params.id, status: callback.status }, 'Saving the document failed');
-      return reply.send({ error: 1 });
+      return reply.send(CALLBACK_FAILED);
     }
-    return reply.send({ error: 0 });
+    return reply.send(CALLBACK_RECEIVED);
   });
 
   return app;
@@ -240,9 +243,9 @@ async function storeCallbackFile(config: PortalConfig, documentId: string, callb
 
 function saveKindOf(callback: CallbackPayload): SaveKind | null {
   switch (callback.status) {
-    case 2:
+    case CALLBACK_STATUS.readyForSaving:
       return 'session-ended';
-    case 6:
+    case CALLBACK_STATUS.forceSaved:
       return 'forced';
     default:
       return null;
