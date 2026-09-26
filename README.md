@@ -17,18 +17,20 @@ Requirements: Docker with Compose v2. Running the tests also needs Node.js 22.18
 ```sh
 deploy/scripts/init-env.sh    # creates deploy/.env with fresh secrets
 cd deploy
-docker compose --profile standalone up -d --build --wait
+docker compose up -d --build --wait
 ```
 
-The `standalone` profile adds a local reverse proxy with its own certificate authority. The stack answers on `https://portail.dcs.test`; point the host names to your machine first, for example with this line in `/etc/hosts`:
+The generated configuration enables the `standalone` profile: a local reverse proxy with its own certificate authority and a local IdP. The stack answers on `https://portail.dcs.test`; point the host names to your machine first, for example with this line in `/etc/hosts`:
 
 ```
-127.0.0.1 portail.dcs.test docs.dcs.test idp.dcs.test
+127.0.0.1 portail.dcs.test docs.dcs.test idp.dcs.test tdf.dcs.test
 ```
 
 Sign in with one of the fictional accounts of the local IdP: `alice`, `bob` or `chloe`, the password being the login.
 
 Your browser will warn about the local certificate authority the first time.
+
+To run the stack behind an existing reverse proxy with your own OpenID Connect provider, see [docs/hosting.md](docs/hosting.md).
 
 ## Tests
 
@@ -49,7 +51,7 @@ Unit and API tests run without the stack: `pnpm test`.
 | `portal` | Host portal: sign-in, document list, ONLYOFFICE editor configuration, relay API |
 | `plugin` | ONLYOFFICE plugin: the labelling panel on the right of the editor |
 | `policy` | Policy service: reads Open XML SPIF files, lists valid labels, renders markings |
-| `deploy` | Docker Compose stack, reverse proxy, local IdP, initialisation job, demo SPIF and documents |
+| `deploy` | Docker Compose stack, reverse proxies, local IdP, OpenTDF configuration, initialisation job, demo SPIF and documents |
 | `e2e` | Playwright end-to-end tests |
 
 ## License
