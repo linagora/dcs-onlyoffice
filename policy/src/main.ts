@@ -1,14 +1,14 @@
-import { ROLLUP_RULES, type RollupRule } from './rollup.ts';
+import { isRollupRule, ROLLUP_RULES } from './rollup.ts';
 import { buildPolicyServer } from './server.ts';
 
 const rollupRule = process.env.ROLLUP_RULE ?? 'clear-parts';
-if (!(ROLLUP_RULES as readonly string[]).includes(rollupRule)) {
+if (!isRollupRule(rollupRule)) {
   throw new Error(`ROLLUP_RULE must be one of ${ROLLUP_RULES.join(', ')}`);
 }
 
 const server = await buildPolicyServer({
   spifDirectory: process.env.SPIF_DIR ?? '/spif',
-  rollupRule: rollupRule as RollupRule, // SAFETY: membership checked above
+  rollupRule,
   markingLanguage: process.env.MARKING_LANGUAGE ?? 'fr',
   logger: true,
 });

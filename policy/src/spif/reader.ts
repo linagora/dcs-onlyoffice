@@ -22,7 +22,7 @@ export const EXTENSION_NAMESPACE = 'urn:linagora:dcs:spif:1';
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
 const ELEMENT_NODE = 1;
 const SUPPORTED_SCHEMA_VERSIONS: readonly string[] = ['2.0', '2.1'];
-const RULE_OPERATIONS: readonly string[] = ['onlyOne', 'oneOrMore', 'all'];
+const RULE_OPERATIONS: readonly string[] = ['onlyOne', 'oneOrMore', 'all'] satisfies RuleOperation[];
 
 // The W3C colour names allowed by the SPIF 2.1 schema, which misspells fuchsia.
 const NAMED_COLORS: Readonly<Record<string, string>> = {
@@ -189,13 +189,14 @@ function categoryType(tag: Element, tagSetName: string): CategoryType {
 
 function readRequiredCategory(element: Element): RequiredCategoryRule {
   const operation = requiredAttribute(element, 'operation');
-  if (!RULE_OPERATIONS.includes(operation)) {
+  if (!isRuleOperation(operation)) {
     throw new SpifError(`unknown requiredCategory operation ${operation}`);
   }
-  return {
-    operation: operation as RuleOperation, // SAFETY: membership checked above
-    groups: children(element, 'categoryGroup').map(readCategoryGroup),
-  };
+  return { operation, groups: children(element, 'categoryGroup').map(readCategoryGroup) };
+}
+
+function isRuleOperation(value: string): value is RuleOperation {
+  return RULE_OPERATIONS.includes(value);
 }
 
 // A group without lacv designates the whole tag set (`all="true"` or omitted).
