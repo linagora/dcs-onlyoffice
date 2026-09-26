@@ -13,6 +13,7 @@ fi
 
 sed -e "s/^ONLYOFFICE_JWT_SECRET=$/ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32)/" \
     -e "s/^OIDC_CLIENT_SECRET=$/OIDC_CLIENT_SECRET=$(openssl rand -hex 32)/" \
+    -e "s/^OPENTDF_DB_PASSWORD=$/OPENTDF_DB_PASSWORD=$(openssl rand -hex 24)/" \
   "$DEPLOY_DIR/.env.example" > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 echo "created $ENV_FILE"
