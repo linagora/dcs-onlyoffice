@@ -1,0 +1,103 @@
+# nginx site for a hosted DCS ONLYOFFICE stack. Render it with envsubst:
+#   DOMAIN=example.org UPSTREAM_HOST=10.0.0.5 PORTAL_PORT=6140 DOCS_PORT=6141 \
+#   TDF_PORT=6142 CERTIFICATE_DIR=/etc/letsencrypt/live/example.org \
+#   envsubst '$DOMAIN $UPSTREAM_HOST $PORTAL_PORT $DOCS_PORT $TDF_PORT $CERTIFICATE_DIR' \
+#     < dcs.conf.template > /etc/nginx/sites-enabled/dcs
+# It needs a certificate covering portail.$DOMAIN, docs.$DOMAIN and tdf.$DOMAIN
+# (for instance *.$DOMAIN), and this map in the http block:
+#   map $http_upgrade $connection_upgrade { default upgrade; "" close; }
+# No authentication gate may sit in front of these sites: the editor's
+# websockets and the token-authenticated OpenTDF calls would break.
+
+upstream dcs_portal {
+    server ${UPSTREAM_HOST}:${PORTAL_PORT};
+    keepalive 16;
+}
+
+upstream dcs_docs {
+    server ${UPSTREAM_HOST}:${DOCS_PORT};
+    keepalive 16;
+}
+
+upstream dcs_tdf {
+    server ${UPSTREAM_HOST}:${TDF_PORT};
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name portail.${DOMAIN} docs.${DOMAIN} tdf.${DOMAIN};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name portail.${DOMAIN};
+    ssl_certificate ${CERTIFICATE_DIR}/fullchain.pem;
+    ssl_certificate_key ${CERTIFICATE_DIR}/privkey.pem;
+
+    client_max_body_size 100M;
+
+    # Only the Document Server may call these, from the Compose network.
+    location /internal/ {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://dcs_portal;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name docs.${DOMAIN};
+    ssl_certificate ${CERTIFICATE_DIR}/fullchain.pem;
+    ssl_certificate_key ${CERTIFICATE_DIR}/privkey.pem;
+
+    client_max_body_size 100M;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+
+    location / {
+        proxy_pass http://dcs_docs;
+        proxy_http_version 1.1;
+        # Co-editing runs over websockets.
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name tdf.${DOMAIN};
+    ssl_certificate ${CERTIFICATE_DIR}/fullchain.pem;
+    ssl_certificate_key ${CERTIFICATE_DIR}/privkey.pem;
+
+    # Browsers use Connect over HTTP/1.1; gRPC clients would need grpc_pass.
+    location / {
+        proxy_pass http://dcs_tdf;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+    }
+}
