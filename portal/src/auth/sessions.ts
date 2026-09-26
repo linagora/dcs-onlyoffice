@@ -67,6 +67,15 @@ export class SessionStore {
     return session;
   }
 
+  updateTokens(id: string, tokens: SessionTokens): Session | null {
+    const session = this.findSession(id);
+    if (session === null) {
+      return null;
+    }
+    session.tokens = tokens;
+    return session;
+  }
+
   deleteSession(id: string): boolean {
     return this.#sessions.delete(id);
   }

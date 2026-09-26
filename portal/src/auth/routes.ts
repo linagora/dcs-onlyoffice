@@ -26,6 +26,8 @@ interface CallbackQuery {
 
 export const SESSION_COOKIE = 'dcs_session';
 
+const TOKEN_REFRESH_MARGIN_MS = 30_000;
+
 // The Document Server calls /internal from the Compose network; the proxy
 // refuses these paths from outside. The editor fetches the plugin's files
 // without credentials.
@@ -82,6 +84,23 @@ export function registerAuth(app: FastifyInstance, deps: AuthDependencies): Fast
         expires: new Date(session.expiresAt),
       })
       .redirect(pending.returnTo, 303);
+  });
+
+  // Access token for the plugin's calls to the OpenTDF platform, refreshed
+  // shortly before it expires.
+  app.get('/api/token', async (request, reply) => {
+    const session = requireSession(request);
+    const expiresAt = session.tokens.accessTokenExpiresAt;
+    if (expiresAt !== null && expiresAt - Date.now() < TOKEN_REFRESH_MARGIN_MS) {
+      const refreshed = await deps.oidc.refresh(session.tokens);
+      if (refreshed === null) {
+        deps.sessions.deleteSession(session.id);
+        reply.clearCookie(SESSION_COOKIE, { path: '/' });
+        return reply.code(401).send({ error: 'The session has expired' });
+      }
+      deps.sessions.updateTokens(session.id, refreshed);
+    }
+    return { accessToken: session.tokens.accessToken, expiresAt: session.tokens.accessTokenExpiresAt };
   });
 
   app.post('/auth/logout', async (request, reply) => {
