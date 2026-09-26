@@ -1,4 +1,4 @@
-import type { StoredDocument } from './documents.ts';
+import type { DocumentTemplate, StoredDocument } from './documents.ts';
 import type { SignedEditorConfig } from './editor-config.ts';
 
 export interface EditorPageOptions {
@@ -11,21 +11,43 @@ const STYLE = `
   body { font-family: system-ui, sans-serif; margin: 0; color: #1f2933; }
   header { background: #1f3a5f; color: #fff; padding: 0.8rem 1.5rem; }
   header h1 { font-size: 1.1rem; margin: 0; }
-  main { padding: 1.5rem; }
-  ul { padding-left: 1.2rem; }
-  li { margin: 0.4rem 0; }
+  main { padding: 1.5rem; max-width: 60rem; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #e4e7eb; }
+  td.actions { text-align: right; white-space: nowrap; }
+  form { display: inline; }
+  button { font: inherit; cursor: pointer; }
 `;
 
-export function renderDocumentListPage(documents: StoredDocument[]): string {
-  const items =
+export function renderDocumentListPage(documents: StoredDocument[], templates: DocumentTemplate[]): string {
+  const documentRows =
     documents.length === 0
       ? '<p>No document yet.</p>'
-      : `<ul>${documents
-          .map((document) => `<li><a href="/documents/${document.id}/edit">${escapeHtml(document.fileName)}</a></li>`)
-          .join('')}</ul>`;
+      : `<table>${documents
+          .map(
+            (document) => `<tr>
+  <td><a href="/documents/${document.id}/edit">${escapeHtml(document.fileName)}</a></td>
+  <td class="actions"><a href="/documents/${document.id}/download">Download</a></td>
+</tr>`,
+          )
+          .join('')}</table>`;
+  const templateButtons = templates
+    .map(
+      (template) => `<form method="post" action="/documents">
+  <input type="hidden" name="template" value="${escapeHtml(template.id)}">
+  <button type="submit">New document from ${escapeHtml(template.fileName)}</button>
+</form>`,
+    )
+    .join(' ');
   return page(
     'Documents',
-    `<header><h1>DCS ONLYOFFICE</h1></header><main><h2>Documents</h2>${items}</main>`,
+    `<header><h1>DCS ONLYOFFICE</h1></header>
+<main>
+  <h2>Documents</h2>
+  ${documentRows}
+  <h2>Templates</h2>
+  <p>${templateButtons}</p>
+</main>`,
   );
 }
 

@@ -1,0 +1,110 @@
+import { jwtVerify, SignJWT, type JWTPayload } from 'jose';
+
+export type CallbackStatus = 1 | 2 | 3 | 4 | 6 | 7;
+
+export interface CallbackPayload {
+  key: string;
+  status: CallbackStatus;
+  url: string | null;
+}
+
+export type ForceSaveOutcome = 'accepted' | 'no-changes' | 'unknown-document' | 'failed';
+
+const CALLBACK_STATUSES: readonly number[] = [1, 2, 3, 4, 6, 7];
+
+export async function signOnlyofficeToken(payload: Record<string, unknown>, secret: string): Promise<string> {
+  return new SignJWT(payload).setProtectedHeader({ alg: 'HS256', typ: 'JWT' }).sign(encodeSecret(secret));
+}
+
+export async function verifyOnlyofficeToken(token: string, secret: string): Promise<JWTPayload | null> {
+  try {
+    const { payload } = await jwtVerify(token, encodeSecret(secret), { algorithms: ['HS256'] });
+    return payload;
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name.startsWith('JW')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+// The Document Server signs its callbacks either in the body (`token`) or in
+// the Authorization header, where the original body sits under `payload`.
+export async function readVerifiedCallback(
+  body: unknown,
+  authorization: string | undefined,
+  secret: string,
+): Promise<CallbackPayload | null> {
+  const bodyToken = isRecord(body) && typeof body.token === 'string' ? body.token : null;
+  const headerToken = authorization?.startsWith('Bearer ') === true ? authorization.slice('Bearer '.length) : null;
+  const token = bodyToken ?? headerToken;
+  if (token === null) {
+    return null;
+  }
+  const verified = await verifyOnlyofficeToken(token, secret);
+  if (verified === null) {
+    return null;
+  }
+  return parseCallbackPayload(isRecord(verified.payload) ? verified.payload : verified);
+}
+
+export async function requestForceSave(
+  onlyofficeInternalUrl: string,
+  key: string,
+  secret: string,
+): Promise<ForceSaveOutcome> {
+  const command = { c: 'forcesave', key };
+  const token = await signOnlyofficeToken(command, secret);
+  const response = await fetch(`${onlyofficeInternalUrl}/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ...command, token }),
+  });
+  if (!response.ok) {
+    return 'failed';
+  }
+  const result: unknown = await response.json();
+  const error = isRecord(result) && typeof result.error === 'number' ? result.error : null;
+  switch (error) {
+    case 0:
+      return 'accepted';
+    case 4:
+      return 'no-changes';
+    case 1:
+      return 'unknown-document';
+    default:
+      return 'failed';
+  }
+}
+
+// Saved files are served by the Document Server under its public origin; the
+// portal fetches them over the internal network instead.
+export function toInternalUrl(fileUrl: string, onlyofficeInternalUrl: string): string {
+  const source = new URL(fileUrl);
+  const internal = new URL(onlyofficeInternalUrl);
+  source.protocol = internal.protocol;
+  source.host = internal.host;
+  return source.toString();
+}
+
+function parseCallbackPayload(value: unknown): CallbackPayload | null {
+  if (!isRecord(value) || typeof value.key !== 'string' || typeof value.status !== 'number') {
+    return null;
+  }
+  if (!CALLBACK_STATUSES.includes(value.status)) {
+    return null;
+  }
+  return {
+    key: value.key,
+    status: value.status as CallbackStatus, // SAFETY: membership checked above
+    url: typeof value.url === 'string' ? value.url : null,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function encodeSecret(secret: string): Uint8Array {
+  return new TextEncoder().encode(secret);
+}
