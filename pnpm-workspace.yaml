@@ -1,4 +1,5 @@
 packages:
   - portal
+  - policy
   - e2e
   - deploy/demo
