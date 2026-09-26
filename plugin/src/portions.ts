@@ -1,8 +1,10 @@
 import type { OfficeApi } from './office-api.ts';
 import { runCommand } from './onlyoffice.ts';
-import { fetchAdatp4774, type LabelView } from './policy.ts';
+import { fetchAdatp4774, fetchDocumentLabel, type LabelView } from './policy.ts';
 
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
+export const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
+export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 
 export interface PortionTag {
   v: 1;
@@ -18,6 +20,23 @@ export interface StoredPortion {
   internalId: string;
 }
 
+export interface DocumentState {
+  portions: StoredPortion[];
+  baseLabelCode: string | null;
+}
+
+export interface NewPortion {
+  label: LabelView;
+  text: string;
+  baseLabelCode: string;
+  existingLabelCodes: string[];
+}
+
+interface PartReplacement {
+  namespace: string;
+  xml: string;
+}
+
 interface InsertPortionScope {
   tag: string;
   alias: string;
@@ -28,12 +47,15 @@ interface InsertPortionScope {
 
 interface CommandScope {
   portion: InsertPortionScope;
-  namespace: string;
+  replacements: PartReplacement[];
+  portionNamespace: string;
+  documentNamespace: string;
 }
 
 interface DocumentSnapshot {
   controls: { tag: string; internalId: string }[];
-  parts: string[];
+  portionParts: string[];
+  documentParts: string[];
 }
 
 interface PortionPartContent {
@@ -46,39 +68,62 @@ interface PortionPartContent {
 declare const Api: OfficeApi;
 declare const Asc: { scope: CommandScope };
 
-// One command inserts the placeholder block and its Custom XML part, so that a
-// single undo removes both. The block is locked only once its text is set.
+// One command inserts the placeholder block, the portion's Custom XML part and
+// the updated document label, so that a single undo reverts all of them. The
+// block is locked only once its text is set.
 function insertPortionCommand(): string {
-  const portion = Asc.scope.portion;
+  const scope = Asc.scope;
   const document = Api.GetDocument();
   const block = Api.CreateBlockLvlSdt();
-  block.SetTag(portion.tag);
-  block.SetAlias(portion.alias);
-  if (portion.color !== null) {
-    block.SetBorderColor(Api.HexColor(portion.color));
+  block.SetTag(scope.portion.tag);
+  block.SetAlias(scope.portion.alias);
+  if (scope.portion.color !== null) {
+    block.SetBorderColor(Api.HexColor(scope.portion.color));
   }
-  block.GetContent().GetElement(0)?.AddText(portion.placeholder);
+  block.GetContent().GetElement(0)?.AddText(scope.portion.placeholder);
   block.SetLock('sdtContentLocked');
   document.InsertContent([block]);
-  document.GetCustomXmlParts().Add(portion.xml);
+  const parts = document.GetCustomXmlParts();
+  parts.Add(scope.portion.xml);
+  for (const replacement of scope.replacements) {
+    for (const existing of parts.GetByNamespace(replacement.namespace)) {
+      existing.Delete();
+    }
+    parts.Add(replacement.xml);
+  }
   return block.GetInternalId();
 }
 
-function readPortionsCommand(): DocumentSnapshot {
-  const document = Api.GetDocument();
-  const controls = document.GetAllContentControls().map((control) => ({
-    tag: control.GetTag(),
-    internalId: control.GetInternalId(),
-  }));
-  const parts = document
-    .GetCustomXmlParts()
-    .GetByNamespace(Asc.scope.namespace)
-    .map((part) => part.GetXml());
-  return { controls, parts };
+function replacePartsCommand(): boolean {
+  const parts = Api.GetDocument().GetCustomXmlParts();
+  for (const replacement of Asc.scope.replacements) {
+    for (const existing of parts.GetByNamespace(replacement.namespace)) {
+      existing.Delete();
+    }
+    parts.Add(replacement.xml);
+  }
+  return true;
 }
 
-export async function insertPortion(label: LabelView, text: string): Promise<boolean> {
-  const labelXml = await fetchAdatp4774(label.policy, label.code);
+function readDocumentCommand(): DocumentSnapshot {
+  const document = Api.GetDocument();
+  const parts = document.GetCustomXmlParts();
+  return {
+    controls: document.GetAllContentControls().map((control) => ({
+      tag: control.GetTag(),
+      internalId: control.GetInternalId(),
+    })),
+    portionParts: parts.GetByNamespace(Asc.scope.portionNamespace).map((part) => part.GetXml()),
+    documentParts: parts.GetByNamespace(Asc.scope.documentNamespace).map((part) => part.GetXml()),
+  };
+}
+
+export async function insertPortion(portion: NewPortion): Promise<boolean> {
+  const { label } = portion;
+  const [labelXml, documentLabel] = await Promise.all([
+    fetchAdatp4774(label.policy, label.code),
+    fetchDocumentLabel(label.policy, portion.baseLabelCode, [...portion.existingLabelCodes, label.code]),
+  ]);
   const id = crypto.randomUUID();
   const tag: PortionTag = { v: 1, id, label: label.code };
   const internalId = await runCommand(
@@ -89,8 +134,9 @@ export async function insertPortion(label: LabelView, text: string): Promise<boo
         alias: 'Protected portion',
         color: label.marking.color,
         placeholder: `${label.marking.text} – protected portion`,
-        xml: buildPortionPart({ id, version: 1, labelCode: label.code, labelXml, text }),
+        xml: buildPortionPart({ id, version: 1, labelCode: label.code, labelXml, text: portion.text }),
       },
+      replacements: documentLabelReplacements(documentLabel.xml, portion.baseLabelCode),
     },
     true,
     (result) => (typeof result === 'string' ? result : null),
@@ -98,20 +144,36 @@ export async function insertPortion(label: LabelView, text: string): Promise<boo
   return internalId !== null;
 }
 
+export async function applyBaseLabel(policy: string, baseLabelCode: string, portionLabelCodes: string[]): Promise<boolean> {
+  const documentLabel = await fetchDocumentLabel(policy, baseLabelCode, portionLabelCodes);
+  const done = await runCommand(
+    replacePartsCommand,
+    { replacements: documentLabelReplacements(documentLabel.xml, baseLabelCode) },
+    false,
+    (result) => (result === true ? true : null),
+  );
+  return done === true;
+}
+
 // Portions in document order, each joined with the content of its part.
-export async function readPortions(): Promise<StoredPortion[]> {
-  const snapshot = await runCommand(readPortionsCommand, { namespace: PORTION_NAMESPACE }, false, parseSnapshot);
+export async function readDocumentState(): Promise<DocumentState> {
+  const snapshot = await runCommand(
+    readDocumentCommand,
+    { portionNamespace: PORTION_NAMESPACE, documentNamespace: DOCUMENT_NAMESPACE },
+    false,
+    parseSnapshot,
+  );
   if (snapshot === null) {
-    return [];
+    return { portions: [], baseLabelCode: null };
   }
   const contents = new Map<string, PortionPartContent>();
-  for (const xml of snapshot.parts) {
+  for (const xml of snapshot.portionParts) {
     const content = parsePortionPart(xml);
     if (content !== null) {
       contents.set(content.id, content);
     }
   }
-  return snapshot.controls.flatMap((control) => {
+  const portions = snapshot.controls.flatMap((control) => {
     const tag = parsePortionTag(control.tag);
     if (tag === null) {
       return [];
@@ -127,6 +189,17 @@ export async function readPortions(): Promise<StoredPortion[]> {
       },
     ];
   });
+  const baseLabelCode = snapshot.documentParts.map(parseDocumentPart).find((code) => code !== null) ?? null;
+  return { portions, baseLabelCode };
+}
+
+// The standard ADatP-4778.2 part holds the document label; the project's own
+// part keeps the base label the author chose.
+function documentLabelReplacements(bindingXml: string, baseLabelCode: string): PartReplacement[] {
+  return [
+    { namespace: BINDING_NAMESPACE, xml: bindingXml },
+    { namespace: DOCUMENT_NAMESPACE, xml: buildDocumentPart(baseLabelCode) },
+  ];
 }
 
 // The portion text is stored base64-encoded: the editor's XML serialiser does
@@ -144,6 +217,10 @@ export function buildPortionPart(portion: {
     `<dcs:content encoding="base64">${encodeBase64(portion.text)}</dcs:content>` +
     '</dcs:portion>'
   );
+}
+
+function buildDocumentPart(baseLabelCode: string): string {
+  return `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeAttribute(baseLabelCode)}"/>`;
 }
 
 export function parsePortionTag(tag: string): PortionTag | null {
@@ -171,8 +248,8 @@ export function parsePortionTag(tag: string): PortionTag | null {
 }
 
 function parsePortionPart(xml: string): PortionPartContent | null {
-  const root = new DOMParser().parseFromString(xml, 'application/xml').documentElement;
-  if (root.namespaceURI !== PORTION_NAMESPACE || root.localName !== 'portion') {
+  const root = parseXml(xml);
+  if (root === null || root.namespaceURI !== PORTION_NAMESPACE || root.localName !== 'portion') {
     return null;
   }
   const id = root.getAttribute('id');
@@ -185,14 +262,28 @@ function parsePortionPart(xml: string): PortionPartContent | null {
   return { id, version, labelCode, text: content === undefined ? null : decodeBase64((content.textContent ?? '').trim()) };
 }
 
+function parseDocumentPart(xml: string): string | null {
+  const root = parseXml(xml);
+  if (root === null || root.namespaceURI !== DOCUMENT_NAMESPACE || root.localName !== 'document') {
+    return null;
+  }
+  return root.getAttribute('base');
+}
+
+function parseXml(xml: string): Element | null {
+  const document = new DOMParser().parseFromString(xml, 'application/xml');
+  return document.getElementsByTagName('parsererror').length > 0 ? null : document.documentElement;
+}
+
 function parseSnapshot(result: unknown): DocumentSnapshot | null {
-  if (typeof result !== 'object' || result === null || !('controls' in result) || !('parts' in result)) {
+  if (typeof result !== 'object' || result === null) {
     return null;
   }
-  const { controls, parts } = result;
-  if (!Array.isArray(controls) || !Array.isArray(parts)) {
+  const { controls, portionParts, documentParts } = result as Record<string, unknown>; // SAFETY: object checked above
+  if (!Array.isArray(controls) || !Array.isArray(portionParts) || !Array.isArray(documentParts)) {
     return null;
   }
+  const isString = (value: unknown): value is string => typeof value === 'string';
   return {
     controls: controls.filter(
       (control): control is { tag: string; internalId: string } =>
@@ -203,7 +294,8 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
         'internalId' in control &&
         typeof control.internalId === 'string',
     ),
-    parts: parts.filter((part): part is string => typeof part === 'string'),
+    portionParts: portionParts.filter(isString),
+    documentParts: documentParts.filter(isString),
   };
 }
 

@@ -29,6 +29,7 @@ export interface ApiContentControl {
 
 export interface ApiCustomXmlPart {
   GetXml(): string;
+  Delete(): boolean;
 }
 
 export interface ApiCustomXmlParts {

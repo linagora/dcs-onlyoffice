@@ -56,6 +56,40 @@ export async function fetchAdatp4774(policy: string, code: string): Promise<stri
   return body.xml;
 }
 
+export interface DocumentLabel {
+  label: LabelView;
+  moreRestrictivePortions: boolean;
+  xml: string;
+}
+
+// Document label computed from the base label and the portions' labels, with
+// its ADatP-4778.2 binding part.
+export async function fetchDocumentLabel(policy: string, base: string, portions: string[]): Promise<DocumentLabel> {
+  const response = await fetch(`${RELAY}/policies/${encodeURIComponent(policy)}/document-label`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base, portions }),
+  });
+  if (!response.ok) {
+    throw new Error(`The policy service could not compute the document label (${response.status})`);
+  }
+  const body: unknown = await response.json();
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    !('label' in body) ||
+    !isLabelView(body.label) ||
+    !('xml' in body) ||
+    typeof body.xml !== 'string' ||
+    !('moreRestrictivePortions' in body) ||
+    typeof body.moreRestrictivePortions !== 'boolean'
+  ) {
+    throw new Error('Unexpected document label answer');
+  }
+  return { label: body.label, moreRestrictivePortions: body.moreRestrictivePortions, xml: body.xml };
+}
+
 async function getJson(url: string): Promise<unknown> {
   const response = await fetch(url, { credentials: 'same-origin' });
   if (!response.ok) {

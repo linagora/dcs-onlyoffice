@@ -1,11 +1,12 @@
 import type { JSX } from 'preact';
 import { useCallback, useEffect, useState } from 'preact/hooks';
+import { DocumentLabel } from './DocumentLabel.tsx';
 import { type Identity, resolveIdentity } from './identity.ts';
 import { onEditorEvent, type PluginInfo } from './onlyoffice.ts';
-import { fetchDefaultPolicyLabels, type LabelView } from './policy.ts';
+import { fetchDefaultPolicyLabels, fetchDocumentLabel, type LabelView } from './policy.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList } from './PortionList.tsx';
-import { insertPortion, readPortions, type StoredPortion } from './portions.ts';
+import { applyBaseLabel, type DocumentState, insertPortion, readDocumentState } from './portions.ts';
 
 export interface PanelProps {
   pluginReady: Promise<PluginInfo>;
@@ -16,32 +17,86 @@ type Loadable<T> = { status: 'loading' } | { status: 'failed'; reason: string } 
 export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const identity = useLoadable<Identity | null>(async () => resolveIdentity(await pluginReady), [pluginReady]);
   const labels = useLoadable<LabelView[]>(fetchDefaultPolicyLabels, []);
-  const [portions, setPortions] = useState<StoredPortion[]>([]);
+  const [documentState, setDocumentState] = useState<DocumentState | null>(null);
+  const [documentLabel, setDocumentLabel] = useState<LabelView | null>(null);
 
-  const refreshPortions = useCallback(async (): Promise<StoredPortion[]> => {
-    const current = await readPortions();
-    setPortions(current);
-    return current;
+  const labelList = labels.status === 'loaded' ? labels.value : [];
+  const policy = labelList[0]?.policy ?? null;
+  // Until the author picks one, the base label is the least restrictive.
+  const baseLabelCode = documentState?.baseLabelCode ?? labelList[0]?.code ?? null;
+  const portions = documentState?.portions ?? [];
+
+  const refresh = useCallback(async (): Promise<DocumentState> => {
+    const state = await readDocumentState();
+    setDocumentState(state);
+    return state;
   }, []);
 
   useEffect(() => {
     pluginReady
       .then(async () => {
         onEditorEvent('onDocumentContentReady', () => {
-          refreshPortions().catch(() => []);
+          refresh().catch(() => null);
         });
-        return refreshPortions();
+        return refresh();
       })
-      .catch(() => []);
-  }, [pluginReady, refreshPortions]);
+      .catch(() => null);
+  }, [pluginReady, refresh]);
+
+  useEffect(() => {
+    if (policy === null || baseLabelCode === null || documentState === null) {
+      return;
+    }
+    let cancelled = false;
+    fetchDocumentLabel(
+      policy,
+      baseLabelCode,
+      documentState.portions.map((portion) => portion.labelCode),
+    )
+      .then((result) => {
+        if (!cancelled) {
+          setDocumentLabel(result.label);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDocumentLabel(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [policy, baseLabelCode, documentState]);
 
   const insert = async (label: LabelView, text: string): Promise<boolean> => {
-    const inserted = await insertPortion(label, text);
-    await refreshPortions();
+    if (baseLabelCode === null) {
+      return false;
+    }
+    const current = await refresh();
+    const inserted = await insertPortion({
+      label,
+      text,
+      baseLabelCode,
+      existingLabelCodes: current.portions.map((portion) => portion.labelCode),
+    });
+    await refresh();
     return inserted;
   };
 
-  const labelList = labels.status === 'loaded' ? labels.value : [];
+  const changeBaseLabel = async (code: string): Promise<boolean> => {
+    if (policy === null) {
+      return false;
+    }
+    const current = await refresh();
+    const applied = await applyBaseLabel(
+      policy,
+      code,
+      current.portions.map((portion) => portion.labelCode),
+    );
+    await refresh();
+    return applied;
+  };
+
   return (
     <main class="panel">
       <section class="identity" data-testid="identity" data-source={identity.status === 'loaded' ? identity.value?.source : undefined}>
@@ -60,12 +115,22 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
           </>
         )}
       </section>
-      <section aria-labelledby="new-portion-title">
-        <h2 id="new-portion-title">New protected portion</h2>
-        {labels.status === 'loading' && <p class="muted">Loading the policy…</p>}
-        {labels.status === 'failed' && <p class="error">The policy could not be loaded ({labels.reason}).</p>}
-        {labels.status === 'loaded' && <PortionForm labels={labelList} onInsert={insert} />}
-      </section>
+      {labels.status === 'loading' && <p class="muted">Loading the policy…</p>}
+      {labels.status === 'failed' && <p class="error">The policy could not be loaded ({labels.reason}).</p>}
+      {labels.status === 'loaded' && (
+        <>
+          <DocumentLabel
+            labels={labelList}
+            baseLabelCode={baseLabelCode}
+            documentLabel={documentLabel}
+            onBaseLabelChange={changeBaseLabel}
+          />
+          <section aria-labelledby="new-portion-title">
+            <h2 id="new-portion-title">New protected portion</h2>
+            <PortionForm labels={labelList} onInsert={insert} />
+          </section>
+        </>
+      )}
       <PortionList portions={portions} labels={labelList} />
     </main>
   );

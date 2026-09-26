@@ -113,3 +113,17 @@ legend,
   margin: 4px 0 0;
   white-space: pre-wrap;
 }
+
+.field select {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+}
+
+.document-marking {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-weight: 700;
+}
