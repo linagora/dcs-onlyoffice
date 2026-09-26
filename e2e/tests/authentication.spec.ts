@@ -13,7 +13,7 @@ test('an anonymous visitor signs in at the IdP and lands on the page they asked 
 
 test('a signed-in user opens a document under their own name', async ({ page }) => {
   await signIn(page, DEMO_ACCOUNTS.alice);
-  await page.getByRole('link', { name: 'exercise-northwind.docx' }).click();
+  await page.getByRole('link', { name: 'exercise-northwind.docx', exact: true }).click();
   await waitForEditorReady(page);
 
   const { editorConfig } = await editorPageConfig(page);
