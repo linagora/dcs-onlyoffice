@@ -1,3 +1,5 @@
+import { logProblem } from './log.ts';
+
 // Typed access to the ONLYOFFICE plugin runtime that plugins.js installs on
 // window.Asc. The editor fills `info` and calls `init` once the plugin is loaded.
 
@@ -80,9 +82,15 @@ export function runCommand<T>(
   recalculate: boolean,
   parse: (result: unknown) => T | null,
 ): Promise<T | null> {
-  const run = commandQueue.then(() => sendCommand(command, scope, recalculate)).then(parse);
-  commandQueue = run.catch(() => null);
-  return run;
+  const run = async (): Promise<T | null> => {
+    await commandQueue;
+    return parse(await sendCommand(command, scope, recalculate));
+  };
+  const result = run();
+  // The caller receives the command's failure; the queue only waits for the
+  // command to be over.
+  commandQueue = result.catch(() => null);
+  return result;
 }
 
 function sendCommand(command: () => unknown, scope: Record<string, unknown>, recalculate: boolean): Promise<unknown> {
@@ -131,7 +139,9 @@ export function offerContextMenu(entries: () => MenuEntry[], onClick: (id: strin
     return false;
   }
   plugin.attachEvent('onContextMenuShow', () => {
-    callEditorMethod('AddContextMenuItem', [{ guid: plugin.guid, items: entries() }]).catch(() => null);
+    callEditorMethod('AddContextMenuItem', [{ guid: plugin.guid, items: entries() }]).catch((error: unknown) => {
+      logProblem('Answering the context menu', error);
+    });
   });
   for (const entry of entries()) {
     plugin.attachContextMenuClickEvent(entry.id, () => {

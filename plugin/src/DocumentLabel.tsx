@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import { logProblem } from './log.ts';
 import type { LabelView } from './policy.ts';
 
 export interface DocumentLabelProps {
@@ -21,7 +22,9 @@ export function DocumentLabel({ labels, baseLabelCode, documentLabel, readOnly, 
         <select
           value={baseLabelCode ?? ''}
           onChange={(event) => {
-            onBaseLabelChange(event.currentTarget.value).catch(() => false);
+            onBaseLabelChange(event.currentTarget.value).catch((error: unknown) => {
+              logProblem('Changing the base label', error);
+            });
           }}
         >
           {labels.map((label) => (
