@@ -7,6 +7,7 @@ export interface PortalConfig {
   docsPublicUrl: string;
   portalInternalUrl: string;
   onlyofficeInternalUrl: string;
+  policyInternalUrl: string;
   onlyofficeJwtSecret: string;
   documentsDirectory: string;
   templatesDirectory: string;
@@ -24,6 +25,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     docsPublicUrl: `https://docs.${domain}`,
     portalInternalUrl: env.PORTAL_INTERNAL_URL ?? 'http://portal:3000',
     onlyofficeInternalUrl: env.ONLYOFFICE_INTERNAL_URL ?? 'http://onlyoffice',
+    policyInternalUrl: env.POLICY_INTERNAL_URL ?? 'http://policy:3001',
     onlyofficeJwtSecret: requireEnv(env, 'ONLYOFFICE_JWT_SECRET'),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
     templatesDirectory: env.TEMPLATES_DIR ?? '/templates',
