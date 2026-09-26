@@ -38,9 +38,16 @@ services:
       PORTAL_INTERNAL_URL: http://portal:3000
       DOCUMENTS_DIR: /data/documents
       TEMPLATES_DIR: /templates
+      OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID in .env}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      # Trusts the standalone proxy's certificates for server-to-server calls.
+      NODE_EXTRA_CA_CERTS: /pki/public/ca.crt
     volumes:
       - documents:/data/documents
       - ./demo/documents:/templates:ro
+      - pki-public:/pki/public:ro
     depends_on:
       init:
         condition: service_completed_successfully
@@ -61,6 +68,30 @@ services:
       - pki-public:/pki/public
       - pki-private:/pki/private
 
+  idp:
+    image: yadd/lemonldap-ng-full:2.23.4-1
+    profiles: [standalone]
+    environment:
+      SSODOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      PORTAL: https://idp.${DOMAIN}
+      LOGLEVEL: info
+      LOGGER: stderr
+      USERLOGGER: stderr
+      FORWARDED_BY: 172.16.0.0/12
+      DCS_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+    volumes:
+      - ./idp/lmConf-1.json:/seed/lmConf-1.json:ro
+      - ./idp/users.json:/idp/users.json:ro
+      - ./idp/00-dcs-idp-config:/etc/cont-init.d/00-dcs-idp-config:ro
+      - idp-conf:/var/lib/lemonldap-ng/conf
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
+
   proxy:
     image: caddy:2.11.4-alpine
     profiles: [standalone]
@@ -79,12 +110,15 @@ services:
         aliases:
           - portail.${DOMAIN}
           - docs.${DOMAIN}
+          - idp.${DOMAIN}
     depends_on:
       init:
         condition: service_completed_successfully
       portal:
         condition: service_healthy
       onlyoffice:
+        condition: service_healthy
+      idp:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 443"]
@@ -100,3 +134,4 @@ volumes:
   caddy-data:
   pki-public:
   pki-private:
+  idp-conf:
