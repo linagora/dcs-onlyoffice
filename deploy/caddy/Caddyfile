@@ -1,15 +1,33 @@
 {
-	local_certs
-	skip_install_trust
 	admin off
+	skip_install_trust
+	pki {
+		ca local {
+			name "DCS ONLYOFFICE local CA"
+			root {
+				cert /pki/public/ca.crt
+				key /pki/private/ca.key
+			}
+		}
+	}
+}
+
+(local_tls) {
+	tls {
+		issuer internal {
+			ca local
+		}
+	}
 }
 
 portail.{$DOMAIN} {
+	import local_tls
 	@internal path /internal/*
 	respond @internal 404
 	reverse_proxy portal:3000
 }
 
 docs.{$DOMAIN} {
+	import local_tls
 	reverse_proxy onlyoffice:80
 }
