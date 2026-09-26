@@ -110,6 +110,40 @@ describe('policy API with the demo SPIF', () => {
     ]);
   });
 
+  async function validateDemo(body: Record<string, unknown>): Promise<ValidationAnswer> {
+    const response = await server.inject({ method: 'POST', url: '/policies/DEMO-FR/labels/validate', payload: body });
+    assert.equal(response.statusCode, 200);
+    return validationAnswerOf(response.json());
+  }
+
+  it('accepts SPECIAL FRANCE on DIFFUSION RESTREINTE and renders its marking', async () => {
+    const answer = await validateDemo({
+      classification: 'DIFFUSION RESTREINTE',
+      categories: [{ tagSet: 'Special Handling', values: ['SPECIAL FRANCE'] }],
+    });
+    assert.equal(answer.valid, true);
+    assert.equal(labelOf(answer).marking.text, 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE');
+  });
+
+  it('refuses SPECIAL FRANCE on NON PROTEGE', async () => {
+    const answer = await validateDemo({
+      classification: 'NON PROTEGE',
+      categories: [{ tagSet: 'Special Handling', values: ['SPECIAL FRANCE'] }],
+    });
+    assert.equal(answer.valid, false);
+  });
+
+  it('refuses SPECIAL FRANCE together with a release to NATO', async () => {
+    const answer = await validateDemo({
+      classification: 'DIFFUSION RESTREINTE',
+      categories: [
+        { tagSet: 'Special Handling', values: ['SPECIAL FRANCE'] },
+        { tagSet: 'Releasable To', values: ['NATO'] },
+      ],
+    });
+    assert.equal(answer.valid, false);
+  });
+
   it('answers 404 for an unknown policy', async () => {
     const response = await server.inject({ method: 'GET', url: '/policies/UNKNOWN/labels' });
     assert.equal(response.statusCode, 404);
@@ -281,35 +315,79 @@ describe('document label rollup with the demo SPIF', () => {
     );
   });
 
-  // Each case: base label, portion labels, expected document label code. A
-  // portion is more restrictive when a reader allowed by the base label can be
-  // refused the portion (ADatP-4774 access decision): higher classification,
-  // extra restrictive category, or a permissive category the base does not
+  const NP = 'DEMO-FR:1';
+  const NP_NATO = 'DEMO-FR:1/2.1';
+  const DR = 'DEMO-FR:2';
+  const DR_SF = 'DEMO-FR:2/1.1';
+  const DR_NATO = 'DEMO-FR:2/2.1';
+
+  // Every base label against every portion label. A portion is more
+  // restrictive when a reader allowed by the base label can be refused the
+  // portion by the SPIF access decision: higher classification, a restrictive
+  // category the base lacks, or a permissive category the base does not
   // impose. Plain DIFFUSION RESTREINTE imposes no release category, so a
-  // portion releasable to NATO only is more restrictive than it.
-  const clearPartsCases: [string, string[], string][] = [
-    ['DEMO-FR:2/2.1', ['DEMO-FR:1', 'DEMO-FR:2/2.1'], 'DEMO-FR:2/2.1'],
-    ['DEMO-FR:2/2.1', ['DEMO-FR:2'], 'DEMO-FR:2/2.1'],
-    ['DEMO-FR:2', ['DEMO-FR:2/2.1'], 'DEMO-FR:2/3.1'],
-    ['DEMO-FR:1', ['DEMO-FR:2'], 'DEMO-FR:1/3.1'],
-    ['DEMO-FR:1/2.1', ['DEMO-FR:1'], 'DEMO-FR:1/2.1'],
-    ['DEMO-FR:2', [], 'DEMO-FR:2'],
+  // portion releasable to NATO only is more restrictive than it, while a
+  // portion without release category never is on that account.
+  const clearPartsMatrix: Record<string, Record<string, string>> = {
+    [NP]: { [NP]: NP, [NP_NATO]: 'DEMO-FR:1/3.1', [DR]: 'DEMO-FR:1/3.1', [DR_SF]: 'DEMO-FR:1/3.1', [DR_NATO]: 'DEMO-FR:1/3.1' },
+    [NP_NATO]: {
+      [NP]: NP_NATO,
+      [NP_NATO]: NP_NATO,
+      [DR]: 'DEMO-FR:1/2.1/3.1',
+      [DR_SF]: 'DEMO-FR:1/2.1/3.1',
+      [DR_NATO]: 'DEMO-FR:1/2.1/3.1',
+    },
+    [DR]: { [NP]: DR, [NP_NATO]: 'DEMO-FR:2/3.1', [DR]: DR, [DR_SF]: 'DEMO-FR:2/3.1', [DR_NATO]: 'DEMO-FR:2/3.1' },
+    [DR_SF]: { [NP]: DR_SF, [NP_NATO]: 'DEMO-FR:2/1.1/3.1', [DR]: DR_SF, [DR_SF]: DR_SF, [DR_NATO]: 'DEMO-FR:2/1.1/3.1' },
+    [DR_NATO]: { [NP]: DR_NATO, [NP_NATO]: DR_NATO, [DR]: DR_NATO, [DR_SF]: 'DEMO-FR:2/2.1/3.1', [DR_NATO]: DR_NATO },
+  };
+  for (const [base, row] of Object.entries(clearPartsMatrix)) {
+    for (const [portion, expected] of Object.entries(row)) {
+      it(`clear-parts: ${base} with [${portion}] gives ${expected}`, async () => {
+        assert.equal((await documentLabel(clearParts, base, [portion])).label.code, expected);
+      });
+    }
+  }
+
+  const clearPartsSeveralPortionsCases: [string, string[], string][] = [
+    [DR_NATO, [NP, DR_NATO], DR_NATO],
+    [NP, [NP, DR_SF], 'DEMO-FR:1/3.1'],
+    [DR, [], DR],
   ];
-  for (const [base, portions, expected] of clearPartsCases) {
+  for (const [base, portions, expected] of clearPartsSeveralPortionsCases) {
     it(`clear-parts: ${base} with [${portions.join(', ')}] gives ${expected}`, async () => {
       assert.equal((await documentLabel(clearParts, base, portions)).label.code, expected);
     });
   }
 
   // ADatP-4774.1 section 4.4: highest classification, restrictive categories
-  // united, permissive categories intersected.
-  const highWaterMarkCases: [string, string[], string][] = [
-    ['DEMO-FR:2/2.1', ['DEMO-FR:2/1.1'], 'DEMO-FR:2/1.1'],
-    ['DEMO-FR:1/2.1', ['DEMO-FR:2/2.1'], 'DEMO-FR:2/2.1'],
-    ['DEMO-FR:1', ['DEMO-FR:2/2.1'], 'DEMO-FR:2'],
-    ['DEMO-FR:2/2.1', [], 'DEMO-FR:2/2.1'],
+  // united, permissive categories intersected and dropped when one label lacks
+  // them. The standard reads release categories as widening dissemination: a
+  // part without one makes the whole not releasable. So NON PROTÉGÉ with
+  // DIFFUSION RESTREINTE releasable to NATO gives plain DIFFUSION RESTREINTE,
+  // although the access decision would refuse the second part to a reader
+  // without NATO. The clear-parts rule flags that case.
+  const highWaterMarkMatrix: Record<string, Record<string, string>> = {
+    [NP]: { [NP]: NP, [NP_NATO]: NP, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR },
+    [NP_NATO]: { [NP]: NP, [NP_NATO]: NP_NATO, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR_NATO },
+    [DR]: { [NP]: DR, [NP_NATO]: DR, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR },
+    [DR_SF]: { [NP]: DR_SF, [NP_NATO]: DR_SF, [DR]: DR_SF, [DR_SF]: DR_SF, [DR_NATO]: DR_SF },
+    [DR_NATO]: { [NP]: DR, [NP_NATO]: DR_NATO, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR_NATO },
+  };
+  for (const [base, row] of Object.entries(highWaterMarkMatrix)) {
+    for (const [portion, expected] of Object.entries(row)) {
+      it(`high-water-mark: ${base} with [${portion}] gives ${expected}`, async () => {
+        assert.equal((await documentLabel(highWaterMark, base, [portion])).label.code, expected);
+      });
+    }
+  }
+
+  const highWaterMarkSeveralPortionsCases: [string, string[], string][] = [
+    [NP_NATO, [DR_NATO, NP_NATO], DR_NATO],
+    [NP_NATO, [DR_NATO, NP], DR],
+    [DR_NATO, [], DR_NATO],
   ];
-  for (const [base, portions, expected] of highWaterMarkCases) {
+  for (const [base, portions, expected] of highWaterMarkSeveralPortionsCases) {
     it(`high-water-mark: ${base} with [${portions.join(', ')}] gives ${expected}`, async () => {
       assert.equal((await documentLabel(highWaterMark, base, portions)).label.code, expected);
     });
