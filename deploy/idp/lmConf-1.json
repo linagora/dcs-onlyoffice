@@ -46,7 +46,7 @@
       "oidcRPMetaDataOptionsAdditionalAudiences": "https://tdf.__DOMAIN__",
       "oidcRPMetaDataOptionsAllowClientCredentialsGrant": 0,
       "oidcRPMetaDataOptionsAllowOffline": 0,
-      "oidcRPMetaDataOptionsAllowPasswordGrant": 0,
+      "oidcRPMetaDataOptionsAllowPasswordGrant": 1,
       "oidcRPMetaDataOptionsAuthMethod": "client_secret_basic",
       "oidcRPMetaDataOptionsAuthorizationCodeExpiration": 60,
       "oidcRPMetaDataOptionsBypassConsent": 1,
