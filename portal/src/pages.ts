@@ -17,6 +17,7 @@ const STYLE = `
   table { border-collapse: collapse; width: 100%; }
   td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #e4e7eb; }
   td.actions { text-align: right; white-space: nowrap; }
+  td.actions a { margin-left: 0.8rem; }
   form { display: inline; }
   button { font: inherit; cursor: pointer; }
 `;
@@ -33,7 +34,10 @@ export function renderDocumentListPage(
           .map(
             (document) => `<tr>
   <td><a href="/documents/${document.id}/edit">${escapeHtml(document.fileName)}</a></td>
-  <td class="actions"><a href="/documents/${document.id}/download">Download</a></td>
+  <td class="actions">
+    <a href="/documents/${document.id}/view" aria-label="Read ${escapeHtml(document.fileName)}">Read</a>
+    <a href="/documents/${document.id}/download" aria-label="Download ${escapeHtml(document.fileName)}">Download</a>
+  </td>
 </tr>`,
           )
           .join('')}</table>`;

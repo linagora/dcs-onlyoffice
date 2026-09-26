@@ -29,16 +29,22 @@ export interface EditorConfig {
 export interface EditorPlugin {
   guid: string;
   configUrl: string;
+  // ONLYOFFICE 9.4 crashes when it adds a right-panel plugin to the viewer,
+  // whose right menu does not exist; read-only sessions load a left panel.
+  viewConfigUrl: string;
 }
 
 export interface SignedEditorConfig extends EditorConfig {
   token: string;
 }
 
+export type EditorMode = 'edit' | 'view';
+
 export function buildEditorConfig(
   document: StoredDocument,
   user: EditorUser,
   plugin: EditorPlugin,
+  mode: EditorMode,
   config: PortalConfig,
 ): EditorConfig {
   const documentUrl = `${config.portalInternalUrl}/internal/documents/${document.id}`;
@@ -48,16 +54,16 @@ export function buildEditorConfig(
       key: document.key,
       title: document.fileName,
       url: `${documentUrl}/content`,
-      permissions: { edit: true, download: true },
+      permissions: { edit: mode === 'edit', download: true },
     },
     documentType: 'word',
     editorConfig: {
       callbackUrl: `${documentUrl}/callback`,
       lang: 'en',
-      mode: 'edit',
+      mode,
       user,
       coEditing: { mode: 'fast', change: false },
-      plugins: { autostart: [plugin.guid], pluginsData: [plugin.configUrl] },
+      plugins: { autostart: [plugin.guid], pluginsData: [mode === 'view' ? plugin.viewConfigUrl : plugin.configUrl] },
     },
   };
 }
