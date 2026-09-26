@@ -7,7 +7,7 @@ import type {
   SecurityPolicy,
   TagCategory,
 } from './spif/model.ts';
-import { sameName } from './spif/reader.ts';
+import { categoryNamed, classificationNamed, sameName, tagSetNamed } from './spif/lookup.ts';
 
 export interface LabelCategory {
   tagSet: string;
@@ -41,19 +41,19 @@ const MAX_ENUMERATED_CATEGORIES = 12;
 
 export function validateLabel(policy: SecurityPolicy, request: LabelRequest): LabelValidation {
   const errors: string[] = [];
-  const classification = policy.classifications.find((candidate) => sameName(candidate.name, request.classification)) ?? null;
+  const classification = classificationNamed(policy, request.classification);
   if (classification === null) {
     errors.push(`Unknown classification ${request.classification}`);
   }
   const selected: SelectedCategory[] = [];
   for (const requested of request.categories) {
-    const tagSet = policy.tagSets.find((candidate) => sameName(candidate.name, requested.tagSet)) ?? null;
+    const tagSet = tagSetNamed(policy, requested.tagSet);
     if (tagSet === null) {
       errors.push(`Unknown tag set ${requested.tagSet}`);
       continue;
     }
     for (const value of requested.values) {
-      const category = tagSet.categories.find((candidate) => sameName(candidate.name, value)) ?? null;
+      const category = categoryNamed(tagSet, value);
       if (category === null) {
         errors.push(`Unknown category ${value} in ${tagSet.name}`);
       } else if (!selected.some((existing) => existing.category === category)) {
@@ -103,10 +103,10 @@ export function enumerateValidLabels(policy: SecurityPolicy): LabelEnumeration {
 // each tag set the last arc of its OID and the selected category lacvs, e.g.
 // "DEMO-FR:2/1.1".
 export function labelCode(policy: SecurityPolicy, label: Label): string {
-  const classification = findClassification(policy, label.classification);
+  const classification = requireClassification(policy, label.classification);
   const segments = label.categories.map((labelCategory) => {
-    const tagSet = findTagSet(policy, labelCategory.tagSet);
-    const lacvs = labelCategory.values.map((value) => findCategory(tagSet, value).lacv);
+    const tagSet = requireTagSet(policy, labelCategory.tagSet);
+    const lacvs = labelCategory.values.map((value) => requireCategory(tagSet, value).lacv);
     return `/${tagSet.codeArc}.${lacvs.join('+')}`;
   });
   return `${policy.name}:${classification.lacv}${segments.join('')}`;
@@ -244,25 +244,26 @@ function* combinations(count: number, size: number, start = 0, prefix: number[] 
   }
 }
 
-export function findClassification(policy: SecurityPolicy, name: string): SecurityClassification {
-  const classification = policy.classifications.find((candidate) => sameName(candidate.name, name));
-  if (classification === undefined) {
+// For labels already validated, where an unknown name breaks an invariant.
+export function requireClassification(policy: SecurityPolicy, name: string): SecurityClassification {
+  const classification = classificationNamed(policy, name);
+  if (classification === null) {
     throw new Error(`Label refers to unknown classification ${name}`);
   }
   return classification;
 }
 
-export function findTagSet(policy: SecurityPolicy, name: string): CategoryTagSet {
-  const tagSet = policy.tagSets.find((candidate) => sameName(candidate.name, name));
-  if (tagSet === undefined) {
+export function requireTagSet(policy: SecurityPolicy, name: string): CategoryTagSet {
+  const tagSet = tagSetNamed(policy, name);
+  if (tagSet === null) {
     throw new Error(`Label refers to unknown tag set ${name}`);
   }
   return tagSet;
 }
 
-export function findCategory(tagSet: CategoryTagSet, name: string): TagCategory {
-  const category = tagSet.categories.find((candidate) => sameName(candidate.name, name));
-  if (category === undefined) {
+export function requireCategory(tagSet: CategoryTagSet, name: string): TagCategory {
+  const category = categoryNamed(tagSet, name);
+  if (category === null) {
     throw new Error(`Label refers to unknown category ${name} in ${tagSet.name}`);
   }
   return category;

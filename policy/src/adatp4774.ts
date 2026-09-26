@@ -1,4 +1,4 @@
-import { findTagSet, type Label } from './labels.ts';
+import { requireTagSet, type Label } from './labels.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 
 export const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
@@ -15,7 +15,7 @@ export interface LabelMetadata {
 export function serializeOriginatorLabel(policy: SecurityPolicy, label: Label, metadata: LabelMetadata): string {
   const categories = label.categories
     .map((category) => {
-      const tagSet = findTagSet(policy, category.tagSet);
+      const tagSet = requireTagSet(policy, category.tagSet);
       const values = category.values.map((value) => `<slab:GenericValue>${escapeXml(value)}</slab:GenericValue>`).join('');
       return `<slab:Category Type="${category.type}" TagName="${escapeXml(tagSet.name)}" URI="urn:oid:${escapeXml(tagSet.oid)}">${values}</slab:Category>`;
     })

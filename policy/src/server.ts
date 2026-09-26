@@ -13,7 +13,8 @@ import {
 import { type Marking, renderMarking } from './marking.ts';
 import { computeDocumentLabel, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
-import { loadPolicies, sameName } from './spif/reader.ts';
+import { sameName } from './spif/lookup.ts';
+import { loadPolicies } from './spif/reader.ts';
 
 export interface PolicyServerOptions {
   spifDirectory: string;
