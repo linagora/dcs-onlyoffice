@@ -1,5 +1,6 @@
 import { fastify, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
+import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
 import {
   enumerateValidLabels,
   type Label,
@@ -10,6 +11,7 @@ import {
   validateLabel,
 } from './labels.ts';
 import { type Marking, renderMarking } from './marking.ts';
+import { computeDocumentLabel, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { loadPolicies, sameName } from './spif/reader.ts';
 
@@ -17,6 +19,7 @@ export interface PolicyServerOptions {
   spifDirectory: string;
   markingLanguage?: string;
   reviewPeriodYears?: number;
+  rollupRule?: RollupRule;
   now?: () => Date;
   logger?: boolean;
 }
@@ -42,6 +45,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
   const defaultLanguage = options.markingLanguage ?? 'en';
   const reviewPeriodYears = options.reviewPeriodYears ?? 5;
   const now = options.now ?? ((): Date => new Date());
+  const rollupRule = options.rollupRule ?? 'clear-parts';
   const app = fastify({ logger: options.logger ?? false });
 
   const findPolicy = (name: string): SecurityPolicy | null =>
@@ -109,7 +113,73 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     },
   );
 
+  app.post<{ Params: PolicyParams; Querystring: LanguageQuery }>(
+    '/policies/:policy/document-label',
+    async (request, reply) => {
+      const policy = findPolicy(request.params.policy);
+      if (policy === null) {
+        return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
+      }
+      const body = readDocumentLabelRequest(request.body);
+      if (body === null) {
+        return reply.code(400).send({ error: 'Expected { base, portions: [codes], parts?: [part names] }' });
+      }
+      const base = labelFromCode(policy, body.base);
+      const portions = body.portions.map((code) => labelFromCode(policy, code));
+      if (base === null || portions.some((portion) => portion === null)) {
+        return reply.code(422).send({ error: 'Every label code must designate a valid label' });
+      }
+      const result = computeDocumentLabel(
+        policy,
+        base,
+        portions.filter((portion): portion is Label => portion !== null),
+        rollupRule,
+      );
+      if (!result.ok) {
+        return reply.code(422).send({ error: result.error });
+      }
+      const creationDateTime = now();
+      const labelXml = serializeOriginatorLabel(policy, result.label, {
+        creationDateTime,
+        reviewDateTime: reviewDateFor(creationDateTime, reviewPeriodYears),
+        originatorEmail: callerEmail(request),
+      });
+      return {
+        label: toView(policy, result.label, request.query.lang ?? defaultLanguage),
+        moreRestrictivePortions: result.moreRestrictivePortions,
+        rule: rollupRule,
+        xml: serializeDocumentBinding(labelXml, body.parts ?? DEFAULT_DOCUMENT_PARTS),
+      };
+    },
+  );
+
   return app;
+}
+
+function labelFromCode(policy: SecurityPolicy, code: string): Label | null {
+  const request = parseLabelCode(policy, code);
+  const validation = request === null ? null : validateLabel(policy, request);
+  return validation !== null && validation.valid ? validation.label : null;
+}
+
+interface DocumentLabelRequest {
+  base: string;
+  portions: string[];
+  parts: string[] | null;
+}
+
+function readDocumentLabelRequest(body: unknown): DocumentLabelRequest | null {
+  if (typeof body !== 'object' || body === null || !('base' in body) || typeof body.base !== 'string') {
+    return null;
+  }
+  const portions: unknown = 'portions' in body ? body.portions : [];
+  const parts: unknown = 'parts' in body ? body.parts : null;
+  const isStringList = (value: unknown): value is string[] =>
+    Array.isArray(value) && value.every((item: unknown) => typeof item === 'string');
+  if (!isStringList(portions) || (parts !== null && !isStringList(parts))) {
+    return null;
+  }
+  return { base: body.base, portions, parts };
 }
 
 // The portal relay sends the caller's identity URI-encoded.
