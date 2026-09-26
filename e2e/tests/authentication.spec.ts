@@ -30,3 +30,11 @@ test('signing out ends both the portal session and the IdP session', async ({ pa
   await expect(page).toHaveURL(/\/\/idp\./);
   await expect(page.locator('input[name="user"]')).toBeVisible();
 });
+
+test("the portal knows the signed-in user's groups", async ({ page }) => {
+  await signIn(page, DEMO_ACCOUNTS.alice);
+
+  const me = await page.evaluate(async () => (await fetch('/api/me', { credentials: 'same-origin' })).json());
+  // The IdP does not keep the order of groups stable.
+  expect([...(me as { groups: string[] }).groups].sort()).toEqual(['dcs-maquette', 'dcs-maquette-admin']);
+});
