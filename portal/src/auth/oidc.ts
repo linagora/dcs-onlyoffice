@@ -10,17 +10,16 @@ export interface OidcSettings {
   postLogoutRedirectUri: string;
 }
 
-export interface AuthorizationRequest {
-  url: URL;
+// What the callback of an authorization request is checked against.
+export interface AuthorizationChecks {
   state: string;
   codeVerifier: string;
   nonce: string;
 }
 
-export interface AuthorizationChecks {
-  state: string;
-  codeVerifier: string;
-  nonce: string;
+export interface AuthorizationRequest {
+  url: URL;
+  checks: AuthorizationChecks;
 }
 
 export interface SignInResult {
@@ -49,7 +48,7 @@ export class OidcClient {
       state,
       nonce,
     });
-    return { url, state, codeVerifier, nonce };
+    return { url, checks: { state, codeVerifier, nonce } };
   }
 
   async completeAuthorization(callbackUrl: URL, checks: AuthorizationChecks): Promise<SignInResult> {
