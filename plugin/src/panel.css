@@ -58,3 +58,58 @@ h2 {
   color: #c62828;
   margin: 0;
 }
+
+fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+legend,
+.field > span {
+  display: block;
+  font-weight: 700;
+  margin: 6px 0 4px;
+}
+
+.label-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  resize: vertical;
+}
+
+.portion-form button {
+  margin-top: 8px;
+}
+
+.portion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.portion-item {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-divider, #dfdfdf);
+}
+
+.portion-marking {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.portion-text {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}

@@ -8,14 +8,19 @@ export interface PluginInfo {
   [field: string]: unknown;
 }
 
+type CommandCallback = (result: unknown) => void;
+
 interface AscPlugin {
   init?: () => void;
   button?: (id: number) => void;
   info?: PluginInfo;
+  callCommand?: (command: () => unknown, isClose: boolean, isCalc: boolean, callback: CommandCallback) => void;
+  attachEvent?: (name: string, handler: (payload: unknown) => void) => void;
 }
 
 interface AscRuntime {
   plugin?: AscPlugin;
+  scope?: Record<string, unknown>;
 }
 
 declare global {
@@ -43,4 +48,37 @@ export function whenPluginReady(): Promise<PluginInfo> {
     });
   }
   return ready;
+}
+
+// Events must also be listed in config.json for the editor to send them.
+export function onEditorEvent(name: string, handler: (payload: unknown) => void): boolean {
+  const plugin = window.Asc?.plugin;
+  if (plugin?.attachEvent === undefined) {
+    return false;
+  }
+  plugin.attachEvent(name, handler);
+  return true;
+}
+
+// The command is serialised with toString() and runs in the editor's sandbox:
+// it may only use `Api` and the JSON data passed as `Asc.scope`. No network
+// call may happen inside it.
+export function runCommand<T>(
+  command: () => unknown,
+  scope: Record<string, unknown>,
+  recalculate: boolean,
+  parse: (result: unknown) => T | null,
+): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    const runtime = window.Asc;
+    const callCommand = runtime?.plugin?.callCommand;
+    if (runtime === undefined || callCommand === undefined) {
+      reject(new Error('The editor cannot run commands yet'));
+      return;
+    }
+    runtime.scope = scope;
+    callCommand.call(runtime.plugin, command, false, recalculate, (result) => {
+      resolve(parse(result));
+    });
+  });
 }
