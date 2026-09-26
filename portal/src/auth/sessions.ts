@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { AuthorizationChecks } from './oidc.ts';
 
 export interface UserIdentity {
   id: string;
@@ -25,9 +26,7 @@ export interface Session {
 }
 
 export interface PendingSignIn {
-  state: string;
-  codeVerifier: string;
-  nonce: string;
+  checks: AuthorizationChecks;
   returnTo: string;
   expiresAt: number;
 }
@@ -76,7 +75,7 @@ export class SessionStore {
   savePendingSignIn(pending: Omit<PendingSignIn, 'expiresAt'>): PendingSignIn {
     this.#dropExpiredPendingSignIns();
     const saved: PendingSignIn = { ...pending, expiresAt: Date.now() + PENDING_SIGN_IN_LIFETIME_MS };
-    this.#pendingSignIns.set(saved.state, saved);
+    this.#pendingSignIns.set(saved.checks.state, saved);
     return saved;
   }
 

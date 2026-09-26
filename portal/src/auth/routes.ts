@@ -47,12 +47,7 @@ export function registerAuth(app: FastifyInstance, deps: AuthDependencies): Fast
 
   app.get<{ Querystring: LoginQuery }>('/auth/login', async (request, reply) => {
     const authorization = await deps.oidc.startAuthorization();
-    deps.sessions.savePendingSignIn({
-      state: authorization.state,
-      codeVerifier: authorization.codeVerifier,
-      nonce: authorization.nonce,
-      returnTo: safeReturnPath(request.query.returnTo),
-    });
+    deps.sessions.savePendingSignIn({ checks: authorization.checks, returnTo: safeReturnPath(request.query.returnTo) });
     return reply.redirect(authorization.url.href, 303);
   });
 
@@ -70,7 +65,7 @@ export function registerAuth(app: FastifyInstance, deps: AuthDependencies): Fast
         .type('text/html; charset=utf-8')
         .send(renderMessagePage('Sign-in expired', 'This sign-in attempt has expired or was already used.'));
     }
-    const result = await deps.oidc.completeAuthorization(new URL(request.url, deps.portalPublicUrl), pending);
+    const result = await deps.oidc.completeAuthorization(new URL(request.url, deps.portalPublicUrl), pending.checks);
     const session = deps.sessions.createSession(result.user, result.tokens);
     request.log.info({ user: session.user.id }, 'Signed in');
     return reply
