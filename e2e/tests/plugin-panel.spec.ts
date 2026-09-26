@@ -26,7 +26,8 @@ test('the portal session cookie is sent from the plugin iframe', { tag: '@cross-
   const frame = await pluginFrame(page);
   const identity = await frame.evaluate(async () => {
     const response = await fetch('/api/me', { credentials: 'same-origin' });
-    return { status: response.status, body: response.ok ? ((await response.json()) as { id?: string }) : null };
+    const body: unknown = response.ok ? await response.json() : null;
+    return { status: response.status, body };
   });
   expect(identity).toEqual({ status: 200, body: expect.objectContaining({ id: 'alice' }) });
 });

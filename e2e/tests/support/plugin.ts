@@ -5,6 +5,20 @@ export interface PluginInfoIdentity {
   userName: string | null;
 }
 
+// What the editor's plugin runtime installs on the plugin frame's window.
+interface AscPluginRuntime {
+  plugin?: {
+    info?: Record<string, unknown>;
+    executeMethod?: (method: string, args: unknown[], callback: (result: unknown) => void) => void;
+  };
+}
+
+declare global {
+  interface Window {
+    Asc?: AscPluginRuntime;
+  }
+}
+
 const PLUGIN_PAGE = '/plugin/index.html';
 
 export function pluginPanel(page: Page): FrameLocator {
@@ -30,8 +44,7 @@ export async function pluginFrame(page: Page): Promise<Frame> {
 
 export async function pluginInfoIdentity(frame: Frame): Promise<PluginInfoIdentity> {
   return frame.evaluate(() => {
-    const scope = window as { Asc?: { plugin?: { info?: Record<string, unknown> } } };
-    const info = scope.Asc?.plugin?.info ?? {};
+    const info = window.Asc?.plugin?.info ?? {};
     return {
       userId: typeof info.userId === 'string' ? info.userId : null,
       userName: typeof info.userName === 'string' ? info.userName : null,
@@ -44,10 +57,7 @@ export async function executeEditorMethod(frame: Frame, name: string, parameters
   return frame.evaluate(
     async ({ name, parameters }) =>
       new Promise((resolve) => {
-        const scope = window as {
-          Asc?: { plugin?: { executeMethod?: (method: string, args: unknown[], callback: (result: unknown) => void) => void } };
-        };
-        scope.Asc?.plugin?.executeMethod?.(name, parameters, (result) => {
+        window.Asc?.plugin?.executeMethod?.(name, parameters, (result) => {
           resolve(result ?? null);
         });
       }),

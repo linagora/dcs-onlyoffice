@@ -127,12 +127,12 @@ function readPortionPart(xml: string): PortionPart | null {
   }
   const label = elements(root, PORTION_NAMESPACE, 'label')[0];
   const content = elements(root, PORTION_NAMESPACE, 'content')[0];
-  const labelElement = label === undefined ? undefined : childElements(label)[0];
+  const labelElement = label === undefined ? null : (childElements(label)[0] ?? null);
   return {
     id: root.getAttribute('id'),
     version: root.getAttribute('version'),
     label: root.getAttribute('label'),
-    labelXml: labelElement === undefined ? '' : new XMLSerializer().serializeToString(labelElement),
+    labelXml: labelElement === null ? '' : new XMLSerializer().serializeToString(labelElement),
     content: content === undefined ? '' : Buffer.from((content.textContent ?? '').trim(), 'base64').toString('utf8'),
   };
 }
