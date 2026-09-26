@@ -113,6 +113,7 @@ export function isLabelView(value: unknown): value is LabelView {
   const marking = candidate.marking;
   return (
     typeof candidate.code === 'string' &&
+    typeof candidate.policy === 'string' &&
     typeof candidate.classification === 'string' &&
     Array.isArray(candidate.categories) &&
     typeof marking === 'object' &&
