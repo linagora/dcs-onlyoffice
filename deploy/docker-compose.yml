@@ -1,0 +1,92 @@
+name: dcs
+
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:9.4.0.1
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      JWT_HEADER: Authorization
+      JWT_IN_BODY: "true"
+      # Documents and save callbacks travel over the private Compose network.
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      # Default plugins are downloaded from the internet; the stack must run offline.
+      PLUGINS_ENABLED: "false"
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+      - onlyoffice-logs:/var/log/onlyoffice
+    healthcheck:
+      # The entrypoint generates the fonts and restarts the editing services
+      # after nginx already answers; its last step tails the logs. The bracket
+      # keeps pgrep from matching this healthcheck's own command line.
+      test: ["CMD-SHELL", "pgrep -f 'xargs tail -[F]' >/dev/null && curl -fsS http://localhost/healthcheck | grep -q true"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+    restart: unless-stopped
+
+  portal:
+    build:
+      context: ..
+      dockerfile: portal/Dockerfile
+    image: dcs/portal:dev
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      ONLYOFFICE_INTERNAL_URL: http://onlyoffice
+      PORTAL_INTERNAL_URL: http://portal:3000
+      DOCUMENTS_DIR: /data/documents
+    volumes:
+      - documents:/data/documents
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  init:
+    image: alpine:3.24.2
+    command: ["/bin/sh", "/init/init.sh"]
+    volumes:
+      - ./init:/init:ro
+      - ./demo/documents:/demo/documents:ro
+      - documents:/data/documents
+
+  proxy:
+    image: caddy:2.11.4-alpine
+    profiles: [standalone]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports:
+      - "${PROXY_BIND:-127.0.0.1}:443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      default:
+        # Containers reach each other through the same public names as browsers.
+        aliases:
+          - portail.${DOMAIN}
+          - docs.${DOMAIN}
+    depends_on:
+      portal:
+        condition: service_healthy
+      onlyoffice:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 443"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  documents:
+  onlyoffice-data:
+  onlyoffice-logs:
+  caddy-data:
