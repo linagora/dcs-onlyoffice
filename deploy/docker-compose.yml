@@ -47,6 +47,7 @@ services:
       OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
       # Trusts the standalone proxy's certificates for server-to-server calls.
       NODE_EXTRA_CA_CERTS: /pki/public/ca.crt
+      POLICY_INTERNAL_URL: http://policy:3001
     volumes:
       - documents:/data/documents
       - ./demo/documents:/templates:ro
@@ -54,8 +55,28 @@ services:
     depends_on:
       init:
         condition: service_completed_successfully
+      policy:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Not published: the plugin reaches it through the portal's relay.
+  policy:
+    build:
+      context: ..
+      dockerfile: policy/Dockerfile
+    image: dcs/policy:dev
+    environment:
+      SPIF_DIR: /spif
+      MARKING_LANGUAGE: ${MARKING_LANGUAGE:-fr}
+    volumes:
+      - ./spif:/spif:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
       interval: 10s
       timeout: 5s
       retries: 10
