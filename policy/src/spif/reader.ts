@@ -8,6 +8,7 @@ import type {
   MarkingPhrase,
   MarkingQualifiers,
   RequiredCategoryRule,
+  RollupIndicator,
   RuleOperation,
   SecurityClassification,
   SecurityPolicy,
@@ -15,6 +16,7 @@ import type {
 } from './model.ts';
 
 export const SPIF_NAMESPACE = 'http://www.xmlspif.org/spif';
+export const EXTENSION_NAMESPACE = 'urn:linagora:dcs:spif:1';
 
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
 const ELEMENT_NODE = 1;
@@ -112,6 +114,7 @@ function readPolicy(root: Element, sourceFile: string): SecurityPolicy {
   const policy: SecurityPolicy = {
     name: requiredAttribute(policyId, 'name'),
     oid: requiredAttribute(policyId, 'id'),
+    rollupIndicator: readRollupIndicator(root),
     classifications,
     tagSets,
     policyPhrase: readPolicyPhrase(root),
@@ -247,11 +250,31 @@ function readPolicyPhrase(root: Element): string | null {
   return replacement === undefined ? null : replacement.phrase;
 }
 
+// Project extension, declared in the SPIF's `extensions` element.
+function readRollupIndicator(root: Element): RollupIndicator | null {
+  const extensions = optionalChild(root, 'extensions');
+  if (extensions === null) {
+    return null;
+  }
+  const indicator = Array.from(extensions.getElementsByTagNameNS(EXTENSION_NAMESPACE, 'rollupIndicator'))[0];
+  if (indicator === undefined) {
+    return null;
+  }
+  return { tagSet: requiredAttribute(indicator, 'tagSet'), category: requiredAttribute(indicator, 'category') };
+}
+
 function checkConsistency(policy: SecurityPolicy): SecurityPolicy {
   assertUnique(policy.classifications.map((classification) => classification.name.toUpperCase()), 'classification name');
   assertUnique(policy.classifications.map((classification) => String(classification.lacv)), 'classification lacv');
   assertUnique(policy.tagSets.map((tagSet) => tagSet.name.toUpperCase()), 'tag set name');
   assertUnique(policy.tagSets.map((tagSet) => tagSet.codeArc), 'tag set OID last arc');
+  const indicator = policy.rollupIndicator;
+  if (indicator !== null) {
+    const tagSet = policy.tagSets.find((candidate) => sameName(candidate.name, indicator.tagSet));
+    if (tagSet === undefined || tagSet.type !== 'INFORMATIVE' || !tagSet.categories.some((category) => sameName(category.name, indicator.category))) {
+      throw new SpifError(`the rollup indicator must be an informative category (${indicator.tagSet} / ${indicator.category})`);
+    }
+  }
   for (const tagSet of policy.tagSets) {
     assertUnique(tagSet.categories.map((category) => category.name.toUpperCase()), `category name in ${tagSet.name}`);
     assertUnique(tagSet.categories.map((category) => String(category.lacv)), `category lacv in ${tagSet.name}`);

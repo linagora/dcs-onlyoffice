@@ -75,7 +75,9 @@ export function validateLabel(policy: SecurityPolicy, request: LabelRequest): La
 // categories, then by the order of the categories in the SPIF.
 export function enumerateValidLabels(policy: SecurityPolicy): LabelEnumeration {
   const candidates: SelectedCategory[] = policy.tagSets.flatMap((tagSet) =>
-    tagSet.categories.filter((category) => !category.obsolete).map((category) => ({ tagSet, category })),
+    tagSet.categories
+      .filter((category) => !category.obsolete && !isRollupIndicator(policy, tagSet, category))
+      .map((category) => ({ tagSet, category })),
   );
   if (candidates.length > MAX_ENUMERATED_CATEGORIES) {
     return { ok: false, error: `${policy.name} has too many categories to list every label` };
@@ -139,6 +141,11 @@ export function parseLabelCode(policy: SecurityPolicy, code: string): LabelReque
     categories.push({ tagSet: tagSet.name, values });
   }
   return { classification: classification.name, categories };
+}
+
+function isRollupIndicator(policy: SecurityPolicy, tagSet: CategoryTagSet, category: TagCategory): boolean {
+  const indicator = policy.rollupIndicator;
+  return indicator !== null && sameName(indicator.tagSet, tagSet.name) && sameName(indicator.category, category.name);
 }
 
 function ruleViolations(

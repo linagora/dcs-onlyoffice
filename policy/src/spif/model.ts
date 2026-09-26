@@ -60,9 +60,17 @@ export interface CategoryTagSet {
   qualifiers: MarkingQualifiers;
 }
 
+// Informative category added to a document label when some of its portions
+// are more restrictive than its unprotected content (clear-parts rule).
+export interface RollupIndicator {
+  tagSet: string;
+  category: string;
+}
+
 export interface SecurityPolicy {
   name: string;
   oid: string;
+  rollupIndicator: RollupIndicator | null;
   classifications: SecurityClassification[];
   tagSets: CategoryTagSet[];
   policyPhrase: string | null;
