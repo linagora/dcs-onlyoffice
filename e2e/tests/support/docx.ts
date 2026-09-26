@@ -15,16 +15,40 @@ export interface PortionPart {
   content: string;
 }
 
+export interface LabelCategory {
+  type: string | null;
+  tagName: string | null;
+  values: string[];
+}
+
+export interface ConfidentialityLabel {
+  policy: string;
+  classification: string;
+  categories: LabelCategory[];
+}
+
+export interface DocumentBinding {
+  label: ConfidentialityLabel | null;
+  references: string[];
+}
+
 export interface DocxInspection {
   bodyText: string;
   // Text of every part except customXml, to prove protected text stays out.
   packageText: string;
   contentControls: ContentControl[];
   portionParts: PortionPart[];
+  bindings: DocumentBinding[];
+  // Present parts that ADatP-4778.2 Tables 5-2 and 5-3 require a whole-document
+  // binding to reference.
+  bindableParts: string[];
 }
 
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
+const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
+const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
+const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments|commentsExtended)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
 
 export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   const zip = await JSZip.loadAsync(docx);
@@ -32,6 +56,7 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   const document = parse(documentXml);
   const packageTexts: string[] = [];
   const portionParts: PortionPart[] = [];
+  const bindings: DocumentBinding[] = [];
   for (const name of Object.keys(zip.files).sort()) {
     const file = zip.files[name];
     if (file === undefined || file.dir) {
@@ -44,6 +69,10 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
       const part = readPortionPart(content);
       if (part !== null) {
         portionParts.push(part);
+      }
+      const binding = readBinding(content);
+      if (binding !== null) {
+        bindings.push(binding);
       }
     }
   }
@@ -59,6 +88,35 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
       };
     }),
     portionParts,
+    bindings,
+    bindableParts: Object.keys(zip.files)
+      .filter((name) => zip.files[name]?.dir === false && BINDABLE_PART.test(name))
+      .sort(),
+  };
+}
+
+function readBinding(xml: string): DocumentBinding | null {
+  const root = parse(xml);
+  if (root.namespaceURI !== BINDING_NAMESPACE || root.localName !== 'BindingInformation') {
+    return null;
+  }
+  const label = elements(root, LABEL_NAMESPACE, 'originatorConfidentialityLabel')[0];
+  return {
+    label: label === undefined ? null : readLabel(label),
+    references: elements(root, BINDING_NAMESPACE, 'DataReference').map((reference) => reference.getAttribute('URI') ?? ''),
+  };
+}
+
+function readLabel(label: Element): ConfidentialityLabel {
+  const text = (localName: string): string => elements(label, LABEL_NAMESPACE, localName)[0]?.textContent ?? '';
+  return {
+    policy: text('PolicyIdentifier'),
+    classification: text('Classification'),
+    categories: elements(label, LABEL_NAMESPACE, 'Category').map((category) => ({
+      type: category.getAttribute('Type'),
+      tagName: category.getAttribute('TagName'),
+      values: elements(category, LABEL_NAMESPACE, 'GenericValue').map((value) => value.textContent ?? ''),
+    })),
   };
 }
 
