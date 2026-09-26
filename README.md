@@ -23,8 +23,10 @@ docker compose --profile standalone up -d --build --wait
 The `standalone` profile adds a local reverse proxy with its own certificate authority. The stack answers on `https://portail.dcs.test`; point the host names to your machine first, for example with this line in `/etc/hosts`:
 
 ```
-127.0.0.1 portail.dcs.test docs.dcs.test
+127.0.0.1 portail.dcs.test docs.dcs.test idp.dcs.test
 ```
+
+Sign in with one of the fictional accounts of the local IdP: `alice`, `bob` or `chloe`, the password being the login.
 
 Your browser will warn about the local certificate authority the first time.
 
@@ -34,16 +36,20 @@ End-to-end tests drive a real browser against the running stack:
 
 ```sh
 pnpm install
-pnpm --filter @dcs/e2e exec playwright install chromium
+pnpm --filter @dcs/e2e exec playwright install chromium firefox
 pnpm e2e
 ```
+
+Unit and API tests run without the stack: `pnpm test`.
 
 ## Repository layout
 
 | Folder | Content |
 | --- | --- |
-| `portal` | Host portal: document list, ONLYOFFICE editor configuration |
-| `deploy` | Docker Compose stack, reverse proxy, initialisation job, demo documents |
+| `portal` | Host portal: sign-in, document list, ONLYOFFICE editor configuration, relay API |
+| `plugin` | ONLYOFFICE plugin: the labelling panel on the right of the editor |
+| `policy` | Policy service: reads Open XML SPIF files, lists valid labels, renders markings |
+| `deploy` | Docker Compose stack, reverse proxy, local IdP, initialisation job, demo SPIF and documents |
 | `e2e` | Playwright end-to-end tests |
 
 ## License
