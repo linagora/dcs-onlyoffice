@@ -1,0 +1,27 @@
+import { expect, type Page } from '@playwright/test';
+
+export interface DemoAccount {
+  login: string;
+  password: string;
+  name: string;
+}
+
+// Fictional accounts of the local IdP (deploy/idp/users.json).
+export const DEMO_ACCOUNTS = {
+  alice: { login: 'alice', password: 'alice', name: 'Alice Martin' },
+  bob: { login: 'bob', password: 'bob', name: 'Bob Walker' },
+  chloe: { login: 'chloe', password: 'chloe', name: 'Chloe Bernard' },
+} as const satisfies Record<string, DemoAccount>;
+
+export async function fillIdpLoginForm(page: Page, account: DemoAccount): Promise<void> {
+  await page.locator('input[name="user"]').fill(account.login);
+  await page.locator('input[name="password"]').fill(account.password);
+  await page.locator('button[type="submit"]').first().click();
+}
+
+export async function signIn(page: Page, account: DemoAccount): Promise<void> {
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/\/idp\./);
+  await fillIdpLoginForm(page, account);
+  await expect(page.getByText(`Signed in as ${account.name}`)).toBeVisible();
+}
