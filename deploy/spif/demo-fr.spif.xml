@@ -51,6 +51,18 @@
         </spif:markingQualifier>
       </spif:securityCategoryTag>
     </spif:securityCategoryTagSet>
+    <!-- Informative: added to the document label when portions are more
+         restrictive than its unprotected content. Authors never pick it. -->
+    <spif:securityCategoryTagSet name="Composition"
+        id="2.25.166231019600111174217682845337071458325.3">
+      <spif:securityCategoryTag name="Composition" tagType="tagType7" tag7Encoding="bitSetAttributes">
+        <spif:tagCategory name="MORE RESTRICTIVE PORTIONS" lacv="1">
+          <spif:markingData xml:lang="fr" phrase="CONTIENT DES PORTIONS PLUS RESTRICTIVES">
+            <spif:code>pageTopBottom</spif:code>
+          </spif:markingData>
+        </spif:tagCategory>
+      </spif:securityCategoryTag>
+    </spif:securityCategoryTagSet>
   </spif:securityCategoryTagSets>
   <!-- French markings do not print the policy name. -->
   <spif:markingData phrase="">
@@ -59,4 +71,8 @@
   <spif:markingQualifier markingCode="pageTopBottom">
     <spif:qualifier markingQualifier=" – " qualifierCode="separator"/>
   </spif:markingQualifier>
+  <spif:extensions>
+    <dcs:rollupIndicator xmlns:dcs="urn:linagora:dcs:spif:1"
+        tagSet="Composition" category="MORE RESTRICTIVE PORTIONS"/>
+  </spif:extensions>
 </spif:SPIF>
