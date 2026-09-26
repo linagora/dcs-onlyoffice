@@ -28,6 +28,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.4
+      '@xmldom/xmldom':
+        specifier: 0.9.12
+        version: 0.9.12
       jszip:
         specifier: 3.10.2
         version: 3.10.2

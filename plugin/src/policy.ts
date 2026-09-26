@@ -38,6 +38,24 @@ export async function fetchDefaultPolicyLabels(): Promise<LabelView[]> {
   return labels;
 }
 
+// ADatP-4774 XML of a label, created now for the calling user.
+export async function fetchAdatp4774(policy: string, code: string): Promise<string> {
+  const response = await fetch(`${RELAY}/policies/${encodeURIComponent(policy)}/labels/adatp4774`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) {
+    throw new Error(`The policy service refused label ${code} (${response.status})`);
+  }
+  const body: unknown = await response.json();
+  if (typeof body !== 'object' || body === null || !('xml' in body) || typeof body.xml !== 'string') {
+    throw new Error('Unexpected ADatP-4774 answer');
+  }
+  return body.xml;
+}
+
 async function getJson(url: string): Promise<unknown> {
   const response = await fetch(url, { credentials: 'same-origin' });
   if (!response.ok) {
