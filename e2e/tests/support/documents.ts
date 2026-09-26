@@ -1,5 +1,9 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import JSZip from 'jszip';
+
+// Annotation naming a document a test created; the page fixture attaches its
+// stored DOCX to the test's results as evidence.
+export const CREATED_DOCUMENT = 'created document';
 
 // Creates a fresh document from a portal template so that each test works on
 // its own copy, then waits until the editor is ready.
@@ -11,6 +15,7 @@ export async function openNewDocument(page: Page, templateFileName: string): Pro
   if (match?.[1] === undefined) {
     throw new Error(`Unexpected editor URL ${page.url()}`);
   }
+  test.info().annotations.push({ type: CREATED_DOCUMENT, description: match[1] });
   await waitForEditorReady(page);
   return match[1];
 }

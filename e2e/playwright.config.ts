@@ -18,8 +18,10 @@ export default defineConfig({
   use: {
     baseURL: `https://portail.${domain}`,
     ignoreHTTPSErrors: true,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    // CI keeps a trace and a screenshot of every test as evidence for the stop
+    // report (about 10 MB of trace per test); local runs keep failures only.
+    trace: process.env.CI === undefined ? 'retain-on-failure' : 'on',
+    screenshot: process.env.CI === undefined ? 'only-on-failure' : 'on',
   },
   projects: [
     {
