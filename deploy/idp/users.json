@@ -1,0 +1,11 @@
+{
+  "users": {
+    "alice": { "password": "alice", "uid": "alice", "cn": "Alice Martin", "givenName": "Alice", "sn": "Martin", "mail": "alice.martin@dcs.test" },
+    "bob": { "password": "bob", "uid": "bob", "cn": "Bob Walker", "givenName": "Bob", "sn": "Walker", "mail": "bob.walker@dcs.test" },
+    "chloe": { "password": "chloe", "uid": "chloe", "cn": "Chloe Bernard", "givenName": "Chloe", "sn": "Bernard", "mail": "chloe.bernard@dcs.test" }
+  },
+  "groups": {
+    "dcs-maquette": ["alice", "bob", "chloe"],
+    "dcs-maquette-admin": ["alice"]
+  }
+}

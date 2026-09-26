@@ -1,0 +1,34 @@
+#!/command/with-contenv sh
+# Seeds the LemonLDAP::NG configuration from the version-controlled
+# lmConf-1.json at every start. Runs before the image's own update-llng-conf
+# script (cont-init.d scripts run in lexical order).
+set -eu
+SEED=/seed/lmConf-1.json
+CONF_DIR=/var/lib/lemonldap-ng/conf
+[ -f "$SEED" ] || exit 0
+
+# Signing key and session key, generated once per configuration volume so that
+# no private key is ever committed.
+if [ ! -s "$CONF_DIR/oidc-sig.key" ]; then
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
+    -subj "/CN=$(echo "${PORTAL:-idp}" | sed 's#^https*://##; s#/.*##')" \
+    -keyout "$CONF_DIR/oidc-sig.key" -out "$CONF_DIR/oidc-sig.crt" 2>/dev/null
+  openssl rand -hex 16 > "$CONF_DIR/llng.key"
+  chmod 600 "$CONF_DIR/oidc-sig.key" "$CONF_DIR/llng.key"
+fi
+KID="dcs-$(openssl x509 -in "$CONF_DIR/oidc-sig.crt" -noout -fingerprint -sha256 \
+  | sed 's/.*=//; s/://g' | cut -c1-16 | tr 'A-F' 'a-f')"
+
+rm -f "$CONF_DIR"/lmConf-*.json "$CONF_DIR/lmConf.lock"
+sed "s/__DOMAIN__/${SSODOMAIN}/g" "$SEED" \
+  | jq --rawfile key "$CONF_DIR/oidc-sig.key" --rawfile crt "$CONF_DIR/oidc-sig.crt" \
+       --arg kid "$KID" --arg llngkey "$(cat "$CONF_DIR/llng.key")" \
+       '.oidcServicePrivateKeySig = $key | .oidcServicePublicKeySig = $crt
+        | .oidcServiceKeyIdSig = $kid | .key = $llngkey' \
+  > "$CONF_DIR/lmConf-1.json"
+chown www-data:www-data "$CONF_DIR/lmConf-1.json"
+chmod 0640 "$CONF_DIR/lmConf-1.json"
+
+# Otherwise the same cfgNum may be served from cache for up to 10 minutes.
+rm -rf /var/cache/lemonldap-ng/lemonldap-ng-config
+echo "dcs: LemonLDAP::NG configuration seeded (signing key id $KID)"

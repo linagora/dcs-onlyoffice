@@ -11,7 +11,8 @@ if [ -e "$ENV_FILE" ]; then
   exit 0
 fi
 
-sed "s/^ONLYOFFICE_JWT_SECRET=$/ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32)/" \
+sed -e "s/^ONLYOFFICE_JWT_SECRET=$/ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32)/" \
+    -e "s/^OIDC_CLIENT_SECRET=$/OIDC_CLIENT_SECRET=$(openssl rand -hex 32)/" \
   "$DEPLOY_DIR/.env.example" > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 echo "created $ENV_FILE"

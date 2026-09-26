@@ -31,3 +31,8 @@ docs.{$DOMAIN} {
 	import local_tls
 	reverse_proxy onlyoffice:80
 }
+
+idp.{$DOMAIN} {
+	import local_tls
+	reverse_proxy idp:80
+}
