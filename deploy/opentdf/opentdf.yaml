@@ -47,6 +47,7 @@ server:
       # LemonLDAP::NG access tokens carry client_id, not azp.
       client_id_claim: client_id
       # Setting extension drops the built-in opentdf-admin/opentdf-standard roles.
+      # The group names are those registered at the corporate SSO.
       extension: |
         g, dcs-maquette-admin, role:admin
         g, dcs-maquette, role:standard

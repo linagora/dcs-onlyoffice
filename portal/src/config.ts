@@ -18,6 +18,8 @@ export interface PortalConfig {
 
 export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
   const domain = requireEnv(env, 'DOMAIN');
+  // Public host names are part of the deployment, not identifiers: the
+  // portal's is registered at the IdP as the redirect URI's host.
   const portalPublicUrl = `https://portail.${domain}`;
   return {
     domain,
