@@ -113,8 +113,32 @@ function toUserIdentity(subject: string, claims: Record<string, unknown>): UserI
     name: stringClaim(claims, 'name') ?? username ?? email ?? subject,
     email,
     username,
-    groups: Array.isArray(claims.groups) ? claims.groups.filter((group) => typeof group === 'string') : [],
+    groups: groupsClaim(claims.groups),
   };
+}
+
+// The local IdP releases groups as a JSON array; some LemonLDAP::NG setups
+// release a string holding that array, or a separated list.
+function groupsClaim(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((group): group is string => typeof group === 'string' && group !== '');
+  }
+  if (typeof value !== 'string') {
+    return [];
+  }
+  const text = value.trim();
+  if (text.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      return groupsClaim(Array.isArray(parsed) ? parsed : []);
+    } catch (error: unknown) {
+      if (error instanceof SyntaxError) {
+        return [];
+      }
+      throw error;
+    }
+  }
+  return text.split(/[;,]\s*/).filter((group) => group !== '');
 }
 
 function stringClaim(claims: Record<string, unknown>, name: string): string | null {
