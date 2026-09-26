@@ -22,6 +22,9 @@ function sameState(left: DocumentState, right: DocumentState): boolean {
 
 export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const identity = useLoadable<Identity | null>(async () => resolveIdentity(await pluginReady), [pluginReady]);
+  const viewMode = useLoadable<boolean>(async () => (await pluginReady).isViewMode === true, [pluginReady]);
+  // Until the editor says otherwise, nothing that writes is offered.
+  const readOnly = viewMode.status !== 'loaded' || viewMode.value;
   const labels = useLoadable<LabelView[]>(fetchDefaultPolicyLabels, []);
   const [documentState, setDocumentState] = useState<DocumentState | null>(null);
   const [documentLabel, setDocumentLabel] = useState<LabelView | null>(null);
@@ -79,7 +82,8 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
         // Two authors inserting at the same moment each write a document label
         // that misses the other's portion, and the last writer wins. Whoever
         // notices the stale label rewrites it from the document's content.
-        const stale = documentState.documentLabelCode !== null && documentState.documentLabelCode !== result.label.code;
+        const stale =
+          !readOnly && documentState.documentLabelCode !== null && documentState.documentLabelCode !== result.label.code;
         return stale ? writeDocumentLabel(policy, baseLabelCode, documentState.portions.map((portion) => portion.labelCode)) : null;
       })
       .catch(() => {
@@ -90,7 +94,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [policy, baseLabelCode, documentState]);
+  }, [policy, baseLabelCode, documentState, readOnly]);
 
   const insert = async (label: LabelView, text: string): Promise<boolean> => {
     if (baseLabelCode === null) {
@@ -147,12 +151,15 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
             labels={labelList}
             baseLabelCode={baseLabelCode}
             documentLabel={documentLabel}
+            readOnly={readOnly}
             onBaseLabelChange={changeBaseLabel}
           />
-          <section aria-labelledby="new-portion-title">
-            <h2 id="new-portion-title">New protected portion</h2>
-            <PortionForm labels={labelList} onInsert={insert} />
-          </section>
+          {!readOnly && (
+            <section aria-labelledby="new-portion-title">
+              <h2 id="new-portion-title">New protected portion</h2>
+              <PortionForm labels={labelList} onInsert={insert} />
+            </section>
+          )}
         </>
       )}
       <PortionList portions={portions} labels={labelList} />
