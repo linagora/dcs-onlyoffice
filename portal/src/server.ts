@@ -17,6 +17,7 @@ import {
   readVerifiedCallback,
   requestForceSave,
   toInternalUrl,
+  verifyOnlyofficeToken,
 } from './onlyoffice.ts';
 import { renderDocumentListPage, renderEditorPage } from './pages.ts';
 
@@ -108,6 +109,10 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   // Routes under /internal are only reachable from the Compose network: the
   // reverse proxy refuses them.
   app.get<{ Params: DocumentParams }>('/internal/documents/:id/content', async (request, reply) => {
+    if (!(await isSignedByDocumentServer(request.headers.authorization, config.onlyofficeJwtSecret))) {
+      request.log.warn({ documentId: request.params.id }, 'Rejected an unsigned document download');
+      return reply.code(401).send({ error: 'Unsigned request' });
+    }
     const document = await findDocument(config.documentsDirectory, request.params.id);
     if (document === null) {
       return reply.code(404).send({ error: 'Document not found' });
@@ -137,6 +142,14 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 }
 
 type CallbackOutcome = 'saved' | 'ignored' | 'failed';
+
+// With JWT enabled, the Document Server signs its requests to the document URL.
+async function isSignedByDocumentServer(authorization: string | undefined, secret: string): Promise<boolean> {
+  if (authorization?.startsWith('Bearer ') !== true) {
+    return false;
+  }
+  return (await verifyOnlyofficeToken(authorization.slice('Bearer '.length), secret)) !== null;
+}
 
 async function storeCallbackFile(config: PortalConfig, documentId: string, callback: CallbackPayload): Promise<CallbackOutcome> {
   const kind = saveKindOf(callback);
