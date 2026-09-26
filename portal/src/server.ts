@@ -1,7 +1,11 @@
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
+import { fastifyCookie } from '@fastify/cookie';
 import { fastifyStatic } from '@fastify/static';
 import { fastify, type FastifyInstance } from 'fastify';
+import { OidcClient } from './auth/oidc.ts';
+import { registerAuth, requireSession } from './auth/routes.ts';
+import { SessionStore } from './auth/sessions.ts';
 import type { PortalConfig } from './config.ts';
 import {
   createDocumentFromTemplate,
@@ -11,7 +15,7 @@ import {
   type SaveKind,
   saveDocumentContent,
 } from './documents.ts';
-import { buildEditorConfig, type EditorUser, signEditorConfig } from './editor-config.ts';
+import { buildEditorConfig, signEditorConfig } from './editor-config.ts';
 import {
   type CallbackPayload,
   readVerifiedCallback,
@@ -31,8 +35,7 @@ interface CreateDocumentBody {
 
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-// Replaced by the signed-in user once authentication is in place.
-const ANONYMOUS_USER: EditorUser = { id: 'anonymous', name: 'Anonymous' };
+const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 
 export function buildServer(config: PortalConfig): FastifyInstance {
   const app = fastify({ logger: true, trustProxy: true });
@@ -40,6 +43,12 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   app.register(fastifyStatic, {
     root: path.join(import.meta.dirname, '..', 'public'),
     prefix: '/static/',
+  });
+  app.register(fastifyCookie);
+  registerAuth(app, {
+    oidc: new OidcClient(config.oidc),
+    sessions: new SessionStore(SESSION_LIFETIME_MS),
+    portalPublicUrl: config.portalPublicUrl,
   });
   app.addContentTypeParser(
     'application/x-www-form-urlencoded',
@@ -51,13 +60,16 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
-  app.get('/', async (_request, reply) => {
+  app.get('/', async (request, reply) => {
+    const session = requireSession(request);
     const [documents, templates] = await Promise.all([
       listDocuments(config.documentsDirectory),
       listTemplates(config.templatesDirectory),
     ]);
-    return reply.type('text/html; charset=utf-8').send(renderDocumentListPage(documents, templates));
+    return reply.type('text/html; charset=utf-8').send(renderDocumentListPage(session.user, documents, templates));
   });
+
+  app.get('/api/me', async (request) => requireSession(request).user);
 
   app.post<{ Body: CreateDocumentBody }>('/documents', async (request, reply) => {
     const templateId = request.body.template ?? '';
@@ -73,8 +85,9 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (document === null) {
       return reply.code(404).send({ error: 'Document not found' });
     }
+    const { user } = requireSession(request);
     const editorConfig = await signEditorConfig(
-      buildEditorConfig(document, ANONYMOUS_USER, config),
+      buildEditorConfig(document, { id: user.id, name: user.name }, config),
       config.onlyofficeJwtSecret,
     );
     return reply.type('text/html; charset=utf-8').send(

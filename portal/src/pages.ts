@@ -1,3 +1,4 @@
+import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentTemplate, StoredDocument } from './documents.ts';
 import type { SignedEditorConfig } from './editor-config.ts';
 
@@ -9,8 +10,9 @@ export interface EditorPageOptions {
 
 const STYLE = `
   body { font-family: system-ui, sans-serif; margin: 0; color: #1f2933; }
-  header { background: #1f3a5f; color: #fff; padding: 0.8rem 1.5rem; }
-  header h1 { font-size: 1.1rem; margin: 0; }
+  header { background: #1f3a5f; color: #fff; padding: 0.8rem 1.5rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.1rem; margin: 0; flex: 1; }
+  header button { background: none; border: 1px solid #fff; color: #fff; border-radius: 4px; padding: 0.2rem 0.6rem; }
   main { padding: 1.5rem; max-width: 60rem; }
   table { border-collapse: collapse; width: 100%; }
   td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #e4e7eb; }
@@ -19,7 +21,11 @@ const STYLE = `
   button { font: inherit; cursor: pointer; }
 `;
 
-export function renderDocumentListPage(documents: StoredDocument[], templates: DocumentTemplate[]): string {
+export function renderDocumentListPage(
+  user: UserIdentity,
+  documents: StoredDocument[],
+  templates: DocumentTemplate[],
+): string {
   const documentRows =
     documents.length === 0
       ? '<p>No document yet.</p>'
@@ -41,12 +47,24 @@ export function renderDocumentListPage(documents: StoredDocument[], templates: D
     .join(' ');
   return page(
     'Documents',
-    `<header><h1>DCS ONLYOFFICE</h1></header>
+    `${renderHeader(user)}
 <main>
   <h2>Documents</h2>
   ${documentRows}
   <h2>Templates</h2>
   <p>${templateButtons}</p>
+</main>`,
+  );
+}
+
+export function renderMessagePage(title: string, message: string): string {
+  return page(
+    title,
+    `<header><h1>DCS ONLYOFFICE</h1></header>
+<main>
+  <h2>${escapeHtml(title)}</h2>
+  <p>${escapeHtml(message)}</p>
+  <p><a href="/">Back to the portal</a></p>
 </main>`,
   );
 }
@@ -66,6 +84,14 @@ export function renderEditorPage(options: EditorPageOptions): string {
   <script src="/static/editor.js"></script>
 </body>
 </html>`;
+}
+
+function renderHeader(user: UserIdentity): string {
+  return `<header>
+  <h1>DCS ONLYOFFICE</h1>
+  <span>Signed in as ${escapeHtml(user.name)}</span>
+  <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>
+</header>`;
 }
 
 function page(title: string, body: string): string {
