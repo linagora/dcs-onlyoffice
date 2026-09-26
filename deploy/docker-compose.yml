@@ -52,12 +52,14 @@ services:
     restart: unless-stopped
 
   init:
-    image: alpine:3.24.2
-    command: ["/bin/sh", "/init/init.sh"]
+    build:
+      context: ./init
+    image: dcs/init:dev
     volumes:
-      - ./init:/init:ro
       - ./demo/documents:/demo/documents:ro
       - documents:/data/documents
+      - pki-public:/pki/public
+      - pki-private:/pki/private
 
   proxy:
     image: caddy:2.11.4-alpine
@@ -69,6 +71,8 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
+      - pki-public:/pki/public:ro
+      - pki-private:/pki/private:ro
     networks:
       default:
         # Containers reach each other through the same public names as browsers.
@@ -76,6 +80,8 @@ services:
           - portail.${DOMAIN}
           - docs.${DOMAIN}
     depends_on:
+      init:
+        condition: service_completed_successfully
       portal:
         condition: service_healthy
       onlyoffice:
@@ -92,3 +98,5 @@ volumes:
   onlyoffice-data:
   onlyoffice-logs:
   caddy-data:
+  pki-public:
+  pki-private:
