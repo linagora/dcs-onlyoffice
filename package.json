@@ -10,6 +10,6 @@
   "scripts": {
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "e2e": "pnpm --filter @dcs/e2e test"
+    "e2e": "pnpm --filter @dcs/e2e e2e"
   }
 }
