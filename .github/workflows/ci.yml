@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-24.04
+    needs: checks
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create the stack configuration
+        run: deploy/scripts/init-env.sh
+      - name: Start the stack
+        working-directory: deploy
+        run: docker compose --profile standalone up -d --build --wait --wait-timeout 600
+      - name: Install browsers
+        run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium
+      - name: Run end-to-end tests
+        run: pnpm e2e
+      - name: Collect stack logs
+        if: failure()
+        working-directory: deploy
+        run: |
+          mkdir -p ../e2e/test-results
+          docker compose --profile standalone logs --no-color > ../e2e/test-results/stack.log 2>&1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-results
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 14
