@@ -11,8 +11,12 @@ In hosted mode, the stack runs on a Docker host behind an existing reverse proxy
   - confidential client, authorization code flow with PKCE (S256);
   - redirect URI `https://portail.<DOMAIN>/auth/callback`, post-logout redirect URI `https://portail.<DOMAIN>/`;
   - scopes `openid profile email groups`;
-  - access tokens as JWT signed RS256 by a key that has a key id, with the audience containing the client id and the claims `email`, `preferred_username`, `name` and `groups` (a JSON array) inside the access token, because the OpenTDF platform only reads the access token;
+  - access tokens as JWT signed RS256 by a key that has a key id, because the OpenTDF platform validates them itself and cannot use opaque tokens;
+  - the claims `email`, `preferred_username`, `name` and `groups` (a JSON array) inside the access token, because the platform only reads the access token;
+  - the platform's URL, `https://tdf.<DOMAIN>`, as an additional audience of the access token (or set `OIDC_AUDIENCE` to the audience the provider issues, often the client id);
   - online refresh tokens.
+
+With LemonLDAP::NG, these are options of the relying party: JWT format for access tokens, claims released in access tokens, additional audiences, and the `groups` attribute exported as an array.
 
 ## Configuration
 
@@ -27,6 +31,7 @@ Create `deploy/.env` with `deploy/scripts/init-env.sh`, which generates the secr
 | `OIDC_ISSUER` | the issuer exactly as the provider's discovery document spells it |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | the registered client |
 | `OIDC_SCOPES` | `openid profile email groups` |
+| `OIDC_AUDIENCE` | only when access tokens do not carry `https://tdf.<DOMAIN>` in their audience |
 
 `deploy/.env` holds secrets: it is ignored by Git and must stay on the host.
 
