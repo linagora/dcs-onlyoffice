@@ -119,8 +119,7 @@ services:
     environment:
       OPENTDF_DB_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
       OPENTDF_SERVER_AUTH_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
-      # Access tokens name the portal's OIDC client in their audience.
-      OPENTDF_SERVER_AUTH_AUDIENCE: ${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID in .env}
+      OPENTDF_SERVER_AUTH_AUDIENCE: ${OIDC_AUDIENCE:-https://tdf.${DOMAIN}}
       OPENTDF_SERVER_CORS_ALLOWEDORIGINS: https://portail.${DOMAIN}
       # Extra trust anchors for a private CA; the image's public bundle stays.
       SSL_CERT_DIR: /etc/opentdf/ca
