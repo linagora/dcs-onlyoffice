@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
+import { Document, Footer, Header, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 
 interface DemoDocument {
   fileName: string;
@@ -28,6 +28,8 @@ function buildExerciseNorthwind(): Document {
     description: 'Fictional document for demonstration purposes only',
     sections: [
       {
+        headers: { default: new Header({ children: [paragraph('Exercise NORTHWIND 26 - fictional')] }) },
+        footers: { default: new Footer({ children: [paragraph('Fictional document for demonstration purposes')] }) },
         children: [
           new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun('Exercise NORTHWIND 26')] }),
           new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun('Coordination note')] }),
