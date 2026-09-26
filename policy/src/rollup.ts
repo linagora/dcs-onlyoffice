@@ -41,7 +41,10 @@ export function computeDocumentLabel(
 
 // ADatP-4774.1 section 4.4: highest classification by hierarchy, restrictive
 // and informative categories united, permissive categories intersected (a tag
-// set missing from one label is dropped).
+// set missing from one label is dropped). The standard reads release
+// categories as widening dissemination, so the result can impose fewer of
+// them than a portion does: under the access decision that isMoreRestrictive
+// follows, a reader allowed by the result may still be refused that portion.
 export function highWaterMark(policy: SecurityPolicy, labels: Label[]): Label {
   const classification = labels
     .map((label) => policy.classifications.find((candidate) => sameName(candidate.name, label.classification)))
@@ -76,9 +79,11 @@ function addRollupIndicator(policy: SecurityPolicy, label: Label): Label | null 
 }
 
 // True when a reader allowed by `base` may be refused `portion`, following the
-// ADatP-4774 access decision: the classification must be covered, every
-// restrictive category held, and one value of each permissive category held.
-// Informative categories take no part in it.
+// SPIF access control decision (as spiffing implements it): the
+// classification must be covered, every restrictive category held, and one
+// value of each permissive category held. Informative categories take no
+// part in it. OpenTDF's anyOf attribute rule reads permissive values the
+// same way.
 export function isMoreRestrictive(policy: SecurityPolicy, portion: Label, base: Label): boolean {
   const hierarchyOf = (label: Label): number =>
     policy.classifications.find((candidate) => sameName(candidate.name, label.classification))?.hierarchy ?? 0;
