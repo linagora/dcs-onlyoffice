@@ -1,0 +1,26 @@
+body {
+  margin: 0;
+}
+
+.panel {
+  padding: 12px;
+  font-size: 12px;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-divider, #dfdfdf);
+}
+
+.identity-name {
+  font-weight: 700;
+}
+
+.identity-account,
+.muted {
+  color: var(--text-secondary, #6b6b6b);
+  margin: 0;
+}
