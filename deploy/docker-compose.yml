@@ -18,6 +18,9 @@ services:
       # Loaded after the configuration the entrypoint rewrites. Disables the
       # 5-minute DNS cache, which kept a recreated portal's old address.
       - ./onlyoffice/local-production-linux.json:/etc/onlyoffice/documentserver/local-production-linux.json:ro
+    # For an external reverse proxy (hosted mode); loopback by default.
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${DOCS_PORT:-6141}:80"
     healthcheck:
       # The entrypoint generates the fonts and restarts the editing services
       # after nginx already answers; its last step tails the logs. The bracket
@@ -52,6 +55,8 @@ services:
       - documents:/data/documents
       - ./demo/documents:/templates:ro
       - pki-public:/pki/public:ro
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORTAL_PORT:-6140}:3000"
     depends_on:
       init:
         condition: service_completed_successfully
@@ -133,6 +138,8 @@ services:
       proxy:
         condition: service_healthy
         required: false
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${TDF_PORT:-6142}:8080"
     # The image has no shell: the proxy probes /healthz instead.
     restart: unless-stopped
 
