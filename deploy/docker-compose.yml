@@ -114,7 +114,8 @@ services:
     restart: unless-stopped
 
   opentdf:
-    image: registry.opentdf.io/platform:v0.27.0@sha256:4f35e6a10af23a2aaeb53133afc28ed8c3a3f23407701e002358231775c5318a
+    build: ./opentdf
+    image: dcs/opentdf:dev
     command: ["start", "--config-file", "/etc/opentdf/opentdf.yaml"]
     environment:
       OPENTDF_DB_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
@@ -139,7 +140,12 @@ services:
         required: false
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${TDF_PORT:-6142}:8080"
-    # The image has no shell: the proxy probes /healthz instead.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
 
   idp:
