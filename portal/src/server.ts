@@ -4,6 +4,7 @@ import { fastifyCookie } from '@fastify/cookie';
 import { fastifyStatic } from '@fastify/static';
 import { fastify, type FastifyInstance } from 'fastify';
 import { OidcClient } from './auth/oidc.ts';
+import { refreshBindingReferences } from './binding.ts';
 import { registerAuth, requireSession } from './auth/routes.ts';
 import { SessionStore } from './auth/sessions.ts';
 import type { PortalConfig } from './config.ts';
@@ -203,12 +204,8 @@ async function storeCallbackFile(config: PortalConfig, documentId: string, callb
   if (!response.ok) {
     return 'failed';
   }
-  const saved = await saveDocumentContent(
-    config.documentsDirectory,
-    documentId,
-    new Uint8Array(await response.arrayBuffer()),
-    kind,
-  );
+  const content = await refreshBindingReferences(new Uint8Array(await response.arrayBuffer()));
+  const saved = await saveDocumentContent(config.documentsDirectory, documentId, content, kind);
   return saved === null ? 'failed' : 'saved';
 }
 
