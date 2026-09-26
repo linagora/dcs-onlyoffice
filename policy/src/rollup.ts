@@ -6,6 +6,11 @@ export type RollupRule = 'clear-parts' | 'high-water-mark';
 
 export const ROLLUP_RULES: readonly RollupRule[] = ['clear-parts', 'high-water-mark'];
 
+export function isRollupRule(value: string): value is RollupRule {
+  const names: readonly string[] = ROLLUP_RULES;
+  return names.includes(value);
+}
+
 export type DocumentLabelResult =
   | { ok: true; label: Label; moreRestrictivePortions: boolean }
   | { ok: false; error: string };
