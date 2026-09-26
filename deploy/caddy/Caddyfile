@@ -36,3 +36,13 @@ idp.{$DOMAIN} {
 	import local_tls
 	reverse_proxy idp:80
 }
+
+# h2c keeps gRPC clients working as well as Connect JSON over HTTP/1.1.
+tdf.{$DOMAIN} {
+	import local_tls
+	reverse_proxy h2c://opentdf:8080 {
+		transport http {
+			versions h2c 2 1.1
+		}
+	}
+}
