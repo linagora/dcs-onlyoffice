@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { type Identity, resolveIdentity } from './identity.ts';
+import { LabelList } from './LabelList.tsx';
 import type { PluginInfo } from './onlyoffice.ts';
 
 export interface PanelProps {
@@ -50,6 +51,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
           </>
         )}
       </section>
+      <LabelList />
     </main>
   );
 }
