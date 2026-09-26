@@ -110,6 +110,37 @@ export function labelCode(policy: SecurityPolicy, label: Label): string {
   return `${policy.name}:${classification.lacv}${segments.join('')}`;
 }
 
+// Reverse of labelCode. Returns null when the code does not designate existing
+// entries of this policy; the result still has to be validated.
+export function parseLabelCode(policy: SecurityPolicy, code: string): LabelRequest | null {
+  const match = /^([^:]+):(\d+)((?:\/[^/.]+\.\d+(?:\+\d+)*)*)$/.exec(code);
+  if (match === null || match[1] === undefined || match[2] === undefined || !sameName(match[1], policy.name)) {
+    return null;
+  }
+  const classification = policy.classifications.find((candidate) => candidate.lacv === Number(match[2]));
+  if (classification === undefined) {
+    return null;
+  }
+  const categories: LabelRequest['categories'] = [];
+  for (const segment of (match[3] ?? '').split('/').filter((part) => part !== '')) {
+    const [arc, lacvList] = segment.split('.');
+    const tagSet = policy.tagSets.find((candidate) => candidate.codeArc === arc);
+    if (tagSet === undefined || lacvList === undefined) {
+      return null;
+    }
+    const values: string[] = [];
+    for (const lacv of lacvList.split('+')) {
+      const category = tagSet.categories.find((candidate) => candidate.lacv === Number(lacv));
+      if (category === undefined) {
+        return null;
+      }
+      values.push(category.name);
+    }
+    categories.push({ tagSet: tagSet.name, values });
+  }
+  return { classification: classification.name, categories };
+}
+
 function ruleViolations(
   policy: SecurityPolicy,
   classification: SecurityClassification,

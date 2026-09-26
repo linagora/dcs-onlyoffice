@@ -1,5 +1,14 @@
-import { fastify, type FastifyInstance } from 'fastify';
-import { enumerateValidLabels, type Label, type LabelCategory, labelCode, type LabelRequest, validateLabel } from './labels.ts';
+import { fastify, type FastifyInstance, type FastifyRequest } from 'fastify';
+import { reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
+import {
+  enumerateValidLabels,
+  type Label,
+  type LabelCategory,
+  labelCode,
+  type LabelRequest,
+  parseLabelCode,
+  validateLabel,
+} from './labels.ts';
 import { type Marking, renderMarking } from './marking.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { loadPolicies, sameName } from './spif/reader.ts';
@@ -7,6 +16,8 @@ import { loadPolicies, sameName } from './spif/reader.ts';
 export interface PolicyServerOptions {
   spifDirectory: string;
   markingLanguage?: string;
+  reviewPeriodYears?: number;
+  now?: () => Date;
   logger?: boolean;
 }
 
@@ -29,6 +40,8 @@ interface LanguageQuery {
 export async function buildPolicyServer(options: PolicyServerOptions): Promise<FastifyInstance> {
   const policies = await loadPolicies(options.spifDirectory);
   const defaultLanguage = options.markingLanguage ?? 'en';
+  const reviewPeriodYears = options.reviewPeriodYears ?? 5;
+  const now = options.now ?? ((): Date => new Date());
   const app = fastify({ logger: options.logger ?? false });
 
   const findPolicy = (name: string): SecurityPolicy | null =>
@@ -70,7 +83,44 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     },
   );
 
+  app.post<{ Params: PolicyParams; Querystring: LanguageQuery }>(
+    '/policies/:policy/labels/adatp4774',
+    async (request, reply) => {
+      const policy = findPolicy(request.params.policy);
+      if (policy === null) {
+        return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
+      }
+      const code = readCode(request.body);
+      if (code === null) {
+        return reply.code(400).send({ error: 'Expected { code }' });
+      }
+      const labelRequest = parseLabelCode(policy, code);
+      const validation = labelRequest === null ? null : validateLabel(policy, labelRequest);
+      if (validation === null || !validation.valid) {
+        return reply.code(422).send({ error: `${code} is not a valid label of ${policy.name}` });
+      }
+      const creationDateTime = now();
+      const xml = serializeOriginatorLabel(policy, validation.label, {
+        creationDateTime,
+        reviewDateTime: reviewDateFor(creationDateTime, reviewPeriodYears),
+        originatorEmail: callerEmail(request),
+      });
+      return { xml, label: toView(policy, validation.label, request.query.lang ?? defaultLanguage) };
+    },
+  );
+
   return app;
+}
+
+// The portal relay sends the caller's identity URI-encoded.
+function callerEmail(request: FastifyRequest): string | null {
+  const header = request.headers['x-user-email'];
+  const value = typeof header === 'string' ? decodeURIComponent(header) : '';
+  return value === '' ? null : value;
+}
+
+function readCode(body: unknown): string | null {
+  return typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string' ? body.code : null;
 }
 
 function toView(policy: SecurityPolicy, label: Label, language: string): LabelView {
