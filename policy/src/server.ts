@@ -207,24 +207,25 @@ function parseLabelRequest(body: unknown): LabelRequest | null {
   if (typeof body !== 'object' || body === null || !('classification' in body) || typeof body.classification !== 'string') {
     return null;
   }
-  const rawCategories: unknown = 'categories' in body ? body.categories : [];
-  if (!Array.isArray(rawCategories)) {
+  const rawCategories = unknownArray('categories' in body ? body.categories : []);
+  if (rawCategories === null) {
     return null;
   }
   const categories: LabelRequest['categories'] = [];
   for (const raw of rawCategories) {
-    if (
-      typeof raw !== 'object' ||
-      raw === null ||
-      !('tagSet' in raw) ||
-      typeof raw.tagSet !== 'string' ||
-      !('values' in raw) ||
-      !Array.isArray(raw.values) ||
-      !raw.values.every((value: unknown) => typeof value === 'string')
-    ) {
+    if (typeof raw !== 'object' || raw === null || !('tagSet' in raw) || typeof raw.tagSet !== 'string' || !('values' in raw)) {
       return null;
     }
-    categories.push({ tagSet: raw.tagSet, values: raw.values });
+    const values = unknownArray(raw.values);
+    if (values === null || !values.every((value): value is string => typeof value === 'string')) {
+      return null;
+    }
+    categories.push({ tagSet: raw.tagSet, values });
   }
   return { classification: body.classification, categories };
+}
+
+// Array.isArray narrows to any[]; its items are unknown until checked.
+function unknownArray(value: unknown): unknown[] | null {
+  return Array.isArray(value) ? value : null;
 }
