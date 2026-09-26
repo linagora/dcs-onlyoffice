@@ -219,6 +219,177 @@ describe('ADatP-4774 serialization', () => {
   });
 });
 
+describe('document label rollup with the demo SPIF', () => {
+  let clearParts: FastifyInstance;
+  let highWaterMark: FastifyInstance;
+  before(async () => {
+    clearParts = await buildPolicyServer({ spifDirectory: DEMO_SPIFS, markingLanguage: 'fr', now: FIXED_NOW });
+    highWaterMark = await buildPolicyServer({
+      spifDirectory: DEMO_SPIFS,
+      markingLanguage: 'fr',
+      now: FIXED_NOW,
+      rollupRule: 'high-water-mark',
+    });
+  });
+  after(async () => {
+    await clearParts.close();
+    await highWaterMark.close();
+  });
+
+  async function documentLabel(server: FastifyInstance, base: string, portions: string[]): Promise<Record<string, unknown>> {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/policies/DEMO-FR/document-label',
+      payload: { base, portions },
+    });
+    assert.equal(response.statusCode, 200);
+    return response.json();
+  }
+
+  it('keeps the base label and flags a more restrictive portion under the clear-parts rule', async () => {
+    const result = await documentLabel(clearParts, 'DEMO-FR:2/2.1', ['DEMO-FR:2/1.1']);
+    assert.equal(result.moreRestrictivePortions, true);
+    assert.equal((result.label as LabelView).code, 'DEMO-FR:2/2.1/3.1');
+    assert.equal(
+      (result.label as LabelView).marking.text,
+      'DIFFUSION RESTREINTE – DIFFUSION OTAN – CONTIENT DES PORTIONS PLUS RESTRICTIVES',
+    );
+  });
+
+  // Each case: base label, portion labels, expected document label code. A
+  // portion is more restrictive when a reader allowed by the base label can be
+  // refused the portion (ADatP-4774 access decision): higher classification,
+  // extra restrictive category, or a permissive category the base does not
+  // impose. Plain DIFFUSION RESTREINTE imposes no release category, so a
+  // portion releasable to NATO only is more restrictive than it.
+  const clearPartsCases: [string, string[], string][] = [
+    ['DEMO-FR:2/2.1', ['DEMO-FR:1', 'DEMO-FR:2/2.1'], 'DEMO-FR:2/2.1'],
+    ['DEMO-FR:2/2.1', ['DEMO-FR:2'], 'DEMO-FR:2/2.1'],
+    ['DEMO-FR:2', ['DEMO-FR:2/2.1'], 'DEMO-FR:2/3.1'],
+    ['DEMO-FR:1', ['DEMO-FR:2'], 'DEMO-FR:1/3.1'],
+    ['DEMO-FR:1/2.1', ['DEMO-FR:1'], 'DEMO-FR:1/2.1'],
+    ['DEMO-FR:2', [], 'DEMO-FR:2'],
+  ];
+  for (const [base, portions, expected] of clearPartsCases) {
+    it(`clear-parts: ${base} with [${portions.join(', ')}] gives ${expected}`, async () => {
+      assert.equal(((await documentLabel(clearParts, base, portions)).label as LabelView).code, expected);
+    });
+  }
+
+  // ADatP-4774.1 section 4.4: highest classification, restrictive categories
+  // united, permissive categories intersected.
+  const highWaterMarkCases: [string, string[], string][] = [
+    ['DEMO-FR:2/2.1', ['DEMO-FR:2/1.1'], 'DEMO-FR:2/1.1'],
+    ['DEMO-FR:1/2.1', ['DEMO-FR:2/2.1'], 'DEMO-FR:2/2.1'],
+    ['DEMO-FR:1', ['DEMO-FR:2/2.1'], 'DEMO-FR:2'],
+    ['DEMO-FR:2/2.1', [], 'DEMO-FR:2/2.1'],
+  ];
+  for (const [base, portions, expected] of highWaterMarkCases) {
+    it(`high-water-mark: ${base} with [${portions.join(', ')}] gives ${expected}`, async () => {
+      assert.equal(((await documentLabel(highWaterMark, base, portions)).label as LabelView).code, expected);
+    });
+  }
+
+  it('never offers the rollup indicator as a label an author can pick', async () => {
+    const labels = await listLabels(clearParts, 'DEMO-FR');
+    assert.equal(labels.some((label) => label.code.includes('/3.')), false);
+  });
+});
+
+// The expected part is the tested example of docs/research/labelling-standards.md,
+// section 4.5, with the optional Category URIs that section 2.5 validates.
+describe('ADatP-4778.2 document label part', () => {
+  let server: FastifyInstance;
+  before(async () => {
+    server = await buildPolicyServer({ spifDirectory: EXAMPLE_SPIFS, now: FIXED_NOW });
+  });
+  after(async () => {
+    await server.close();
+  });
+
+  it('binds the document label to the listed package parts', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/policies/EXAMPLE/document-label',
+      payload: {
+        base: 'EXAMPLE:2/1.1/2.1+2/3.1',
+        portions: [],
+        parts: [
+          'word/document.xml',
+          'word/styles.xml',
+          'word/header1.xml',
+          'word/footer1.xml',
+          'word/footnotes.xml',
+          'word/endnotes.xml',
+          'word/comments.xml',
+          'word/media/image1.png',
+          'docProps/core.xml',
+          'docProps/app.xml',
+          'docProps/custom.xml',
+        ],
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    const oid = '2.25.283505922519774543341581604402970826256';
+    assert.equal(
+      compactXml(response.json().xml),
+      compactXml(`<mb:BindingInformation xmlns:mb="urn:nato:stanag:4778:bindinginformation:1:0" xmlns:xmime="http://www.w3.org/2005/05/xmlmime">
+        <mb:MetadataBindingContainer>
+          <mb:MetadataBinding Id="mb-document">
+            <mb:Metadata>
+              <slab:originatorConfidentialityLabel xmlns:slab="urn:nato:stanag:4774:confidentialitymetadatalabel:1:0" ReviewDateTime="2031-09-26T00:00:00Z">
+                <slab:ConfidentialityInformation>
+                  <slab:PolicyIdentifier URI="urn:oid:${oid}">EXAMPLE</slab:PolicyIdentifier>
+                  <slab:Classification>RESTRICTED</slab:Classification>
+                  <slab:Category Type="RESTRICTIVE" TagName="Special Handling" URI="urn:oid:${oid}.1">
+                    <slab:GenericValue>ALPHA</slab:GenericValue>
+                  </slab:Category>
+                  <slab:Category Type="PERMISSIVE" TagName="Releasable To" URI="urn:oid:${oid}.2">
+                    <slab:GenericValue>XAA</slab:GenericValue>
+                    <slab:GenericValue>XBB</slab:GenericValue>
+                  </slab:Category>
+                  <slab:Category Type="INFORMATIVE" TagName="Administrative" URI="urn:oid:${oid}.3">
+                    <slab:GenericValue>STAFF</slab:GenericValue>
+                  </slab:Category>
+                </slab:ConfidentialityInformation>
+                <slab:CreationDateTime>2026-09-26T12:00:00Z</slab:CreationDateTime>
+              </slab:originatorConfidentialityLabel>
+            </mb:Metadata>
+            <mb:DataReference URI="pack:///word/document.xml"/>
+            <mb:DataReference URI="pack:///word/styles.xml"/>
+            <mb:DataReference URI="pack:///word/header1.xml"/>
+            <mb:DataReference URI="pack:///word/footer1.xml"/>
+            <mb:DataReference URI="pack:///word/footnotes.xml"/>
+            <mb:DataReference URI="pack:///word/endnotes.xml"/>
+            <mb:DataReference URI="pack:///word/comments.xml"/>
+            <mb:DataReference URI="pack:///word/media/image1.png" xmime:contentType="image/png"/>
+            <mb:DataReference URI="pack:///docProps/core.xml"/>
+            <mb:DataReference URI="pack:///docProps/app.xml"/>
+            <mb:DataReference URI="pack:///docProps/custom.xml"/>
+          </mb:MetadataBinding>
+        </mb:MetadataBindingContainer>
+      </mb:BindingInformation>`),
+    );
+  });
+
+  it('references the parts a document always has when none are listed', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/policies/EXAMPLE/document-label',
+      payload: { base: 'EXAMPLE:1', portions: [] },
+    });
+    const uris = [...String(response.json().xml).matchAll(/DataReference URI="([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(uris, [
+      'pack:///word/document.xml',
+      'pack:///word/styles.xml',
+      'pack:///word/footnotes.xml',
+      'pack:///word/endnotes.xml',
+      'pack:///docProps/core.xml',
+      'pack:///docProps/app.xml',
+    ]);
+  });
+});
+
 describe('policy service start-up', () => {
   it('refuses to start on a SPIF it cannot read, naming the file', async () => {
     await assert.rejects(buildPolicyServer({ spifDirectory: BROKEN_SPIFS }), /broken\.spif\.xml/);
