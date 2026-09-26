@@ -44,3 +44,18 @@ test('closing the editor saves the document, which reopens with the edits under 
   expect(await editorDocumentKey(page)).not.toBe(firstKey);
   expect(await readDocumentText(page)).toContain(marker);
 });
+
+// The labelling panel rereads the document regularly; that must not count as
+// an edit that the Document Server saves as a new version.
+test('opening a document without editing it keeps its key', async ({ page }) => {
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  const firstKey = await editorDocumentKey(page);
+  await page.waitForTimeout(10_000);
+
+  await page.goto('/');
+  // The Document Server reports the closed session a few seconds later.
+  await page.waitForTimeout(15_000);
+
+  await openDocument(page, documentId);
+  expect(await editorDocumentKey(page)).toBe(firstKey);
+});

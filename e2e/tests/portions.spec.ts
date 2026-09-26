@@ -48,3 +48,19 @@ test('portions survive saving to DOCX and reopening', async ({ page }) => {
   await expect(pluginPanel(page).getByTestId('portion-text')).toHaveText([secret]);
   await expect(pluginPanel(page).getByTestId('portion-marking')).toHaveText([SPECIAL_FRANCE]);
 });
+
+// One editor command inserts both the block and its part; the panel's regular
+// rereading of the document must not add undo steps of its own.
+test('a single undo removes an inserted portion and its part', async ({ page }) => {
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: `Fictional undone paragraph ${Date.now()}` });
+  // Let the panel reread the document a few times.
+  await page.waitForTimeout(7_000);
+
+  await page.frameLocator('iframe[name="frameEditor"]').locator('#editor_sdk').click({ position: { x: 400, y: 300 } });
+  await page.keyboard.press('ControlOrMeta+z');
+
+  await expect(pluginPanel(page).getByTestId('portion-item')).toHaveCount(0);
+  const docx = await forceSavedDocx(page, documentId, (saved) => saved.contentControls.length === 0);
+  expect(docx.portionParts).toEqual([]);
+});
