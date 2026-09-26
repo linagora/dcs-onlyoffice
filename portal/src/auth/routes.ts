@@ -27,8 +27,9 @@ interface CallbackQuery {
 export const SESSION_COOKIE = 'dcs_session';
 
 // The Document Server calls /internal from the Compose network; the proxy
-// refuses these paths from outside.
-const PUBLIC_PATH_PREFIXES = ['/healthz', '/static/', '/auth/', '/internal/'];
+// refuses these paths from outside. The editor fetches the plugin's files
+// without credentials.
+const PUBLIC_PATH_PREFIXES = ['/healthz', '/static/', '/plugin/', '/auth/', '/internal/'];
 
 export function registerAuth(app: FastifyInstance, deps: AuthDependencies): FastifyInstance {
   app.decorateRequest('session', null);

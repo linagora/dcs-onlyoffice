@@ -1,4 +1,4 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fastifyCookie } from '@fastify/cookie';
 import { fastifyStatic } from '@fastify/static';
@@ -15,7 +15,7 @@ import {
   type SaveKind,
   saveDocumentContent,
 } from './documents.ts';
-import { buildEditorConfig, signEditorConfig } from './editor-config.ts';
+import { buildEditorConfig, type EditorPlugin, signEditorConfig } from './editor-config.ts';
 import {
   type CallbackPayload,
   readVerifiedCallback,
@@ -39,10 +39,21 @@ const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 
 export function buildServer(config: PortalConfig): FastifyInstance {
   const app = fastify({ logger: true, trustProxy: true });
+  const plugin = loadEditorPlugin(config);
 
   app.register(fastifyStatic, {
     root: path.join(import.meta.dirname, '..', 'public'),
     prefix: '/static/',
+  });
+  // The editor, on the Document Server's origin, fetches the plugin
+  // configuration with an XHR; the plugin page itself runs on this origin.
+  app.register(fastifyStatic, {
+    root: config.pluginDirectory,
+    prefix: '/plugin/',
+    decorateReply: false,
+    setHeaders: (reply) => {
+      reply.header('Access-Control-Allow-Origin', config.docsPublicUrl);
+    },
   });
   app.register(fastifyCookie);
   registerAuth(app, {
@@ -87,7 +98,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     }
     const { user } = requireSession(request);
     const editorConfig = await signEditorConfig(
-      buildEditorConfig(document, { id: user.id, name: user.name }, config),
+      buildEditorConfig(document, { id: user.id, name: user.name }, plugin, config),
       config.onlyofficeJwtSecret,
     );
     return reply.type('text/html; charset=utf-8').send(
@@ -155,6 +166,14 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 }
 
 type CallbackOutcome = 'saved' | 'ignored' | 'failed';
+
+function loadEditorPlugin(config: PortalConfig): EditorPlugin {
+  const manifest: unknown = JSON.parse(readFileSync(path.join(config.pluginDirectory, 'config.json'), 'utf8'));
+  if (typeof manifest !== 'object' || manifest === null || !('guid' in manifest) || typeof manifest.guid !== 'string') {
+    throw new Error(`The plugin configuration in ${config.pluginDirectory} has no guid`);
+  }
+  return { guid: manifest.guid, configUrl: `${config.portalPublicUrl}/plugin/config.json` };
+}
 
 // With JWT enabled, the Document Server signs its requests to the document URL.
 async function isSignedByDocumentServer(authorization: string | undefined, secret: string): Promise<boolean> {
