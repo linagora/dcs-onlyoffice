@@ -1,6 +1,6 @@
-import { SignJWT } from 'jose';
 import type { PortalConfig } from './config.ts';
 import type { StoredDocument } from './documents.ts';
+import { signOnlyofficeToken } from './onlyoffice.ts';
 
 export interface EditorUser {
   id: string;
@@ -71,8 +71,5 @@ export function buildEditorConfig(
 // The Document Server only accepts a configuration whose fields are repeated,
 // signed, in the `token` field.
 export async function signEditorConfig(editorConfig: EditorConfig, secret: string): Promise<SignedEditorConfig> {
-  const token = await new SignJWT({ ...editorConfig })
-    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-    .sign(new TextEncoder().encode(secret));
-  return { ...editorConfig, token };
+  return { ...editorConfig, token: await signOnlyofficeToken({ ...editorConfig }, secret) };
 }
