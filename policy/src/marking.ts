@@ -1,4 +1,4 @@
-import { findCategory, findClassification, findTagSet, type Label } from './labels.ts';
+import { requireCategory, requireClassification, requireTagSet, type Label } from './labels.ts';
 import type { MarkingPhrase, SecurityPolicy } from './spif/model.ts';
 
 export interface Marking {
@@ -9,7 +9,7 @@ export interface Marking {
 // Same composition as spiffing: policy (or its replacement phrase), then the
 // classification, then each tag set's values between its prefix and suffix.
 export function renderMarking(policy: SecurityPolicy, label: Label, language: string): Marking {
-  const classification = findClassification(policy, label.classification);
+  const classification = requireClassification(policy, label.classification);
   const parts: string[] = [];
   const policyPart = policy.policyPhrase ?? policy.name;
   if (policyPart !== '') {
@@ -19,9 +19,9 @@ export function renderMarking(policy: SecurityPolicy, label: Label, language: st
     parts.push(phraseFor(classification.markings, classification.name, language));
   }
   for (const labelCategory of label.categories) {
-    const tagSet = findTagSet(policy, labelCategory.tagSet);
+    const tagSet = requireTagSet(policy, labelCategory.tagSet);
     const values = labelCategory.values
-      .map((value) => findCategory(tagSet, value))
+      .map((value) => requireCategory(tagSet, value))
       .filter((category) => !hasCode(category.markings, 'noMarkingDisplay'))
       .map((category) => phraseFor(category.markings, category.name, language))
       .filter((phrase) => phrase !== '');

@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DOMParser, type Element } from '@xmldom/xmldom';
+import { classificationNamed, sameName, tagSetNamed } from './lookup.ts';
 import type {
   CategoryGroup,
   CategoryTagSet,
@@ -69,10 +70,6 @@ export function parseSpif(xml: string, sourceFile: string): SecurityPolicy {
     const reason = error instanceof Error ? error.message : String(error);
     throw new SpifError(`${sourceFile}: ${reason}`, { cause: error });
   }
-}
-
-export function sameName(left: string, right: string): boolean {
-  return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 }
 
 function parseXml(xml: string): Element {
@@ -270,8 +267,8 @@ function checkConsistency(policy: SecurityPolicy): SecurityPolicy {
   assertUnique(policy.tagSets.map((tagSet) => tagSet.codeArc), 'tag set OID last arc');
   const indicator = policy.rollupIndicator;
   if (indicator !== null) {
-    const tagSet = policy.tagSets.find((candidate) => sameName(candidate.name, indicator.tagSet));
-    if (tagSet === undefined || tagSet.type !== 'INFORMATIVE' || !tagSet.categories.some((category) => sameName(category.name, indicator.category))) {
+    const tagSet = tagSetNamed(policy, indicator.tagSet);
+    if (tagSet === null || tagSet.type !== 'INFORMATIVE' || !tagSet.categories.some((category) => sameName(category.name, indicator.category))) {
       throw new SpifError(`the rollup indicator must be an informative category (${indicator.tagSet} / ${indicator.category})`);
     }
   }
@@ -280,7 +277,7 @@ function checkConsistency(policy: SecurityPolicy): SecurityPolicy {
     assertUnique(tagSet.categories.map((category) => String(category.lacv)), `category lacv in ${tagSet.name}`);
     for (const category of tagSet.categories) {
       for (const classificationName of [...category.excludedClasses, ...(category.requiredClass === null ? [] : [category.requiredClass])]) {
-        if (!policy.classifications.some((classification) => sameName(classification.name, classificationName))) {
+        if (classificationNamed(policy, classificationName) === null) {
           throw new SpifError(`category ${category.name} refers to unknown classification ${classificationName}`);
         }
       }
@@ -289,7 +286,7 @@ function checkConsistency(policy: SecurityPolicy): SecurityPolicy {
         ...category.requiredCategories.flatMap((rule) => rule.groups),
       ];
       for (const group of groups) {
-        if (!policy.tagSets.some((candidate) => sameName(candidate.name, group.tagSet))) {
+        if (tagSetNamed(policy, group.tagSet) === null) {
           throw new SpifError(`category ${category.name} refers to unknown tag set ${group.tagSet}`);
         }
       }

@@ -1,6 +1,6 @@
 import { type Label, type LabelCategory, type LabelRequest, validateLabel } from './labels.ts';
 import type { CategoryTagSet, SecurityPolicy } from './spif/model.ts';
-import { sameName } from './spif/reader.ts';
+import { classificationNamed, sameName } from './spif/lookup.ts';
 
 export type RollupRule = 'clear-parts' | 'high-water-mark';
 
@@ -47,8 +47,8 @@ export function computeDocumentLabel(
 // follows, a reader allowed by the result may still be refused that portion.
 export function highWaterMark(policy: SecurityPolicy, labels: Label[]): Label {
   const classification = labels
-    .map((label) => policy.classifications.find((candidate) => sameName(candidate.name, label.classification)))
-    .filter((candidate) => candidate !== undefined)
+    .map((label) => classificationNamed(policy, label.classification))
+    .filter((candidate) => candidate !== null)
     .reduce((highest, current) => (current.hierarchy > highest.hierarchy ? current : highest));
   const categories: LabelCategory[] = [];
   for (const tagSet of policy.tagSets) {
@@ -86,7 +86,7 @@ function addRollupIndicator(policy: SecurityPolicy, label: Label): Label | null 
 // same way.
 export function isMoreRestrictive(policy: SecurityPolicy, portion: Label, base: Label): boolean {
   const hierarchyOf = (label: Label): number =>
-    policy.classifications.find((candidate) => sameName(candidate.name, label.classification))?.hierarchy ?? 0;
+    classificationNamed(policy, label.classification)?.hierarchy ?? 0;
   if (hierarchyOf(portion) > hierarchyOf(base)) {
     return true;
   }
