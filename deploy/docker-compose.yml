@@ -37,8 +37,10 @@ services:
       ONLYOFFICE_INTERNAL_URL: http://onlyoffice
       PORTAL_INTERNAL_URL: http://portal:3000
       DOCUMENTS_DIR: /data/documents
+      TEMPLATES_DIR: /templates
     volumes:
       - documents:/data/documents
+      - ./demo/documents:/templates:ro
     depends_on:
       init:
         condition: service_completed_successfully

@@ -6,6 +6,7 @@ export interface PortalConfig {
   onlyofficeInternalUrl: string;
   onlyofficeJwtSecret: string;
   documentsDirectory: string;
+  templatesDirectory: string;
   port: number;
 }
 
@@ -19,6 +20,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     onlyofficeInternalUrl: env.ONLYOFFICE_INTERNAL_URL ?? 'http://onlyoffice',
     onlyofficeJwtSecret: requireEnv(env, 'ONLYOFFICE_JWT_SECRET'),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
+    templatesDirectory: env.TEMPLATES_DIR ?? '/templates',
     port: Number(env.PORT ?? '3000'),
   };
 }
