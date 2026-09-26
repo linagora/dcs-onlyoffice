@@ -18,6 +18,7 @@ import {
 } from './documents.ts';
 import { buildEditorConfig, type EditorMode, type EditorPlugin, signEditorConfig } from './editor-config.ts';
 import {
+  bearerToken,
   type CallbackPayload,
   readVerifiedCallback,
   requestForceSave,
@@ -210,10 +211,8 @@ function viewModeManifest(config: PortalConfig): Record<string, unknown> {
 
 // With JWT enabled, the Document Server signs its requests to the document URL.
 async function isSignedByDocumentServer(authorization: string | undefined, secret: string): Promise<boolean> {
-  if (authorization?.startsWith('Bearer ') !== true) {
-    return false;
-  }
-  return (await verifyOnlyofficeToken(authorization.slice('Bearer '.length), secret)) !== null;
+  const token = bearerToken(authorization);
+  return token !== null && (await verifyOnlyofficeToken(token, secret)) !== null;
 }
 
 async function storeCallbackFile(config: PortalConfig, documentId: string, callback: CallbackPayload): Promise<CallbackOutcome> {

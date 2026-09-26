@@ -36,8 +36,7 @@ export async function readVerifiedCallback(
   secret: string,
 ): Promise<CallbackPayload | null> {
   const bodyToken = isRecord(body) && typeof body.token === 'string' ? body.token : null;
-  const headerToken = authorization?.startsWith('Bearer ') === true ? authorization.slice('Bearer '.length) : null;
-  const token = bodyToken ?? headerToken;
+  const token = bodyToken ?? bearerToken(authorization);
   if (token === null) {
     return null;
   }
@@ -46,6 +45,10 @@ export async function readVerifiedCallback(
     return null;
   }
   return parseCallbackPayload(isRecord(verified.payload) ? verified.payload : verified);
+}
+
+export function bearerToken(authorization: string | undefined): string | null {
+  return authorization?.startsWith('Bearer ') === true ? authorization.slice('Bearer '.length) : null;
 }
 
 export async function requestForceSave(
