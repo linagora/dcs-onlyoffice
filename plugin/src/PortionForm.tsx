@@ -1,20 +1,29 @@
 import type { JSX } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { LabelView } from './policy.ts';
 
 export interface PortionFormProps {
   labels: LabelView[];
+  insertionRequested: boolean;
   onInsert: (label: LabelView, text: string) => Promise<boolean>;
 }
 
 // Protected text is typed here, never in the document body: text typed in the
 // body has already reached the co-editing server in clear.
-export function PortionForm({ labels, onInsert }: PortionFormProps): JSX.Element {
+export function PortionForm({ labels, insertionRequested, onInsert }: PortionFormProps): JSX.Element {
   const [code, setCode] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const selected = labels.find((label) => label.code === code) ?? null;
+  const textArea = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (insertionRequested) {
+      textArea.current?.scrollIntoView({ block: 'nearest' });
+      textArea.current?.focus();
+    }
+  }, [insertionRequested]);
 
   const submit = async (event: Event): Promise<boolean> => {
     event.preventDefault();
@@ -34,6 +43,11 @@ export function PortionForm({ labels, onInsert }: PortionFormProps): JSX.Element
 
   return (
     <form class="portion-form" onSubmit={submit}>
+      {insertionRequested && (
+        <p class="hint" data-testid="insertion-requested">
+          Pick a label and type the text: the portion goes where the cursor is in the document.
+        </p>
+      )}
       <fieldset>
         <legend>Label</legend>
         {labels.map((label) => (
@@ -55,6 +69,7 @@ export function PortionForm({ labels, onInsert }: PortionFormProps): JSX.Element
       <label class="field">
         <span>Portion text</span>
         <textarea
+          ref={textArea}
           rows={4}
           value={text}
           onInput={(event) => {

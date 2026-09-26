@@ -7,13 +7,28 @@
     {
       "description": "Confidentiality labels of the document and of its protected portions",
       "url": "index.html",
-      "icons": ["resources/icon.svg", "resources/icon.svg"],
+      "icons": [
+        "resources/icon.svg",
+        "resources/icon.svg"
+      ],
       "icons2": [
-        { "style": "light", "*": { "normal": "resources/icon.svg" } },
-        { "style": "dark", "*": { "normal": "resources/icon-dark.svg" } }
+        {
+          "style": "light",
+          "*": {
+            "normal": "resources/icon.svg"
+          }
+        },
+        {
+          "style": "dark",
+          "*": {
+            "normal": "resources/icon-dark.svg"
+          }
+        }
       ],
       "isViewer": true,
-      "EditorsSupport": ["word"],
+      "EditorsSupport": [
+        "word"
+      ],
       "type": "panelRight",
       "isVisual": true,
       "isModal": false,
@@ -26,6 +41,7 @@
         "onDocumentContentReady",
         "onChangeContentControl",
         "onFocusContentControl",
+        "onBlurContentControl",
         "onContextMenuShow",
         "onContextMenuClick",
         "onToolbarMenuClick"
