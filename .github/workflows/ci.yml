@@ -44,7 +44,7 @@ jobs:
         working-directory: deploy
         run: docker compose --profile standalone up -d --build --wait --wait-timeout 600
       - name: Install browsers
-        run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium
+        run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium firefox
       - name: Run end-to-end tests
         run: pnpm e2e
       - name: Collect stack logs
