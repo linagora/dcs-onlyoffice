@@ -24,6 +24,7 @@ import {
   verifyOnlyofficeToken,
 } from './onlyoffice.ts';
 import { renderDocumentListPage, renderEditorPage } from './pages.ts';
+import { registerPolicyRelay } from './policy-relay.ts';
 
 interface DocumentParams {
   id: string;
@@ -81,6 +82,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   });
 
   app.get('/api/me', async (request) => requireSession(request).user);
+  registerPolicyRelay(app, config.policyInternalUrl);
 
   app.post<{ Body: CreateDocumentBody }>('/documents', async (request, reply) => {
     const templateId = request.body.template ?? '';
