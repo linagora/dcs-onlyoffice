@@ -23,6 +23,8 @@ export interface StoredPortion {
 export interface DocumentState {
   portions: StoredPortion[];
   baseLabelCode: string | null;
+  // Code of the document label last written with the ADatP-4778.2 part.
+  documentLabelCode: string | null;
 }
 
 export interface NewPortion {
@@ -136,7 +138,7 @@ export async function insertPortion(portion: NewPortion): Promise<boolean> {
         placeholder: `${label.marking.text} – protected portion`,
         xml: buildPortionPart({ id, version: 1, labelCode: label.code, labelXml, text: portion.text }),
       },
-      replacements: documentLabelReplacements(documentLabel.xml, portion.baseLabelCode),
+      replacements: documentLabelReplacements(documentLabel.xml, portion.baseLabelCode, documentLabel.label.code),
     },
     true,
     (result) => (typeof result === 'string' ? result : null),
@@ -144,11 +146,12 @@ export async function insertPortion(portion: NewPortion): Promise<boolean> {
   return internalId !== null;
 }
 
-export async function applyBaseLabel(policy: string, baseLabelCode: string, portionLabelCodes: string[]): Promise<boolean> {
+// Rewrites the document label from the base label and the portions' labels.
+export async function writeDocumentLabel(policy: string, baseLabelCode: string, portionLabelCodes: string[]): Promise<boolean> {
   const documentLabel = await fetchDocumentLabel(policy, baseLabelCode, portionLabelCodes);
   const done = await runCommand(
     replacePartsCommand,
-    { replacements: documentLabelReplacements(documentLabel.xml, baseLabelCode) },
+    { replacements: documentLabelReplacements(documentLabel.xml, baseLabelCode, documentLabel.label.code) },
     false,
     (result) => (result === true ? true : null),
   );
@@ -164,7 +167,7 @@ export async function readDocumentState(): Promise<DocumentState> {
     parseSnapshot,
   );
   if (snapshot === null) {
-    return { portions: [], baseLabelCode: null };
+    return { portions: [], baseLabelCode: null, documentLabelCode: null };
   }
   const contents = new Map<string, PortionPartContent>();
   for (const xml of snapshot.portionParts) {
@@ -189,16 +192,20 @@ export async function readDocumentState(): Promise<DocumentState> {
       },
     ];
   });
-  const baseLabelCode = snapshot.documentParts.map(parseDocumentPart).find((code) => code !== null) ?? null;
-  return { portions, baseLabelCode };
+  const documentPart = snapshot.documentParts.map(parseDocumentPart).find((part) => part !== null) ?? null;
+  return {
+    portions,
+    baseLabelCode: documentPart?.base ?? null,
+    documentLabelCode: documentPart?.label ?? null,
+  };
 }
 
 // The standard ADatP-4778.2 part holds the document label; the project's own
 // part keeps the base label the author chose.
-function documentLabelReplacements(bindingXml: string, baseLabelCode: string): PartReplacement[] {
+function documentLabelReplacements(bindingXml: string, baseLabelCode: string, documentLabelCode: string): PartReplacement[] {
   return [
     { namespace: BINDING_NAMESPACE, xml: bindingXml },
-    { namespace: DOCUMENT_NAMESPACE, xml: buildDocumentPart(baseLabelCode) },
+    { namespace: DOCUMENT_NAMESPACE, xml: buildDocumentPart(baseLabelCode, documentLabelCode) },
   ];
 }
 
@@ -219,8 +226,8 @@ export function buildPortionPart(portion: {
   );
 }
 
-function buildDocumentPart(baseLabelCode: string): string {
-  return `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeAttribute(baseLabelCode)}"/>`;
+function buildDocumentPart(baseLabelCode: string, documentLabelCode: string): string {
+  return `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeAttribute(baseLabelCode)}" label="${escapeAttribute(documentLabelCode)}"/>`;
 }
 
 export function parsePortionTag(tag: string): PortionTag | null {
@@ -262,12 +269,12 @@ function parsePortionPart(xml: string): PortionPartContent | null {
   return { id, version, labelCode, text: content === undefined ? null : decodeBase64((content.textContent ?? '').trim()) };
 }
 
-function parseDocumentPart(xml: string): string | null {
+function parseDocumentPart(xml: string): { base: string | null; label: string | null } | null {
   const root = parseXml(xml);
   if (root === null || root.namespaceURI !== DOCUMENT_NAMESPACE || root.localName !== 'document') {
     return null;
   }
-  return root.getAttribute('base');
+  return { base: root.getAttribute('base'), label: root.getAttribute('label') };
 }
 
 function parseXml(xml: string): Element | null {

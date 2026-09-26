@@ -6,13 +6,19 @@ import { onEditorEvent, type PluginInfo } from './onlyoffice.ts';
 import { fetchDefaultPolicyLabels, fetchDocumentLabel, type LabelView } from './policy.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList } from './PortionList.tsx';
-import { applyBaseLabel, type DocumentState, insertPortion, readDocumentState } from './portions.ts';
+import { type DocumentState, insertPortion, readDocumentState, writeDocumentLabel } from './portions.ts';
 
 export interface PanelProps {
   pluginReady: Promise<PluginInfo>;
 }
 
 type Loadable<T> = { status: 'loading' } | { status: 'failed'; reason: string } | { status: 'loaded'; value: T };
+
+const REFRESH_INTERVAL_MS = 3_000;
+
+function sameState(left: DocumentState, right: DocumentState): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const identity = useLoadable<Identity | null>(async () => resolveIdentity(await pluginReady), [pluginReady]);
@@ -28,19 +34,31 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
 
   const refresh = useCallback(async (): Promise<DocumentState> => {
     const state = await readDocumentState();
-    setDocumentState(state);
+    // Only a real change re-renders, so that polling stays cheap.
+    setDocumentState((previous) => (previous !== null && sameState(previous, state) ? previous : state));
     return state;
   }, []);
 
   useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
     pluginReady
       .then(async () => {
-        onEditorEvent('onDocumentContentReady', () => {
+        const refreshQuietly = (): void => {
           refresh().catch(() => null);
-        });
+        };
+        onEditorEvent('onDocumentContentReady', refreshQuietly);
+        onEditorEvent('onChangeContentControl', refreshQuietly);
+        // Co-authors' changes to Custom XML parts raise no plugin event, so the
+        // panel also rereads the document regularly.
+        timer = setInterval(refreshQuietly, REFRESH_INTERVAL_MS);
         return refresh();
       })
       .catch(() => null);
+    return () => {
+      if (timer !== null) {
+        clearInterval(timer);
+      }
+    };
   }, [pluginReady, refresh]);
 
   useEffect(() => {
@@ -53,10 +71,16 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       baseLabelCode,
       documentState.portions.map((portion) => portion.labelCode),
     )
-      .then((result) => {
-        if (!cancelled) {
-          setDocumentLabel(result.label);
+      .then(async (result) => {
+        if (cancelled) {
+          return null;
         }
+        setDocumentLabel(result.label);
+        // Two authors inserting at the same moment each write a document label
+        // that misses the other's portion, and the last writer wins. Whoever
+        // notices the stale label rewrites it from the document's content.
+        const stale = documentState.documentLabelCode !== null && documentState.documentLabelCode !== result.label.code;
+        return stale ? writeDocumentLabel(policy, baseLabelCode, documentState.portions.map((portion) => portion.labelCode)) : null;
       })
       .catch(() => {
         if (!cancelled) {
@@ -88,7 +112,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       return false;
     }
     const current = await refresh();
-    const applied = await applyBaseLabel(
+    const applied = await writeDocumentLabel(
       policy,
       code,
       current.portions.map((portion) => portion.labelCode),
