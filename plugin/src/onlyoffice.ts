@@ -60,6 +60,13 @@ export function onEditorEvent(name: string, handler: (payload: unknown) => void)
   return true;
 }
 
+// The plugin SDK keeps a single callback slot for commands: a second command
+// sent before the first answers takes over its slot and receives its result.
+// Commands therefore run one at a time.
+let commandQueue: Promise<unknown> = Promise.resolve();
+
+const COMMAND_TIMEOUT_MS = 30_000;
+
 // The command is serialised with toString() and runs in the editor's sandbox:
 // it may only use `Api` and the JSON data passed as `Asc.scope`. No network
 // call may happen inside it.
@@ -69,6 +76,12 @@ export function runCommand<T>(
   recalculate: boolean,
   parse: (result: unknown) => T | null,
 ): Promise<T | null> {
+  const run = commandQueue.then(() => sendCommand(command, scope, recalculate)).then(parse);
+  commandQueue = run.catch(() => null);
+  return run;
+}
+
+function sendCommand(command: () => unknown, scope: Record<string, unknown>, recalculate: boolean): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const runtime = window.Asc;
     const callCommand = runtime?.plugin?.callCommand;
@@ -76,9 +89,14 @@ export function runCommand<T>(
       reject(new Error('The editor cannot run commands yet'));
       return;
     }
+    // An editor busy with a long action may never answer; the queue moves on.
+    const timer = setTimeout(() => {
+      reject(new Error('The editor did not answer the command'));
+    }, COMMAND_TIMEOUT_MS);
     runtime.scope = scope;
     callCommand.call(runtime.plugin, command, false, recalculate, (result) => {
-      resolve(parse(result));
+      clearTimeout(timer);
+      resolve(result);
     });
   });
 }
