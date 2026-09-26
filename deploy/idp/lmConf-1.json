@@ -52,7 +52,7 @@
       "oidcRPMetaDataOptionsBypassConsent": 1,
       "oidcRPMetaDataOptionsClientID": "dcs-maquette",
       "oidcRPMetaDataOptionsClientSecret": "%SERVERENV:DCS_OIDC_CLIENT_SECRET%",
-      "oidcRPMetaDataOptionsDisplayName": "DCS maquette",
+      "oidcRPMetaDataOptionsDisplayName": "DCS demonstrator",
       "oidcRPMetaDataOptionsIDTokenExpiration": 300,
       "oidcRPMetaDataOptionsIDTokenForceClaims": 1,
       "oidcRPMetaDataOptionsIDTokenSignAlg": "RS256",
