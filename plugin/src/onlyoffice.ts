@@ -68,7 +68,11 @@ export function onEditorEvent(name: string, handler: (payload: unknown) => void)
 
 // The plugin SDK keeps a single callback slot for commands: a second command
 // sent before the first answers takes over its slot and receives its result.
-// Commands therefore run one at a time.
+// Commands therefore run one at a time, and the next one waits for the
+// editor's answer to the previous one even after its caller gave up waiting:
+// a late answer would otherwise land in the next command's slot. An editor
+// that never answers blocks later commands, which then time out; reloading
+// the editor recovers.
 let commandQueue: Promise<unknown> = Promise.resolve();
 
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -82,15 +86,32 @@ export function runCommand<T>(
   recalculate: boolean,
   parse: (result: unknown) => T | null,
 ): Promise<T | null> {
-  const run = async (): Promise<T | null> => {
-    await commandQueue;
-    return parse(await sendCommand(command, scope, recalculate));
-  };
-  const result = run();
+  const previous = commandQueue;
+  const answered = sendAfter(previous, command, scope, recalculate);
   // The caller receives the command's failure; the queue only waits for the
-  // command to be over.
-  commandQueue = result.catch(() => null);
-  return result;
+  // editor to be done with it.
+  commandQueue = answered.catch(() => null);
+  return parseAnswer(previous, answered, parse);
+}
+
+async function sendAfter(
+  previous: Promise<unknown>,
+  command: () => unknown,
+  scope: Record<string, unknown>,
+  recalculate: boolean,
+): Promise<unknown> {
+  await previous;
+  return sendCommand(command, scope, recalculate);
+}
+
+// The time limit starts when the command's turn comes, not while it waits.
+async function parseAnswer<T>(
+  previous: Promise<unknown>,
+  answered: Promise<unknown>,
+  parse: (result: unknown) => T | null,
+): Promise<T | null> {
+  await previous;
+  return parse(await withTimeout(answered, COMMAND_TIMEOUT_MS, 'The editor did not answer the command'));
 }
 
 function sendCommand(command: () => unknown, scope: Record<string, unknown>, recalculate: boolean): Promise<unknown> {
@@ -101,16 +122,28 @@ function sendCommand(command: () => unknown, scope: Record<string, unknown>, rec
       reject(new Error('The editor cannot run commands yet'));
       return;
     }
-    // An editor busy with a long action may never answer; the queue moves on.
-    const timer = setTimeout(() => {
-      reject(new Error('The editor did not answer the command'));
-    }, COMMAND_TIMEOUT_MS);
     runtime.scope = scope;
     callCommand.call(runtime.plugin, command, false, recalculate, (result) => {
-      clearTimeout(timer);
       resolve(result);
     });
   });
+}
+
+async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+  const done = new AbortController();
+  const timeout = new Promise<never>((_resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message));
+    }, milliseconds);
+    done.signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+    });
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    done.abort();
+  }
 }
 
 export function callEditorMethod(name: string, parameters: unknown[]): Promise<unknown> {
