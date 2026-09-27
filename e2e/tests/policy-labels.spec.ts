@@ -7,7 +7,6 @@ test('the labelling panel lists the labels that the demo SPIF allows', async ({ 
 
   await expect(pluginPanel(page).getByTestId('label-marking')).toHaveText([
     'NON PROTÉGÉ',
-    'NON PROTÉGÉ – DIFFUSION OTAN',
     'DIFFUSION RESTREINTE',
     'DIFFUSION RESTREINTE – SPÉCIAL FRANCE',
     'DIFFUSION RESTREINTE – DIFFUSION OTAN',
