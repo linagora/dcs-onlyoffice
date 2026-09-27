@@ -1,3 +1,4 @@
+import { withUnreadableDirectory } from './support/deployment.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
 import { labelOfXml } from './support/docx.ts';
 import { envelopeManifest } from './support/envelopes.ts';
@@ -157,6 +158,23 @@ test('an envelope moved under a lower label shows the label bound to it, with a 
         notice: "The label in clear does not match the label bound to this portion's envelope, shown above.",
       },
     ]);
+});
+
+// OpenTDF answers a decision it could not make apart from a refusal: the
+// panel shows a technical failure, and reads the portion once it can.
+test('a portion whose access cannot be decided shows a technical failure, then reads', async ({ page }) => {
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  const secret = markedText('Fictional undecided paragraph');
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
+  await leaveAndWaitForSave([page], documentId, 1);
+  const panel = pluginPanel(page);
+
+  await withUnreadableDirectory(async () => {
+    await openDocument(page, documentId);
+    await expect(panel.getByTestId('portion-notice')).toHaveText(['Could not decrypt (the key service could not decide whether you may read it).']);
+  });
+  await expect(panel.getByTestId('portion-text')).toHaveText([secret], { timeout: 60_000 });
+  await expect(panel.getByTestId('portion-notice')).toHaveCount(0);
 });
 
 test('a portion that cannot be decrypted says why, and is read once it can be', async ({ page }) => {

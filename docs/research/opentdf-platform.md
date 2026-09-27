@@ -715,6 +715,18 @@ section 3.3. Decode one real access token before finalising the platform config.
 - DPoP is not mentioned in the LL::NG pages consulted, so tokens should not carry `cnf`; keep
   platform DPoP off.
 
+### 8.2 What the KAS answers when it does not hand a key over
+
+Observed on the stack (v0.27.0), in the result of a Rewrap call:
+
+| Case | Error of the key access object's result |
+| --- | --- |
+| The decision refuses the key | `permission_denied: request error … desc = forbidden` |
+| The decision could not be made (entity resolution could not read the clearance directory) | `permission_denied: request error … desc = forbidden: pdp-denied` |
+| The KAS cannot be reached | an HTTP 500, which the web SDK reports as a service error |
+
+The web SDK 0.21 turns both `permission_denied` answers into one `PermissionDeniedError` with a fixed message, so the plugin reads the result itself. The platform's `accessPdp.go` names `pdp-denied` among its stable strings, and also uses it for evaluation errors it does not classify.
+
 ## 9. Complete minimal configuration file (step 1)
 
 Placeholders: `<ISSUER_URL>`, `<AUDIENCE>`, `<DB_PASSWORD>`, `<BROWSER_APP_ORIGIN>`,
