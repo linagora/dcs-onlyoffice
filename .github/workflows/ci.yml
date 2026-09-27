@@ -48,7 +48,7 @@ jobs:
         run: |
           set -o pipefail
           docker compose run --rm --no-deps opentdf-provisioning | tee /dev/stderr \
-            | jq -es 'map(select(.msg == "Policy provisioned")) | length > 0 and all(.[]; [.changes[]] | add == 0)'
+            | jq -es 'map(select(.changes)) | any(.msg == "KAS key provisioned") and any(.msg == "Policy provisioned") and all([.changes[]] | add == 0)'
       - name: Install browsers
         run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium firefox
       - name: Run end-to-end tests

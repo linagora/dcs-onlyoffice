@@ -36,7 +36,31 @@ export interface NewSubjectMapping {
   claimValue: string;
 }
 
+export interface PlatformKasKey {
+  keyId: string;
+  // The registry's name of the algorithm, such as ALGORITHM_HPQT_SECP384R1_MLKEM1024.
+  algorithm: string;
+  // The private key, wrapped with the KAS's root key.
+  wrappedPrivateKey: string | null;
+}
+
+export interface NewKasKey {
+  kasId: string;
+  keyId: string;
+  algorithm: string;
+  publicPem: string;
+  wrappedPrivateKey: string;
+}
+
+// The key new envelopes wrap their key for, and the KAS that holds it.
+export interface PlatformBaseKey {
+  kasUri: string;
+  keyId: string;
+}
+
 const RULE_PREFIX = 'ATTRIBUTE_RULE_TYPE_ENUM_';
+// The KAS unwraps with the root key of its configuration, whatever this id.
+const ROOT_KEY_ID = 'root';
 const IN_OPERATOR = 'SUBJECT_MAPPING_OPERATOR_ENUM_IN';
 
 // OpenTDF's policy API, called as Connect unary calls in JSON with the
@@ -108,6 +132,50 @@ export class OpentdfPlatform {
 
   async deleteSubjectMapping(id: string): Promise<void> {
     await this.#call('policy.subjectmapping.SubjectMappingService/DeleteSubjectMapping', { id });
+  }
+
+  // The id the key registry gives the KAS at this address, if it holds it.
+  async kasId(uri: string): Promise<string | null> {
+    const servers = await this.#listAll('policy.kasregistry.KeyAccessServerRegistryService/ListKeyAccessServers', {}, 'keyAccessServers');
+    const found = servers.find((server) => text(field(server, 'uri')) === uri);
+    return found === undefined ? null : requiredText(found, 'id');
+  }
+
+  async registerKas(uri: string): Promise<string> {
+    const answer = await this.#call('policy.kasregistry.KeyAccessServerRegistryService/CreateKeyAccessServer', { uri });
+    return requiredText(field(answer, 'keyAccessServer'), 'id');
+  }
+
+  async kasKey(kasId: string, keyId: string): Promise<PlatformKasKey | null> {
+    const kasKeys = await this.#listAll('policy.kasregistry.KeyAccessServerRegistryService/ListKeys', { kasId }, 'kasKeys');
+    const found = kasKeys.map((kasKey) => field(kasKey, 'key')).find((key) => text(field(key, 'keyId')) === keyId);
+    return found === undefined
+      ? null
+      : { keyId, algorithm: requiredText(found, 'keyAlgorithm'), wrappedPrivateKey: text(field(field(found, 'privateKeyCtx'), 'wrappedKey')) };
+  }
+
+  // A key whose private half the KAS unwraps with its root key.
+  async createRootKeyWrappedKey(key: NewKasKey): Promise<void> {
+    await this.#call('policy.kasregistry.KeyAccessServerRegistryService/CreateKey', {
+      kasId: key.kasId,
+      keyId: key.keyId,
+      keyAlgorithm: key.algorithm,
+      keyMode: 'KEY_MODE_CONFIG_ROOT_KEY',
+      publicKeyCtx: { pem: Buffer.from(key.publicPem).toString('base64') },
+      privateKeyCtx: { keyId: ROOT_KEY_ID, wrappedKey: key.wrappedPrivateKey },
+    });
+  }
+
+  async baseKey(): Promise<PlatformBaseKey | null> {
+    const answer = await this.#call('policy.kasregistry.KeyAccessServerRegistryService/GetBaseKey', {});
+    const baseKey = field(answer, 'baseKey');
+    const kasUri = text(field(baseKey, 'kasUri'));
+    const keyId = text(field(field(baseKey, 'publicKey'), 'kid'));
+    return kasUri === null || keyId === null ? null : { kasUri, keyId };
+  }
+
+  async setBaseKey(kasId: string, keyId: string): Promise<void> {
+    await this.#call('policy.kasregistry.KeyAccessServerRegistryService/SetBaseKey', { key: { kasId, kid: keyId } });
   }
 
   // Follows the pages of a list call.

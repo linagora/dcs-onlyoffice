@@ -29,7 +29,8 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], launchOptions: { args: [hostResolverRules] } },
     },
     {
-      // Browser-specific behaviours only (iframe origin, cookies).
+      // Browser-specific behaviours only (iframe origin, cookies, the WebCrypto
+      // that the hybrid key wrapping relies on).
       name: 'firefox',
       grep: /@cross-browser/,
       use: {

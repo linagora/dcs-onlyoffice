@@ -8,8 +8,16 @@ export interface EnvelopeAssertion {
   statement: string | null;
 }
 
+// Where the envelope's key is, and how it is wrapped.
+export interface KeyAccessObject {
+  type: string | null;
+  url: string | null;
+  // The KAS key the envelope's key is wrapped for.
+  kid: string | null;
+}
+
 export interface EnvelopeManifest {
-  keyAccessUrls: string[];
+  keyAccess: KeyAccessObject[];
   // The FQNs of the attribute values the envelope's policy names.
   dataAttributes: string[];
   assertions: EnvelopeAssertion[];
@@ -23,12 +31,15 @@ export async function envelopeManifest(part: PortionPart): Promise<EnvelopeManif
     throw new Error('The envelope holds no manifest');
   }
   const information = field(manifest, 'encryptionInformation');
-  const keyAccess = arrayField(information, 'keyAccess');
   // The envelope's own access policy, base64-encoded JSON.
   const encodedZtdfPolicy = stringField(information, 'policy');
   const ztdfPolicy: unknown = encodedZtdfPolicy === null ? null : JSON.parse(Buffer.from(encodedZtdfPolicy, 'base64').toString('utf8'));
   return {
-    keyAccessUrls: stringsOf(keyAccess, 'url'),
+    keyAccess: arrayField(information, 'keyAccess').map((keyAccess) => ({
+      type: stringField(keyAccess, 'type'),
+      url: stringField(keyAccess, 'url'),
+      kid: stringField(keyAccess, 'kid'),
+    })),
     dataAttributes: stringsOf(arrayField(field(ztdfPolicy, 'body'), 'dataAttributes'), 'attribute'),
     assertions: arrayField(manifest, 'assertions').map((assertion) => ({
       type: stringField(assertion, 'type'),

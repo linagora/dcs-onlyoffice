@@ -1,5 +1,8 @@
 name: dcs
 
+# The KAS address, in the platform's key registry and in every new envelope.
+x-kas-uri: &kas-uri https://tdf.${DOMAIN}/kas
+
 services:
   onlyoffice:
     image: onlyoffice/documentserver:9.4.0.1
@@ -124,6 +127,10 @@ services:
       # OpenTDF makes this client an administrator (deploy/opentdf/opentdf.yaml).
       PROVISIONER_CLIENT_ID: dcs-provisioner
       PROVISIONER_CLIENT_SECRET: ${OPENTDF_PROVISIONER_CLIENT_SECRET:?set OPENTDF_PROVISIONER_CLIENT_SECRET in .env}
+      # The address the plugin allows, which new envelopes name for their key.
+      KAS_URI: *kas-uri
+      # Wraps the private half of the hybrid key the job creates.
+      KAS_ROOT_KEY: ${OPENTDF_KAS_ROOT_KEY:?set OPENTDF_KAS_ROOT_KEY in .env}
       NODE_EXTRA_CA_CERTS: /pki/public/ca.crt
     volumes:
       - pki-public:/pki/public:ro
@@ -145,7 +152,6 @@ services:
       - documents:/data/documents
       - pki-public:/pki/public
       - pki-private:/pki/private
-      - opentdf-keys:/opentdf/keys
 
   # Roles and schema of the clearance directory, which the policy service owns
   # and OpenTDF's entity resolution reads.
@@ -187,6 +193,8 @@ services:
     environment:
       OPENTDF_DB_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
       OPENTDF_SERVICES_ENTITYRESOLUTION_PROVIDERS_DIRECTORY_CONNECTION_PASSWORD: ${DIRECTORY_READER_PASSWORD:?set DIRECTORY_READER_PASSWORD in .env}
+      OPENTDF_SERVICES_KAS_ROOT_KEY: ${OPENTDF_KAS_ROOT_KEY:?set OPENTDF_KAS_ROOT_KEY in .env}
+      OPENTDF_SERVICES_KAS_REGISTERED_KAS_URI: *kas-uri
       OPENTDF_SERVER_AUTH_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
       OPENTDF_SERVER_AUTH_AUDIENCE: ${OIDC_AUDIENCE:-https://tdf.${DOMAIN}}
       OPENTDF_SERVER_CORS_ALLOWEDORIGINS: https://portail.${DOMAIN}
@@ -194,7 +202,6 @@ services:
       SSL_CERT_DIR: /etc/opentdf/ca
     volumes:
       - ./opentdf/opentdf.yaml:/etc/opentdf/opentdf.yaml:ro
-      - opentdf-keys:/etc/opentdf/keys:ro
       - pki-public:/etc/opentdf/ca:ro
     depends_on:
       init:
@@ -287,5 +294,4 @@ volumes:
   pki-public:
   pki-private:
   idp-conf:
-  opentdf-keys:
   postgres-data:
