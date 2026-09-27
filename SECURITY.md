@@ -31,6 +31,7 @@ These are known properties of the demonstrator, not vulnerabilities:
 - Portions encrypted before the hybrid key, whose key a static RSA key of earlier versions wrapped, can no longer be read: the KAS no longer holds that key.
 - The KAS's private keys are wrapped with a root key kept in `deploy/.env`, not in a hardware security module.
 - The plugin runs a build of the OpenTDF web SDK from a fork, which adds hybrid key wrapping until a release of the SDK includes it; [`plugin/vendor/README.md`](plugin/vendor/README.md) gives its commit and how to rebuild it.
+- Anyone able to edit a document can change a portion's label in clear, which the document label, the placeholder in the body and refused readers rely on. Only readers who open the envelope see the label bound to it, with a warning; someone who holds the envelope's key could even replace that bound label, until the signed ADatP-4778 binding planned for iteration 4.
 - OpenTDF answers a decision it could not make, for instance when the clearance directory cannot be read, the same way as a refusal: the panel shows both as "Access denied" until it is reopened.
 - The `standalone` profile is for development and isolated demos: it uses a local certificate authority, fictional accounts whose password is their login, and it allows the OAuth password grant for the tests.
 - Portal sessions live in memory, and ONLYOFFICE Docs Community Edition keeps editing sessions in memory: a restart signs users out and closes open sessions.

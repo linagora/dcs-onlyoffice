@@ -165,7 +165,7 @@ export function usePortionReadings(portions: StoredPortion[], reader: PortionRea
         return;
       }
       setReadings((previous) => new Map(previous).set(portion.id, reading));
-      if (reading.status === 'failed' && reading.retry && retry === null) {
+      if (needsRetry(reading) && retry === null) {
         retry = setTimeout(() => {
           setAttempt((count) => count + 1);
         }, RETRY_INTERVAL_MS);
@@ -225,4 +225,12 @@ function portionIdOf(control: unknown): string | null {
 
 function sameState(left: DocumentState, right: DocumentState): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+// A failure worth retrying, or a label the policy service could not read yet.
+function needsRetry(reading: PortionReading): boolean {
+  if (reading.status === 'opened') {
+    return reading.boundLabel.status === 'unchecked' || reading.partLabel.status === 'unchecked';
+  }
+  return reading.status === 'failed' && reading.retry;
 }

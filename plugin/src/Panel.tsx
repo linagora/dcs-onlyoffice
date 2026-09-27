@@ -7,7 +7,7 @@ import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import { callEditorMethod, type PluginInfo } from './onlyoffice.ts';
-import { type DocumentLabelRequest, fetchAllowedLabels, fetchDefaultPolicyLabels, type LabelView } from './policy.ts';
+import { type DocumentLabelRequest, fetchAllowedLabels, fetchDefaultPolicyLabels, fetchLabelOfAdatp4774, type LabelView } from './policy.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList } from './PortionList.tsx';
 import { type InsertionResult, insertPortion, type StoredPortion, writeDocumentLabel } from './portions.ts';
@@ -31,7 +31,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     () =>
       envelopes.status === 'loading'
         ? null
-        : new PortionReader(envelopes.status === 'loaded' ? envelopes.value : unavailableOpener(envelopes.reason)),
+        : new PortionReader(envelopes.status === 'loaded' ? envelopes.value : unavailableOpener(envelopes.reason), fetchLabelOfAdatp4774),
     [envelopes],
   );
   const { state: documentState, activePortionId, rereadProblem, refresh } = useDocumentState(pluginReady);

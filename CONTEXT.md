@@ -33,7 +33,11 @@ A part of a document whose text is typed in the labelling panel, never in the do
 _Avoid_: secret paragraph, encrypted block
 
 **Portion label**:
-The label of one protected portion.
+The label of one protected portion. The file holds it in clear, for everyone and for other labelling tools, and bound in the portion's envelope.
+
+**Bound label**:
+The portion label as the envelope carries it, bound to the envelope. For a reader who can open the envelope, it prevails over the label in clear, which anyone able to edit the file could change.
+_Avoid_: assertion label, inner label
 
 **Base label**:
 The label an author gives to the document's unprotected content.

@@ -22,7 +22,10 @@ export function PortionList({ portions, readings, labels, activePortionId, onSel
       ) : (
         <ul class="portion-list">
           {portions.map((portion) => {
-            const label = labels.find((candidate) => candidate.code === portion.labelCode) ?? null;
+            const clearLabel = labels.find((candidate) => candidate.code === portion.labelCode) ?? null;
+            const reading = readings.get(portion.id) ?? null;
+            const check = labelCheck(portion, clearLabel, reading);
+            const label = check.shown;
             return (
               <li
                 key={portion.id}
@@ -42,7 +45,7 @@ export function PortionList({ portions, readings, labels, activePortionId, onSel
                     <span class="label-swatch" style={{ backgroundColor: label?.marking.color ?? 'transparent' }} />
                     <span data-testid="portion-marking">{label?.marking.text ?? portion.labelCode}</span>
                   </span>
-                  <PortionBody reading={readings.get(portion.id) ?? null} />
+                  <PortionBody reading={reading} labelWarning={check.warning} />
                 </button>
               </li>
             );
@@ -53,13 +56,39 @@ export function PortionList({ portions, readings, labels, activePortionId, onSel
   );
 }
 
-function PortionBody({ reading }: { reading: PortionReading | null }): JSX.Element {
+interface LabelCheck {
+  // The label whose marking the portion shows.
+  shown: LabelView | null;
+  warning: string | null;
+}
+
+// For a reader who opened the envelope, the label bound to it prevails over
+// the label in clear, in the tag and in the part, which a co-author could have
+// changed. Labels not read yet are checked at a later reading.
+function labelCheck(portion: StoredPortion, clearLabel: LabelView | null, reading: PortionReading | null): LabelCheck {
+  if (reading?.status !== 'opened' || reading.boundLabel.status === 'unchecked' || reading.partLabel.status === 'unchecked') {
+    return { shown: clearLabel, warning: null };
+  }
+  if (reading.boundLabel.status === 'invalid') {
+    return { shown: clearLabel, warning: messages.boundLabelUnreadable };
+  }
+  const bound = reading.boundLabel.label;
+  const clearCodes = [portion.labelCode, portion.partLabelCode, reading.partLabel.status === 'read' ? reading.partLabel.label.code : null];
+  return clearCodes.every((code) => code === bound.code) ? { shown: clearLabel, warning: null } : { shown: bound, warning: messages.labelMismatch };
+}
+
+function PortionBody({ reading, labelWarning }: { reading: PortionReading | null; labelWarning: string | null }): JSX.Element {
   if (reading === null) {
     return <Notice>{messages.decrypting}</Notice>;
   }
   switch (reading.status) {
     case 'opened':
-      return <PortionText text={reading.text} />;
+      return (
+        <>
+          {labelWarning === null ? null : <Notice warning>{labelWarning}</Notice>}
+          <PortionText text={reading.text} />
+        </>
+      );
     case 'denied':
       return <Notice>{messages.accessDenied}</Notice>;
     case 'failed':

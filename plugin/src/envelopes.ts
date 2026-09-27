@@ -15,8 +15,13 @@ import { withTimeout } from './time.ts';
 type Interceptor = NonNullable<OpenTDFOptions['interceptors']>[number];
 type AssertionConfig = NonNullable<CreateTDFOptions['assertionConfigs']>[number];
 
-// A failure worth retrying (an unreachable service) or not (a damaged envelope).
-export type OpenedEnvelope = { status: 'opened'; text: string } | { status: 'denied' } | { status: 'failed'; reason: string; retry: boolean };
+// An opened envelope gives the text and the ADatP-4774 XML of the label bound
+// to it, which the SDK has verified. A failure is worth retrying (an
+// unreachable service) or not (a damaged envelope).
+export type OpenedEnvelope =
+  | { status: 'opened'; text: string; boundLabelXml: string | null }
+  | { status: 'denied' }
+  | { status: 'failed'; reason: string; retry: boolean };
 
 export type SealedEnvelope = { status: 'sealed'; envelope: Uint8Array } | { status: 'failed'; reason: string };
 
@@ -33,6 +38,7 @@ export interface EnvelopeOpener {
 }
 
 const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
+const LABEL_ASSERTION_ID = 'portion-label';
 
 // A key request that never answers must not hold a portion forever.
 const OPEN_TIMEOUT_MS = 30_000;
@@ -62,7 +68,7 @@ export class EnvelopeClient implements EnvelopeOpener {
       return { status: 'failed', reason: 'the label gives no attribute value to restrict its readers' };
     }
     const assertion: AssertionConfig = {
-      id: 'portion-label',
+      id: LABEL_ASSERTION_ID,
       type: 'handling',
       scope: 'tdo',
       appliesToState: 'unencrypted',
@@ -93,9 +99,14 @@ export class EnvelopeClient implements EnvelopeOpener {
     }
   }
 
+  // The SDK checks every assertion's binding while it decrypts, so the bound
+  // label cannot have been changed without the envelope's key.
   async #read(envelope: Uint8Array): Promise<OpenedEnvelope> {
     const stream = await this.#client.read({ source: { type: 'buffer', location: envelope }, allowedKASEndpoints: [this.#kasUrl] });
-    return { status: 'opened', text: await new Response(stream).text() };
+    const text = await new Response(stream).text();
+    const assertions = (await stream.manifest)?.assertions ?? [];
+    const label = assertions.find((assertion) => assertion.id === LABEL_ASSERTION_ID && assertion.statement.schema === LABEL_NAMESPACE);
+    return { status: 'opened', text, boundLabelXml: label?.statement.value ?? null };
   }
 }
 
