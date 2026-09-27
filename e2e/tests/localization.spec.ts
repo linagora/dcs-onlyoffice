@@ -1,5 +1,6 @@
 import { openNewDocument, waitForEditorReady } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx } from './support/portions.ts';
 
@@ -30,7 +31,7 @@ test('with the editor in French, the panel, the Insert tab button and new portio
   );
 
   await panel.getByRole('radio', { name: SPECIAL_FRANCE, exact: true }).check();
-  await panel.getByRole('textbox', { name: 'Texte de la portion' }).fill(`Fictional French portion ${Date.now()}`);
+  await panel.getByRole('textbox', { name: 'Texte de la portion' }).fill(markedText('Fictional French portion'));
   await panel.getByRole('button', { name: 'Insérer la portion protégée' }).click();
   await expect(panel.getByTestId('portion-item')).toHaveCount(1);
 

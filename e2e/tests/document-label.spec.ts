@@ -1,5 +1,6 @@
 import { openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, insertPortion } from './support/portions.ts';
 
@@ -15,7 +16,7 @@ test('the document label follows its base label and portions, and is stored per 
   await panel.getByLabel('Base label').selectOption({ label: RELEASABLE_TO_NATO });
   await expect(panel.getByTestId('document-label-marking')).toHaveText(RELEASABLE_TO_NATO);
 
-  await insertPortion(page, { marking: SPECIAL_FRANCE, text: `Fictional French-only paragraph ${Date.now()}` });
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional French-only paragraph') });
   await expect(panel.getByTestId('document-label-marking')).toHaveText(
     `${RELEASABLE_TO_NATO} – CONTIENT DES PORTIONS PLUS RESTRICTIVES`,
   );

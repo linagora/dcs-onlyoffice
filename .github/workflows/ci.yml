@@ -53,6 +53,9 @@ jobs:
         run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium firefox
       - name: Run end-to-end tests
         run: pnpm e2e
+      - name: Search the Document Server's working files for portion texts
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @dcs/e2e search-document-server
       - name: Collect stack logs
         if: failure()
         working-directory: deploy

@@ -25,6 +25,7 @@ Check your work with:
 pnpm typecheck    # every package
 pnpm test         # policy service API tests, no stack needed
 pnpm e2e          # end-to-end tests against the running stack
+pnpm --filter @dcs/e2e search-document-server   # then: no portion text among ONLYOFFICE's working files
 ```
 
 The portal and the policy service run their TypeScript sources directly with Node.js type stripping, so after a change to them, rebuild their images: `docker compose up -d --build`.
@@ -45,7 +46,7 @@ TypeScript is strict. Node.js strips types without transforming code, so only er
 - `async`/`await` rather than promise chains, and a fire-and-forget promise gets a `.catch()` that reports the failure;
 - comments explain why, not what.
 
-Tests check behaviour through two public seams: the policy service's HTTP API, in process with `node:test`, and the whole stack through the browser with Playwright. Internals are not tested directly. Expected values come from the standards, the SPIF or a reference implementation, never recomputed the way the code computes them.
+Tests check behaviour through two public seams: the policy service's HTTP API, in process with `node:test`, and the whole stack through the browser with Playwright. Internals are not tested directly. One check looks further, because keeping portion texts out of ONLYOFFICE is what the project guarantees first: every portion text a test writes carries a marker (`e2e/tests/support/marker.ts`), and after the end-to-end suite a script searches the Document Server's working files for it. Expected values come from the standards, the SPIF or a reference implementation, never recomputed the way the code computes them.
 
 ## Commits
 
@@ -67,7 +68,7 @@ Tests check behaviour through two public seams: the policy service's HTTP API, i
 - Branch from `main`: `feat/…`, `fix/…` or `chore/…`.
 - Keep one concern per pull request. Its title is lowercase and under 70 characters, for example `feat: insert portions from the context menu`.
 - The description has a single `## Summary` section with short bullets about what the diff changes.
-- Run the checks above before asking for a review. The CI runs the type checks, the API tests and the end-to-end tests on Chromium and Firefox; it must pass.
+- Run the checks above before asking for a review. The CI runs the type checks, the API tests and the end-to-end tests on Chromium and Firefox, then searches the Document Server's working files for portion texts; it must pass.
 - GitHub Copilot reviews every pull request automatically. Address its comments or answer them.
 - A maintainer reviews the pull request and merges it with a merge commit, which keeps the history of its commits.
 

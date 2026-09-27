@@ -1,5 +1,6 @@
 import { editorPageConfig, openNewDocument, waitForEditorReady } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { insertPortion, leaveAndWaitForSave } from './support/portions.ts';
 
@@ -9,7 +10,7 @@ const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 // read portion blocks and Custom XML parts.
 test('a document opened read-only shows its portions in the panel', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  const secret = `Fictional read-only paragraph ${Date.now()}`;
+  const secret = markedText('Fictional read-only paragraph');
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
   await leaveAndWaitForSave([page], documentId, 1);
 

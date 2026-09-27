@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { insertPortion, leaveAndWaitForSave, shownPortions } from './support/portions.ts';
 
@@ -31,7 +32,7 @@ test('a portion is read only by the people whose clearance allows its label, as 
   for (const reader of [bob, chloe]) {
     await openDocument(reader, documentId);
   }
-  const secret = `Fictional French-eyes-only paragraph ${Date.now()}`;
+  const secret = markedText('Fictional French-eyes-only paragraph');
 
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
 
@@ -45,7 +46,7 @@ test('a portion is read only by the people whose clearance allows its label, as 
 
   // A second portion makes the panels read the document again; the refusal
   // is kept rather than asked again.
-  const unprotected = `Fictional public paragraph ${Date.now()}`;
+  const unprotected = markedText('Fictional public paragraph');
   await insertPortion(page, { marking: NON_PROTEGE, text: unprotected });
   const readable = [...refused, { marking: NON_PROTEGE, text: unprotected, notice: null }];
   for (const reader of [bob, chloe]) {
@@ -66,7 +67,7 @@ test('someone without a clearance is refused every protected portion', async ({ 
   const dan = await signedInPage(browser, DEMO_ACCOUNTS.dan);
   await openDocument(dan, documentId);
 
-  await insertPortion(page, { marking: NON_PROTEGE, text: `Fictional public paragraph ${Date.now()}` });
+  await insertPortion(page, { marking: NON_PROTEGE, text: markedText('Fictional public paragraph') });
 
   await expect.poll(() => shownPortions(dan)).toEqual([{ marking: NON_PROTEGE, text: null, notice: 'Access denied' }]);
   await dan.context().close();
