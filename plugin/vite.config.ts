@@ -10,5 +10,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rolldownOptions: {
+      // The panel, and the page of the window it opens at the cursor.
+      input: { index: 'index.html', bubble: 'bubble.html' },
+    },
   },
 });

@@ -1,8 +1,9 @@
 import type { JSX } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
+import type { BubbleContent } from './bubble-channel.ts';
 import { DocumentLabel } from './DocumentLabel.tsx';
 import { type EnvelopeClient, envelopeClientFor, unavailableOpener } from './envelopes.ts';
-import { useDocumentLabel, useDocumentState, useInsertionEntryPoints, useLoadable, usePortionReadings } from './hooks.ts';
+import { useDocumentLabel, useDocumentState, useInsertionEntryPoints, useLoadable, usePortionBubble, usePortionReadings } from './hooks.ts';
 import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
@@ -17,9 +18,9 @@ import {
 } from './policy.ts';
 import { documentIdOf, reportBaseLabelChange } from './portal.ts';
 import { PortionForm } from './PortionForm.tsx';
-import { PortionList } from './PortionList.tsx';
+import { PortionList, shownLabelOf } from './PortionList.tsx';
 import { type InsertionResult, insertPortion, type StoredPortion, writeDocumentLabel } from './portions.ts';
-import { PortionReader } from './readings.ts';
+import { type PortionReading, PortionReader } from './readings.ts';
 
 // One empty list, so that the portions' readings do not restart on every render.
 const NO_PORTIONS: StoredPortion[] = [];
@@ -68,6 +69,9 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       : labelList.filter((label) => label.code === baseLabelCode);
   const portions = documentState?.portions ?? NO_PORTIONS;
   const readings = usePortionReadings(portions, reader);
+
+  const activePortion = portions.find((portion) => portion.id === activePortionId) ?? null;
+  usePortionBubble(pluginReady, activePortion === null ? null : bubbleContentOf(activePortion, readings.get(activePortion.id) ?? null, labelList));
 
   const labelRequest = useMemo(
     (): DocumentLabelRequest | null =>
@@ -182,4 +186,19 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       <PortionList portions={portions} readings={readings} labels={labelList} activePortionId={activePortionId} onSelect={selectPortion} />
     </main>
   );
+}
+
+// What the bubble shows of the portion that holds the cursor: only a text its
+// reader has, with the marking and the warning the panel shows next to it.
+function bubbleContentOf(portion: StoredPortion, reading: PortionReading | null, labels: LabelView[]): BubbleContent | null {
+  const text = reading?.status === 'opened' || reading?.status === 'unencrypted' ? reading.text : null;
+  if (reading === null || text === null) {
+    return null;
+  }
+  const shown = shownLabelOf(portion, reading, labels);
+  return {
+    marking: shown.shown?.marking ?? { text: portion.labelCode, color: null },
+    text,
+    warning: reading.status === 'unencrypted' ? messages.notEncrypted : shown.warning,
+  };
 }

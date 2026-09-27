@@ -22,9 +22,8 @@ export function PortionList({ portions, readings, labels, activePortionId, onSel
       ) : (
         <ul class="portion-list">
           {portions.map((portion) => {
-            const clearLabel = labels.find((candidate) => candidate.code === portion.labelCode) ?? null;
             const reading = readings.get(portion.id) ?? null;
-            const check = labelCheck(portion, clearLabel, reading);
+            const check = shownLabelOf(portion, reading, labels);
             const label = check.shown;
             return (
               <li
@@ -56,10 +55,17 @@ export function PortionList({ portions, readings, labels, activePortionId, onSel
   );
 }
 
-interface LabelCheck {
+export interface LabelCheck {
   // The label whose marking the portion shows.
   shown: LabelView | null;
   warning: string | null;
+}
+
+// The label whose marking a portion shows, next to it in the panel and in the
+// bubble at the cursor, and the warning that goes with it.
+export function shownLabelOf(portion: StoredPortion, reading: PortionReading | null, labels: LabelView[]): LabelCheck {
+  const clearLabel = labels.find((candidate) => candidate.code === portion.labelCode) ?? null;
+  return labelCheck(portion, clearLabel, reading);
 }
 
 // For a reader who opened the envelope, the label bound to it prevails over

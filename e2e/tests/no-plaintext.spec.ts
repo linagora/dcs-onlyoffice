@@ -3,7 +3,7 @@ import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { browserFetch, openDocument, openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { canaryText, markedText, PORTION_MARKER } from './support/marker.ts';
-import { insertUnencryptedPortion, labelXmlOf, pluginFrame } from './support/plugin.ts';
+import { bubble, insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, insertPortion, shownPortions } from './support/portions.ts';
 import { tracesIn } from './support/traces.ts';
 
@@ -24,6 +24,31 @@ function recordEditorFrames(page: Page): Buffer[] {
   return frames;
 }
 
+// Every message the editor's page receives from now on, the plugin's
+// included: the page that runs ONLYOFFICE's code, on the Document Server's
+// origin.
+async function recordEditorMessages(page: Page): Promise<() => Promise<string[]>> {
+  await page.addInitScript(() => {
+    if (window.name !== 'frameEditor') {
+      return;
+    }
+    const received: string[] = [];
+    Object.assign(window, { dcsReceivedMessages: received });
+    window.addEventListener(
+      'message',
+      (event) => {
+        received.push(typeof event.data === 'string' ? event.data : JSON.stringify(event.data));
+      },
+      true,
+    );
+  });
+  return async () => {
+    const frame = page.frames().find((candidate) => candidate.name() === 'frameEditor');
+    const received: unknown = await frame?.evaluate(() => Reflect.get(window, 'dcsReceivedMessages'));
+    return Array.isArray(received) ? received.map(String) : [];
+  };
+}
+
 // The iteration's exit criterion: the Document Server never sees a portion's
 // text. The CI also searches its working files once the suite is over. An
 // unencrypted portion, written as before encryption, sends its canary text
@@ -32,6 +57,7 @@ function recordEditorFrames(page: Page): Buffer[] {
 // which only the saved file shows.
 test('no portion text reaches the Document Server, in the co-editing exchanges or the saved file', async ({ page, browser }) => {
   const aliceFrames = recordEditorFrames(page);
+  const readAliceMessages = await recordEditorMessages(page);
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
   const bobFrames = recordEditorFrames(bob);
@@ -53,6 +79,10 @@ test('no portion text reaches the Document Server, in the co-editing exchanges o
   await expect
     .poll(async () => (await shownPortions(bob)).map((portion) => portion.text))
     .toEqual([bobText, null, canary]);
+  // Nor does the window that shows the portion holding the cursor send its
+  // text through the editor's page.
+  await pluginPanel(page).getByTestId('portion-item').filter({ hasText: aliceText }).getByRole('button').click();
+  await expect(bubble(page).getByTestId('bubble-text')).toHaveText(aliceText);
   await forceSavedDocx(page, documentId, (saved) => saved.portionParts.length === 3);
   const saved = await browserFetch(page, `/documents/${documentId}/download`);
   await bob.context().close();
@@ -64,5 +94,12 @@ test('no portion text reaches the Document Server, in the co-editing exchanges o
   expect(await tracesIn(saved.body, 'saved DOCX', [canary])).not.toEqual([]);
   const secrets = [aliceText, bobText, PORTION_MARKER];
   expect(await framesHolding(secrets)).toEqual([]);
+  const messages = await readAliceMessages();
+  // The recording saw the panel ask the editor's page to open the bubble.
+  expect(messages.filter((message) => message.includes('ShowWindow'))).not.toEqual([]);
+  const messagesHolding = (
+    await Promise.all(messages.map((message, index) => tracesIn(Buffer.from(message, 'utf8'), `message ${index}`, secrets)))
+  ).flat();
+  expect(messagesHolding).toEqual([]);
   expect(await tracesIn(saved.body, 'saved DOCX', secrets)).toEqual([]);
 });
