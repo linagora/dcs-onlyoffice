@@ -34,6 +34,8 @@ const REFRESH_INTERVAL_MS = 3_000;
 export interface DocumentStateView {
   state: DocumentState | null;
   activePortionId: string | null;
+  // Why the last background reread failed, until a reread succeeds.
+  rereadProblem: string | null;
   // Rereads the document at once and returns what it holds.
   refresh: () => Promise<DocumentState>;
 }
@@ -43,11 +45,13 @@ export interface DocumentStateView {
 export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStateView {
   const [state, setState] = useState<DocumentState | null>(null);
   const [activePortionId, setActivePortionId] = useState<string | null>(null);
+  const [rereadProblem, setRereadProblem] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<DocumentState> => {
     const current = await readDocumentState();
     // Only a real change re-renders, so that polling stays cheap.
     setState((previous) => (previous !== null && sameState(previous, current) ? previous : current));
+    setRereadProblem(null);
     return current;
   }, []);
 
@@ -57,6 +61,9 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
     const refreshInBackground = (): void => {
       refresh().catch((error: unknown) => {
         logProblem('Rereading the document', error);
+        if (!cancelled) {
+          setRereadProblem(describeError(error));
+        }
       });
     };
     const start = async (): Promise<void> => {
@@ -84,6 +91,9 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
     };
     start().catch((error: unknown) => {
       logProblem('Reading the document', error);
+      if (!cancelled) {
+        setRereadProblem(describeError(error));
+      }
     });
     return () => {
       cancelled = true;
@@ -93,7 +103,7 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
     };
   }, [pluginReady, refresh]);
 
-  return { state, activePortionId, refresh };
+  return { state, activePortionId, rereadProblem, refresh };
 }
 
 // The document label computed from the document's content. Two authors

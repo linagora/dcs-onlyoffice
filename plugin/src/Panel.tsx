@@ -20,7 +20,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // Until the editor says otherwise, nothing that writes is offered.
   const readOnly = viewMode.status !== 'loaded' || viewMode.value;
   const labels = useLoadable<LabelView[]>(fetchDefaultPolicyLabels, []);
-  const { state: documentState, activePortionId, refresh } = useDocumentState(pluginReady);
+  const { state: documentState, activePortionId, rereadProblem, refresh } = useDocumentState(pluginReady);
   const [insertionRequested, setInsertionRequested] = useState(false);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
@@ -99,6 +99,11 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
           </>
         )}
       </section>
+      {rereadProblem !== null && (
+        <p class="warning" role="status" data-testid="reread-warning">
+          The document could not be reread, so this panel may be out of date ({rereadProblem}).
+        </p>
+      )}
       {labels.status === 'loading' && <p class="muted">Loading the policy…</p>}
       {labels.status === 'failed' && <p class="error">The policy could not be loaded ({labels.reason}).</p>}
       {labels.status === 'loaded' && (

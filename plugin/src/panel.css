@@ -59,6 +59,14 @@ h2 {
   margin: 0;
 }
 
+.warning {
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 3px solid #e8590c;
+  background: #fff4e6;
+  color: #7a2e00;
+}
+
 fieldset {
   border: none;
   margin: 0;
