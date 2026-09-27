@@ -25,8 +25,45 @@ export async function openDocument(page: Page, documentId: string): Promise<void
   await waitForEditorReady(page);
 }
 
+// ONLYOFFICE's editor sometimes fails to load one of its own modules, which
+// then extends an undefined base class, and never becomes ready. The error
+// comes from the Document Server's web apps; loading the page again gets past
+// it, as it would for a user.
+const MODULE_LOADING_ERROR = "Cannot read properties of undefined (reading 'extend')";
+
+// Pages whose editor failed to load since their last navigation.
+const failedEditorLoads = new WeakSet<Page>();
+
+// Records the editor's loading failures on a page, before it opens a document.
+export function watchEditorLoads(page: Page): void {
+  page.on('pageerror', (error) => {
+    if (error.message === MODULE_LOADING_ERROR) {
+      failedEditorLoads.add(page);
+    }
+  });
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) {
+      failedEditorLoads.delete(page);
+    }
+  });
+}
+
 export async function waitForEditorReady(page: Page): Promise<void> {
-  await expect(page.locator('body')).toHaveAttribute('data-document-ready', 'true', { timeout: 180_000 });
+  if ((await editorLoadOutcome(page)) === 'failed') {
+    await page.reload();
+    expect(await editorLoadOutcome(page)).toBe('ready');
+  }
+}
+
+async function editorLoadOutcome(page: Page): Promise<'ready' | 'failed'> {
+  const outcome = async (): Promise<'ready' | 'failed' | 'loading'> => {
+    if ((await page.locator('body').getAttribute('data-document-ready')) === 'true') {
+      return 'ready';
+    }
+    return failedEditorLoads.has(page) ? 'failed' : 'loading';
+  };
+  await expect.poll(outcome, { timeout: 180_000 }).not.toBe('loading');
+  return (await outcome()) === 'ready' ? 'ready' : 'failed';
 }
 
 interface EditorPageConfig {

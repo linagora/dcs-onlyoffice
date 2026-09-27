@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { DEMO_ACCOUNTS, fillIdpLoginForm, signIn } from './support/accounts.ts';
-import { editorPageConfig, waitForEditorReady } from './support/documents.ts';
+import { editorPageConfig, waitForEditorReady, watchEditorLoads } from './support/documents.ts';
 
 test('an anonymous visitor signs in at the IdP and lands on the page they asked for', async ({ page }) => {
   await page.goto('/documents/exercise-northwind/edit');
@@ -12,6 +12,7 @@ test('an anonymous visitor signs in at the IdP and lands on the page they asked 
 });
 
 test('a signed-in user opens a document under their own name', async ({ page }) => {
+  watchEditorLoads(page);
   await signIn(page, DEMO_ACCOUNTS.alice);
   await page.getByRole('link', { name: 'exercise-northwind.docx', exact: true }).click();
   await waitForEditorReady(page);

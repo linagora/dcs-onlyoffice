@@ -1,6 +1,6 @@
 import { test as base, type Page, type TestInfo } from '@playwright/test';
 import { DEMO_ACCOUNTS, type DemoAccount, signIn } from './accounts.ts';
-import { browserFetch, CREATED_DOCUMENT } from './documents.ts';
+import { browserFetch, CREATED_DOCUMENT, watchEditorLoads } from './documents.ts';
 
 export { expect } from '@playwright/test';
 
@@ -13,6 +13,7 @@ interface SignedInFixtures {
 export const test = base.extend<SignedInFixtures>({
   account: [DEMO_ACCOUNTS.alice, { option: true }],
   page: async ({ page, account, baseURL }, use, testInfo) => {
+    watchEditorLoads(page);
     await signIn(page, account);
     await use(page);
     await attachCreatedDocuments(page, baseURL ?? null, testInfo);
