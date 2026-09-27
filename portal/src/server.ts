@@ -7,6 +7,7 @@ import { AccessTokens } from './auth/access-tokens.ts';
 import { OidcClient } from './auth/oidc.ts';
 import { registerAuth, requireSession } from './auth/routes.ts';
 import { SessionStore } from './auth/sessions.ts';
+import { registerClearanceAdmin } from './clearance-admin.ts';
 import type { PortalConfig } from './config.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { createDocumentFromTemplate, DOCX_CONTENT_TYPE, findDocument, listDocuments, listTemplates } from './documents.ts';
@@ -19,10 +20,6 @@ import { registerPolicyRelay } from './policy-relay.ts';
 
 interface DocumentParams {
   id: string;
-}
-
-interface CreateDocumentBody {
-  template?: string;
 }
 
 interface EditorRoute {
@@ -45,11 +42,13 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   const oidc = new OidcClient(config.oidc);
   const sessions = new SessionStore(SESSION_LIFETIME_MS);
   registerAuth(app, { oidc, sessions, portalPublicUrl: config.portalPublicUrl });
+  // HTML forms: a field sent several times, such as a list of checkboxes,
+  // keeps every value.
   app.addContentTypeParser(
     'application/x-www-form-urlencoded',
     { parseAs: 'string' },
     (_request, body, done) => {
-      done(null, Object.fromEntries(new URLSearchParams(String(body))));
+      done(null, new URLSearchParams(String(body)));
     },
   );
 
@@ -66,10 +65,15 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   app.get('/api/me', async (request) => requireSession(request).user);
   registerPolicyRelay(app, config.policyInternalUrl);
+  registerClearanceAdmin(app, {
+    policyInternalUrl: config.policyInternalUrl,
+    portalPublicUrl: config.portalPublicUrl,
+    administrationSecret: config.directoryAdministrationSecret,
+  });
   registerOpentdfRelay(app, { opentdfInternalUrl: config.opentdfInternalUrl, accessTokens: new AccessTokens(oidc, sessions) });
 
-  app.post<{ Body: CreateDocumentBody }>('/documents', async (request, reply) => {
-    const templateId = request.body.template ?? '';
+  app.post('/documents', async (request, reply) => {
+    const templateId = request.body instanceof URLSearchParams ? (request.body.get('template') ?? '') : '';
     const document = await createDocumentFromTemplate(config.documentsDirectory, config.templatesDirectory, templateId);
     if (document === null) {
       return reply.code(400).send({ error: 'Unknown template' });

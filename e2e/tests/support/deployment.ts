@@ -3,6 +3,9 @@ import { parseEnv } from 'node:util';
 
 const SETTINGS_FILE = new URL('../../../deploy/.env', import.meta.url);
 
+// The stack's public domain, as the Playwright configuration reads it.
+export const DOMAIN = process.env.DOMAIN ?? 'dcs.test';
+
 // A setting of the stack under test: the environment wins over the .env file
 // that compose reads.
 export function deploymentSetting(name: string): string {

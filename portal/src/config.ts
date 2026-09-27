@@ -12,6 +12,9 @@ export interface PortalConfig {
   policyInternalUrl: string;
   opentdfInternalUrl: string;
   onlyofficeJwtSecret: string;
+  // Shared with the policy service: only the portal administers the
+  // clearance directory.
+  directoryAdministrationSecret: string;
   // Language editors open in, unless a document's address asks for another.
   editorLanguage: EditorLanguage;
   documentsDirectory: string;
@@ -36,6 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     policyInternalUrl: env.POLICY_INTERNAL_URL ?? 'http://policy:3001',
     opentdfInternalUrl: env.OPENTDF_INTERNAL_URL ?? 'http://opentdf:8080',
     onlyofficeJwtSecret: requireEnv(env, 'ONLYOFFICE_JWT_SECRET'),
+    directoryAdministrationSecret: requireEnv(env, 'DIRECTORY_ADMINISTRATION_SECRET'),
     editorLanguage: readEditorLanguage(env),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
     templatesDirectory: env.TEMPLATES_DIR ?? '/templates',
