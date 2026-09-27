@@ -42,12 +42,7 @@ export async function refreshBindingReferences(docx: Uint8Array): Promise<Uint8A
   const files = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
   const wanted = BINDABLE_PARTS.flatMap((pattern) => files.filter((name) => pattern.test(name)).sort());
   let changed = false;
-  for (const name of files.filter((file) => /^customXml\/item\d+\.xml$/.test(file))) {
-    const xml = await zip.file(name)?.async('string');
-    if (xml === undefined) {
-      continue;
-    }
-    const document = new DOMParser().parseFromString(xml, 'text/xml');
+  for (const { name, document } of await customXmlParts(zip)) {
     const root = document.documentElement;
     if (root === null || root.namespaceURI !== BINDING_NAMESPACE || root.localName !== 'BindingInformation') {
       continue;
@@ -60,6 +55,18 @@ export async function refreshBindingReferences(docx: Uint8Array): Promise<Uint8A
     }
   }
   return changed ? zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }) : docx;
+}
+
+// The Custom XML parts of a package, parsed.
+export async function customXmlParts(zip: JSZip): Promise<{ name: string; document: Document }[]> {
+  const parts: { name: string; document: Document }[] = [];
+  for (const name of Object.keys(zip.files).filter((file) => /^customXml\/item\d+\.xml$/.test(file))) {
+    const xml = await zip.file(name)?.async('string');
+    if (xml !== undefined) {
+      parts.push({ name, document: new DOMParser().parseFromString(xml, 'text/xml') });
+    }
+  }
+  return parts;
 }
 
 function replaceReferences(document: Document, binding: Element, parts: string[]): boolean {

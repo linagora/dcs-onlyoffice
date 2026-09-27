@@ -1,5 +1,6 @@
 import { isAdministrator } from './auth/administrators.ts';
 import type { UserIdentity } from './auth/sessions.ts';
+import type { DocumentDecision, Marking } from './document-access.ts';
 import type { DocumentTemplate, StoredDocument } from './documents.ts';
 import type { SignedEditorConfig } from './editor-config.ts';
 import { firstDayOf, lastDayOf } from './validity-period.ts';
@@ -54,27 +55,37 @@ const STYLE = `
   form.clearance button { justify-self: start; }
   .notice { padding: 0.5rem 0.8rem; border-radius: 4px; background: #e3f9e5; }
   .notice.error { background: #ffe3e3; }
+  .label-swatch { display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.4rem; border-radius: 2px; vertical-align: middle; }
 `;
 
-export function renderDocumentListPage(
-  user: UserIdentity,
-  documents: StoredDocument[],
-  templates: DocumentTemplate[],
-): string {
-  const documentRows =
-    documents.length === 0
-      ? '<p>No document yet.</p>'
-      : `<table>${documents
-          .map(
-            (document) => `<tr>
+// A stored document, with what the signed-in person may do with it.
+export interface ListedDocument {
+  document: StoredDocument;
+  decision: DocumentDecision;
+}
+
+// A document the person may not open shows only its base label's marking:
+// its name and identifier can be sensitive too, and the restricted documents
+// come last, ordered by marking, so that their place reveals nothing either.
+export function renderDocumentListPage(user: UserIdentity, documents: ListedDocument[], templates: DocumentTemplate[]): string {
+  const openRows = documents.flatMap(({ document, decision }) =>
+    decision.open
+      ? [
+          `<tr>
   <td><a href="/documents/${document.id}/edit">${escapeHtml(document.fileName)}</a></td>
   <td class="actions">
     <a href="/documents/${document.id}/view" aria-label="Read ${escapeHtml(document.fileName)}">Read</a>
     <a href="/documents/${document.id}/download" aria-label="Download ${escapeHtml(document.fileName)}">Download</a>
   </td>
 </tr>`,
-          )
-          .join('')}</table>`;
+        ]
+      : [],
+  );
+  const restrictedRows = documents
+    .flatMap(({ decision }) => (decision.open ? [] : [restrictionText(decision)]))
+    .sort()
+    .map((text) => `<tr class="restricted-document">\n  <td colspan="2">Restricted document: ${text}</td>\n</tr>`);
+  const documentRows = documents.length === 0 ? '<p>No document yet.</p>' : `<table>${[...openRows, ...restrictedRows].join('')}</table>`;
   const templateButtons = templates
     .map(
       (template) => `<form method="post" action="/documents">
@@ -93,6 +104,39 @@ export function renderDocumentListPage(
   <p>${templateButtons}</p>
 </main>`,
   );
+}
+
+// The answer to the addresses of a document the person may not open, which
+// never names it.
+export function renderRestrictedDocumentPage(user: UserIdentity, decision: Exclude<DocumentDecision, { open: true }>): string {
+  const explanation =
+    decision.reason === 'clearance'
+      ? `This document's base label is beyond your clearance: ${restrictionText(decision)}`
+      : 'Whether this document opens for you cannot be decided right now. Try again later.';
+  return page(
+    'Access denied',
+    `${renderHeader(user)}
+<main>
+  <h2>Access denied</h2>
+  <p>${explanation}</p>
+  <p><a href="/">Back to the documents</a></p>
+</main>`,
+  );
+}
+
+function restrictionText(decision: Exclude<DocumentDecision, { open: true }>): string {
+  if (decision.reason === 'unavailable') {
+    return '<span class="marking">access cannot be checked right now</span>';
+  }
+  return renderMarking(decision.marking);
+}
+
+function renderMarking(marking: Marking | null): string {
+  if (marking === null) {
+    return '<span class="marking">label unknown</span>';
+  }
+  const swatch = marking.color === null ? '' : `<span class="label-swatch" style="background-color: ${escapeHtml(marking.color)}"></span>`;
+  return `<span class="marking">${swatch}${escapeHtml(marking.text)}</span>`;
 }
 
 // One form per entry: the person and the policy are fixed, the terms and

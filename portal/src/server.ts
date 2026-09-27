@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { setTimeout } from 'node:timers/promises';
 import path from 'node:path';
 import { fastifyCookie } from '@fastify/cookie';
 import { fastifyStatic } from '@fastify/static';
@@ -6,15 +7,18 @@ import { fastify, type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { AccessTokens } from './auth/access-tokens.ts';
 import { OidcClient } from './auth/oidc.ts';
 import { registerAuth, requireSession } from './auth/routes.ts';
-import { SessionStore } from './auth/sessions.ts';
+import { SessionStore, type UserIdentity } from './auth/sessions.ts';
 import { registerClearanceAdmin } from './clearance-admin.ts';
 import type { PortalConfig } from './config.ts';
+import { BaseLabelAudit } from './base-label-audit.ts';
+import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts';
+import { BaseLabels } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { createDocumentFromTemplate, DOCX_CONTENT_TYPE, findDocument, listDocuments, listTemplates } from './documents.ts';
 import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
 import { requestForceSave } from './onlyoffice.ts';
 import { registerOpentdfRelay } from './opentdf-relay.ts';
-import { renderDocumentListPage, renderEditorPage } from './pages.ts';
+import { renderDocumentListPage, renderEditorPage, renderRestrictedDocumentPage } from './pages.ts';
 import { registerPluginRoutes } from './plugin-routes.ts';
 import { registerPolicyRelay } from './policy-relay.ts';
 
@@ -29,6 +33,8 @@ interface EditorRoute {
 }
 
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
+const FORCE_SAVE_ATTEMPTS = 10;
+const FORCE_SAVE_RETRY_MS = 500;
 
 export function buildServer(config: PortalConfig): FastifyInstance {
   const app = fastify({ logger: true, trustProxy: true });
@@ -54,13 +60,27 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
+  const baseLabels = new BaseLabels();
+  const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, baseLabels, app.log);
+  const baseLabelAudit = new BaseLabelAudit(config.policyInternalUrl, app.log);
+  // A document the person may not open answers every address the same way,
+  // without its name.
+  const refuse = (reply: FastifyReply, user: UserIdentity, decision: Exclude<DocumentDecision, { open: true }>): FastifyReply =>
+    reply
+      .code(decision.reason === 'clearance' ? 403 : 503)
+      .type('text/html; charset=utf-8')
+      .send(renderRestrictedDocumentPage(user, decision));
+
   app.get('/', async (request, reply) => {
     const session = requireSession(request);
     const [documents, templates] = await Promise.all([
       listDocuments(config.documentsDirectory),
       listTemplates(config.templatesDirectory),
     ]);
-    return reply.type('text/html; charset=utf-8').send(renderDocumentListPage(session.user, documents, templates));
+    baseLabels.retain(new Set(documents.map((document) => document.id)));
+    const decisions = await documentAccess.decide(session.user, documents);
+    const listed = documents.map((document, index) => ({ document, decision: decisions[index] ?? { open: false, reason: 'unavailable' } as const }));
+    return reply.type('text/html; charset=utf-8').send(renderDocumentListPage(session.user, listed, templates));
   });
 
   app.get('/api/me', async (request) => requireSession(request).user);
@@ -92,6 +112,10 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       return reply.code(404).send({ error: 'Document not found' });
     }
     const { user } = requireSession(request);
+    const decision = await documentAccess.decideOne(user, document);
+    if (!decision.open) {
+      return refuse(reply, user, decision);
+    }
     const editorConfig = await signEditorConfig(
       buildEditorConfig(document, { id: user.id, name: user.name }, plugin, mode, language, config),
       config.onlyofficeJwtSecret,
@@ -112,6 +136,11 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (document === null) {
       return reply.code(404).send({ error: 'Document not found' });
     }
+    const { user } = requireSession(request);
+    const decision = await documentAccess.decideOne(user, document);
+    if (!decision.open) {
+      return refuse(reply, user, decision);
+    }
     return reply
       .type(DOCX_CONTENT_TYPE)
       .header('Content-Disposition', `attachment; filename="${document.fileName}"`)
@@ -123,11 +152,49 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (document === null) {
       return reply.code(404).send({ error: 'Document not found' });
     }
+    const decision = await documentAccess.decideOne(requireSession(request).user, document);
+    if (!decision.open) {
+      return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
+    }
     const outcome = await requestForceSave(config.onlyofficeInternalUrl, document.key, config.onlyofficeJwtSecret);
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
-  registerDocumentServerRoutes(app, config);
+  // The panel reports the base label changes it makes, which the portal logs
+  // with the person who made them, and saves the document at once: until
+  // then, whoever opens it would still be checked against the stored label.
+  app.post<{ Params: DocumentParams }>('/documents/:id/base-label', async (request, reply) => {
+    const document = await findDocument(config.documentsDirectory, request.params.id);
+    const change = readBaseLabelChange(request.body);
+    if (document === null || change === null) {
+      return reply.code(document === null ? 404 : 400).send({ error: document === null ? 'Document not found' : 'Expected { before, after }' });
+    }
+    const { user } = requireSession(request);
+    const decision = await documentAccess.decideOne(user, document);
+    if (!decision.open) {
+      return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
+    }
+    await baseLabelAudit.recordReport({ documentId: document.id, ...change }, user.id);
+    // The change reaches the Document Server through the editor's websocket,
+    // which may come after this request: until then, it has nothing to save.
+    let outcome = await requestForceSave(config.onlyofficeInternalUrl, document.key, config.onlyofficeJwtSecret);
+    for (let attempt = 1; outcome === 'no-changes' && attempt < FORCE_SAVE_ATTEMPTS; attempt += 1) {
+      await setTimeout(FORCE_SAVE_RETRY_MS);
+      outcome = await requestForceSave(config.onlyofficeInternalUrl, document.key, config.onlyofficeJwtSecret);
+    }
+    return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
+  });
+
+  registerDocumentServerRoutes(app, config, { baseLabels, audit: baseLabelAudit });
 
   return app;
+}
+
+function readBaseLabelChange(body: unknown): { before: string | null; after: string | null } | null {
+  if (typeof body !== 'object' || body === null || !('before' in body) || !('after' in body)) {
+    return null;
+  }
+  const { before, after } = body;
+  const isCode = (value: unknown): value is string | null => value === null || typeof value === 'string';
+  return isCode(before) && isCode(after) ? { before, after } : null;
 }

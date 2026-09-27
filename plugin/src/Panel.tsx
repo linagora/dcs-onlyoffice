@@ -7,7 +7,15 @@ import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import { callEditorMethod, type PluginInfo } from './onlyoffice.ts';
-import { type DocumentLabelRequest, fetchAllowedLabels, fetchDefaultPolicyLabels, fetchLabelOfAdatp4774, type LabelView } from './policy.ts';
+import {
+  type DocumentLabelRequest,
+  fetchAllowedLabels,
+  fetchBaseLabelChoices,
+  fetchDefaultPolicyLabels,
+  fetchLabelOfAdatp4774,
+  type LabelView,
+} from './policy.ts';
+import { documentIdOf, reportBaseLabelChange } from './portal.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList } from './PortionList.tsx';
 import { type InsertionResult, insertPortion, type StoredPortion, writeDocumentLabel } from './portions.ts';
@@ -44,7 +52,20 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const allowedLabels = useLoadable<LabelView[] | null>(async () => (policy === null ? null : fetchAllowedLabels(policy)), [policy]);
   const offeredLabels = allowedLabels.status === 'loaded' ? allowedLabels.value : null;
   // Until the author picks one, the base label is the least restrictive.
-  const baseLabelCode = documentState?.baseLabelCode ?? labelList[0]?.code ?? null;
+  const storedBaseLabelCode = documentState?.baseLabelCode ?? null;
+  const baseLabelCode = storedBaseLabelCode ?? labelList[0]?.code ?? null;
+  // Lowering the base label is reserved to administrators cleared for it.
+  // Until the choices for the current label are known, only it is offered.
+  const documentLoaded = documentState !== null;
+  const baseChoices = useLoadable<{ current: string | null; choices: LabelView[] } | null>(
+    async () =>
+      policy === null || !documentLoaded ? null : { current: storedBaseLabelCode, choices: await fetchBaseLabelChoices(policy, storedBaseLabelCode) },
+    [policy, documentLoaded, storedBaseLabelCode],
+  );
+  const offeredBaseLabels =
+    baseChoices.status === 'loaded' && baseChoices.value !== null && baseChoices.value.current === storedBaseLabelCode
+      ? baseChoices.value.choices
+      : labelList.filter((label) => label.code === baseLabelCode);
   const portions = documentState?.portions ?? NO_PORTIONS;
   const readings = usePortionReadings(portions, reader);
 
@@ -99,6 +120,12 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       portionLabelCodes: current.portions.map((portion) => portion.labelCode),
     });
     await refresh();
+    const documentId = documentIdOf(await pluginReady);
+    if (applied && documentId !== null) {
+      reportBaseLabelChange(documentId, current.baseLabelCode, code).catch((error: unknown) => {
+        logProblem('Reporting a base label change', error);
+      });
+    }
     return applied;
   };
 
@@ -130,7 +157,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       {labels.status === 'loaded' && (
         <>
           <DocumentLabel
-            labels={labelList}
+            labels={offeredBaseLabels}
             baseLabelCode={baseLabelCode}
             documentLabel={documentLabel}
             readOnly={readOnly}

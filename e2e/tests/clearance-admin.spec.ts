@@ -171,9 +171,11 @@ test('an entry outside its validity period grants nothing', async ({ page, brows
   try {
     await saveTerms(page, CHLOE, { ...CHLOE_TERMS, validThrough: yesterday });
     const chloe = await signedInPage(browser, DEMO_ACCOUNTS.chloe);
-    await openDocument(chloe, documentId);
-    await expect.poll(() => shownPortions(chloe)).toEqual([{ marking: NON_PROTEGE, text: null, notice: 'Access denied' }]);
-    await expect(pluginPanel(chloe).getByTestId('no-allowed-label')).toBeVisible();
+    // Not even the document's base label, NON PROTÉGÉ: the document does not
+    // open. OpenTDF's refusal is in access-decisions.spec.ts.
+    const response = await chloe.goto(`/documents/${documentId}/edit`);
+    expect(response?.status()).toBe(403);
+    await expect(chloe.getByRole('heading', { name: 'Access denied' })).toBeVisible();
     await chloe.context().close();
   } finally {
     await saveTerms(page, CHLOE, CHLOE_TERMS);

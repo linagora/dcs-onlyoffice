@@ -75,6 +75,8 @@ People sign in with the provider's accounts, which carry no clearance: their cle
 - `nationality`, a three-letter country code, may be left out.
 - The clearance is valid from `validFrom` until just before `validUntil`, two ISO 8601 dates.
 
+Someone without a valid clearance opens no document: a document without a base label counts as the least restrictive label, which still needs one.
+
 The policy service loads these files when it starts, so run `docker compose restart policy` after changing one. It adds the entries the directory does not hold yet and keeps the others as they are: change an existing entry on the portal's clearance page, which members of the `dcs-maquette-admin` group reach. An invalid entry keeps the policy service from starting, and its log names the file and the entry.
 
 ## Reverse proxy
@@ -110,5 +112,7 @@ curl -s -o /dev/null -w '%{redirect_url}\n' -H 'Accept: text/html' https://porta
 ```
 
 `docker compose logs opentdf-provisioning` shows `KAS key provisioned`, then `Policy provisioned` for each policy.
+
+The portal logs every change of a base label made in the panel, with the person who made it, and every save that lowers one: `docker compose logs portal | grep 'Base label'`.
 
 Then sign in with an account of the provider, open a demo document and check that the labelling panel shows your name.

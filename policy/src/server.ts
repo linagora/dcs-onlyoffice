@@ -2,7 +2,7 @@ import { fastify, type FastifyInstance } from 'fastify';
 import { accessDecision } from './access.ts';
 import { readOriginatorLabel, reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
-import { callerEmail } from './caller.ts';
+import { callerEmail, callerIsAdministrator } from './caller.ts';
 import { registerDirectoryAdministration } from './directory/administration.ts';
 import { type ClearanceTerms, type ClearanceTermsRequest, clearanceChoicesOf, readClearanceTerms } from './directory/clearance.ts';
 import { currentClearanceOf } from './directory/lookup.ts';
@@ -19,7 +19,7 @@ import {
 import { type Marking, renderMarking } from './marking.ts';
 import { isStringList, unknownArray } from './guards.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
-import { computeDocumentLabel, type RollupRule } from './rollup.ts';
+import { computeDocumentLabel, isMoreRestrictive, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
 import { loadPolicies } from './spif/reader.ts';
@@ -71,6 +71,24 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
 
   const findPolicy = (name: string): SecurityPolicy | null => policyNamed(policies, name);
 
+  // The label a code designates, under the policy the code names.
+  const labelOfCode = (code: string): { policy: SecurityPolicy; label: Label } | null => {
+    for (const policy of policies) {
+      const label = labelFromCode(policy, code);
+      if (label !== null) {
+        return { policy, label };
+      }
+    }
+    return null;
+  };
+
+  const leastRestrictiveLabel = (): { policy: SecurityPolicy; label: Label } | null => {
+    const [policy] = policies;
+    const enumeration = policy === undefined ? null : enumerateValidLabels(policy);
+    const [label] = enumeration?.ok === true ? enumeration.labels : [];
+    return policy === undefined || label === undefined ? null : { policy, label };
+  };
+
   // The views of a policy's valid labels that `keep` keeps.
   const labelViews = (policy: SecurityPolicy, language: string, keep: (label: Label) => boolean): LabelViews => {
     const enumeration = enumerateValidLabels(policy);
@@ -114,6 +132,87 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     const clearance = email === null ? null : await currentClearanceOf(clearanceDirectory.store, email, policy.name, now());
     const views = labelViews(policy, request.query.lang ?? defaultLanguage, (label) => accessDecision(policy, clearance, label));
     return views.ok ? views.views : reply.code(422).send({ error: views.error });
+  });
+
+  // The base labels the caller may give a document. Anyone may raise it;
+  // lowering it shows the content in clear to more readers, so only an
+  // administrator whose clearance allows the current label may.
+  app.get<{ Params: PolicyParams; Querystring: LanguageQuery & { current?: unknown } }>(
+    '/policies/:policy/labels/base-choices',
+    async (request, reply) => {
+      const policy = findPolicy(request.params.policy);
+      if (policy === null) {
+        return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
+      }
+      const currentCode: unknown = request.query.current ?? null;
+      if (currentCode !== null && typeof currentCode !== 'string') {
+        return reply.code(400).send({ error: 'Expected at most one current label' });
+      }
+      const current = currentCode === null ? null : labelFromCode(policy, currentCode);
+      if (currentCode !== null && current === null) {
+        return reply.code(422).send({ error: `${currentCode} is not a valid label of ${policy.name}` });
+      }
+      const email = callerEmail(request);
+      const clearance =
+        clearanceDirectory === undefined || email === null ? null : await currentClearanceOf(clearanceDirectory.store, email, policy.name, now());
+      const keep =
+        current === null || (callerIsAdministrator(request) && accessDecision(policy, clearance, current))
+          ? (): boolean => true
+          : (label: Label): boolean => !isMoreRestrictive(policy, current, label);
+      const views = labelViews(policy, request.query.lang ?? defaultLanguage, keep);
+      return views.ok ? views.views : reply.code(422).send({ error: views.error });
+    },
+  );
+
+  // Whether a new base label lowers the previous one: a reader it allows may
+  // be refused the previous one.
+  app.post('/labels/lowering', async (request, reply) => {
+    const fromCode = readTextField(request.body, 'from');
+    const toCode = readTextField(request.body, 'to');
+    if (fromCode === null || toCode === null) {
+      return reply.code(400).send({ error: 'Expected { from, to }' });
+    }
+    const from = labelOfCode(fromCode);
+    const to = labelOfCode(toCode);
+    if (from === null || to === null || from.policy !== to.policy) {
+      return reply.code(422).send({ error: `${fromCode} and ${toCode} are not two valid labels of one policy` });
+    }
+    return { lowering: isMoreRestrictive(from.policy, from.label, to.label) };
+  });
+
+  // Whether the caller may open documents with these base labels, which cover
+  // their content in clear, and the labels decided. A document without a base
+  // label counts as the least restrictive label of the first policy, as the
+  // panel shows it; an invalid label is refused.
+  app.post<{ Querystring: LanguageQuery }>('/labels/decisions', async (request, reply) => {
+    const codes = readCodeList(request.body);
+    if (codes === null) {
+      return reply.code(400).send({ error: 'Expected { codes: [label code or null] }' });
+    }
+    const email = callerEmail(request);
+    const language = request.query.lang ?? defaultLanguage;
+    // One reading of the directory per policy.
+    const clearances = new Map<string, Promise<ClearanceTerms | null>>();
+    const clearanceUnder = (policy: SecurityPolicy): Promise<ClearanceTerms | null> => {
+      const known =
+        clearances.get(policy.name) ??
+        (clearanceDirectory === undefined || email === null
+          ? Promise.resolve(null)
+          : currentClearanceOf(clearanceDirectory.store, email, policy.name, now()));
+      clearances.set(policy.name, known);
+      return known;
+    };
+    const decisions = [];
+    for (const code of codes) {
+      const decided = code === null ? leastRestrictiveLabel() : labelOfCode(code);
+      if (decided === null) {
+        decisions.push({ granted: false, label: null });
+        continue;
+      }
+      const clearance = await clearanceUnder(decided.policy);
+      decisions.push({ granted: accessDecision(decided.policy, clearance, decided.label), label: toView(decided.policy, decided.label, language) });
+    }
+    return { decisions };
   });
 
   app.post<{ Params: PolicyParams; Querystring: LanguageQuery }>(
@@ -330,6 +429,12 @@ function readDocumentLabelRequest(body: unknown): DocumentLabelRequest | null {
 
 function readCode(body: unknown): string | null {
   return readTextField(body, 'code');
+}
+
+// A list of label codes, where null stands for a document without a label.
+function readCodeList(body: unknown): (string | null)[] | null {
+  const codes: unknown = typeof body === 'object' && body !== null && 'codes' in body ? body.codes : null;
+  return Array.isArray(codes) && codes.every((code: unknown) => code === null || typeof code === 'string') ? codes : null;
 }
 
 function readTextField(body: unknown, name: string): string | null {

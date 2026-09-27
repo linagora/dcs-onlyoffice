@@ -40,7 +40,11 @@ The portion label as the envelope carries it, bound to the envelope. For a reade
 _Avoid_: assertion label, inner label
 
 **Base label**:
-The label an author gives to the document's unprotected content.
+The label an author gives to the document's unprotected content. It decides who may open the document; anyone may raise it, but only an administrator whose clearance allows it may lower it. A document without one counts as the least restrictive label.
+
+**Restricted document**:
+A document whose base label the person's clearance does not allow: the portal lists it with that label's marking only, without its name, and does not open it.
+_Avoid_: hidden document, protected document
 
 **Document label**:
 The label of the whole document, computed from its base label and its portion labels, and bound to the file as ADatP-4778.2 prescribes.

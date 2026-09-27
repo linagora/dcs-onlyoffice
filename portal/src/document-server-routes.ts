@@ -1,7 +1,9 @@
 import { createReadStream } from 'node:fs';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { refreshBindingReferences } from './binding.ts';
 import type { PortalConfig } from './config.ts';
+import type { BaseLabelAudit } from './base-label-audit.ts';
+import { type BaseLabels, baseLabelCodeOf } from './document-labels.ts';
 import { DOCX_CONTENT_TYPE, findDocument, type SaveKind, saveDocumentContent } from './documents.ts';
 import {
   bearerToken,
@@ -18,8 +20,15 @@ interface DocumentParams {
   id: string;
 }
 
+// What a save needs to log the lowering of a base label: the stored file's
+// label and the audit.
+export interface SaveAudit {
+  baseLabels: BaseLabels;
+  audit: BaseLabelAudit;
+}
+
 // Routes the Document Server calls to load and save documents.
-export function registerDocumentServerRoutes(app: FastifyInstance, config: PortalConfig): FastifyInstance {
+export function registerDocumentServerRoutes(app: FastifyInstance, config: PortalConfig, saveAudit: SaveAudit): FastifyInstance {
   // Routes under /internal are only reachable from the Compose network: the
   // reverse proxy refuses them.
   app.get<{ Params: DocumentParams }>('/internal/documents/:id/content', async (request, reply) => {
@@ -44,7 +53,7 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
       request.log.warn({ documentId: request.params.id }, 'Rejected an unsigned or invalid callback');
       return reply.code(401).send(CALLBACK_FAILED);
     }
-    const saved = await inArrivalOrder(request.params.id, async () => storeCallbackFile(config, request.params.id, callback));
+    const saved = await inArrivalOrder(request.params.id, async () => storeCallbackFile(config, saveAudit, request.log, request.params.id, callback));
     if (saved === 'failed') {
       request.log.error({ documentId: request.params.id, status: callback.status }, 'Saving the document failed');
       return reply.send(CALLBACK_FAILED);
@@ -89,7 +98,13 @@ async function isSignedByDocumentServer(authorization: string | undefined, secre
   return token !== null && (await verifyOnlyofficeToken(token, secret)) !== null;
 }
 
-async function storeCallbackFile(config: PortalConfig, documentId: string, callback: CallbackPayload): Promise<CallbackOutcome> {
+async function storeCallbackFile(
+  config: PortalConfig,
+  saveAudit: SaveAudit,
+  log: FastifyBaseLogger,
+  documentId: string,
+  callback: CallbackPayload,
+): Promise<CallbackOutcome> {
   const kind = saveKindOf(callback);
   if (kind === null) {
     return 'ignored';
@@ -108,8 +123,29 @@ async function storeCallbackFile(config: PortalConfig, documentId: string, callb
     return 'failed';
   }
   const content = await refreshBindingReferences(new Uint8Array(await response.arrayBuffer()));
+  // Reading the labels must not cost the save: an unreadable one skips the log.
+  const [before, after] = await Promise.all([
+    readBaseLabel(log, documentId, async () => saveAudit.baseLabels.of(document)),
+    readBaseLabel(log, documentId, async () => baseLabelCodeOf(content)),
+  ]);
   const saved = await saveDocumentContent(config.documentsDirectory, documentId, content, kind);
+  if (saved !== null && before !== undefined && after !== undefined) {
+    // Logged in the background: the Document Server waits for this answer.
+    saveAudit.audit.recordSave({ documentId, before, after }, callback.users).catch((error: unknown) => {
+      log.error({ documentId, err: error }, 'The lowering of a base label could not be checked');
+    });
+  }
   return saved === null ? 'failed' : 'saved';
+}
+
+// Undefined when the label cannot be read.
+async function readBaseLabel(log: FastifyBaseLogger, documentId: string, read: () => Promise<string | null>): Promise<string | null | undefined> {
+  try {
+    return await read();
+  } catch (error: unknown) {
+    log.error({ documentId, err: error }, 'A base label could not be read');
+    return undefined;
+  }
 }
 
 function saveKindOf(callback: CallbackPayload): SaveKind | null {
