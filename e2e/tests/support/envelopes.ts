@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { PortionPart } from './docx.ts';
-import { arrayField, field, stringField } from './json.ts';
+import { arrayField, field, stringField, stringsOf } from './json.ts';
 
 export interface EnvelopeAssertion {
   type: string | null;
@@ -10,6 +10,8 @@ export interface EnvelopeAssertion {
 
 export interface EnvelopeManifest {
   keyAccessUrls: string[];
+  // The FQNs of the attribute values the envelope's policy names.
+  dataAttributes: string[];
   assertions: EnvelopeAssertion[];
 }
 
@@ -22,8 +24,12 @@ export async function envelopeManifest(part: PortionPart): Promise<EnvelopeManif
   }
   const information = field(manifest, 'encryptionInformation');
   const keyAccess = arrayField(information, 'keyAccess');
+  // The envelope's own access policy, base64-encoded JSON.
+  const encodedZtdfPolicy = stringField(information, 'policy');
+  const ztdfPolicy: unknown = encodedZtdfPolicy === null ? null : JSON.parse(Buffer.from(encodedZtdfPolicy, 'base64').toString('utf8'));
   return {
-    keyAccessUrls: keyAccess.map((entry) => stringField(entry, 'url')).filter((url): url is string => url !== null),
+    keyAccessUrls: stringsOf(keyAccess, 'url'),
+    dataAttributes: stringsOf(arrayField(field(ztdfPolicy, 'body'), 'dataAttributes'), 'attribute'),
     assertions: arrayField(manifest, 'assertions').map((assertion) => ({
       type: stringField(assertion, 'type'),
       statement: stringField(field(assertion, 'statement'), 'value'),

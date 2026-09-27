@@ -21,11 +21,11 @@ DCS ONLYOFFICE lets authors insert **protected portions** into a document edited
 
 - each portion carries its own **ADatP-4774 confidentiality label**, chosen from the labels the security policy allows;
 - the protected text is typed in a side panel and **never reaches the document body**, which only shows a locked, coloured placeholder;
-- that text is **encrypted in the author's browser** with [OpenTDF](https://opentdf.io) into an envelope stored in the file, next to the portion's label;
+- that text is **encrypted in the author's browser** with [OpenTDF](https://opentdf.io) into an envelope stored in the file, next to the portion's label, and OpenTDF only hands its key to **readers whose clearance allows the label**;
 - the document carries a **label computed from its content**, stored as the standard **ADatP-4778.2 OOXML binding**, so that other labelling tools can read it;
 - the security policy is never hard-coded: it is read from an **Open XML SPIF** file.
 
-Iteration 3 is in progress: next, OpenTDF will grant each portion's key from the reader's clearance, so that only readers with the need to know can read it, and portion keys will be wrapped with hybrid post-quantum key encapsulation.
+Iteration 3 is in progress: next, the panel will only offer the labels a person's clearance allows, administrators will edit clearances in the portal, and portion keys will be wrapped with hybrid post-quantum key encapsulation.
 
 > [!IMPORTANT]
 > This is a **demonstrator**, not a product. It uses fictional data and a fictional policy only, and is not hardened for production or for real classified information.
@@ -39,6 +39,7 @@ Iteration 3 is in progress: next, OpenTDF will grant each portion's key from the
 - **Co-editing**: portions and the document label reach co-authors in real time; concurrent insertions converge to the right label.
 - **Policy service**: Open XML SPIF 2.1 reader, valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part.
 - **OpenTDF platform** running and trusting the identity provider, behind a relay on the portal that adds the access token the portal keeps and refreshes, so that the plugin's calls never need a token in the browser.
+- **Access by clearance**: each person's clearance is kept in a clearance directory, and OpenTDF refuses a portion's key to a reader whose clearance does not allow its label; the panel then shows "Access denied" next to the portion's marking.
 - **OpenTDF provisioned from the security policy**: the policy service derives OpenTDF's attributes, and the subject mappings that grant them to clearances, from the SPIF; a one-shot job applies them when the stack starts. A test checks that OpenTDF's decision is the policy's access decision for every demo account and label.
 - **End-to-end tests** against the whole stack in CI, which keeps a trace, a screenshot and the saved DOCX files of every test.
 
@@ -166,7 +167,7 @@ The tests compare the label and binding outputs with reference documents validat
 
 ## Security
 
-Please do not report vulnerabilities in public issues: see [SECURITY.md](SECURITY.md).
+Please do not report vulnerabilities in public issues: see [SECURITY.md](SECURITY.md), which also lists the demonstrator's known limitations. Among them, nothing prevents a reader from copying the decrypted text of a portion from the panel into the document body, where it is stored in clear.
 
 ## License
 

@@ -20,6 +20,13 @@ export type OpenedEnvelope = { status: 'opened'; text: string } | { status: 'den
 
 export type SealedEnvelope = { status: 'sealed'; envelope: Uint8Array } | { status: 'failed'; reason: string };
 
+// A portion label as its envelope carries it: its ADatP-4774 XML, and the
+// attribute values from which the KAS decides who may read the portion.
+export interface EnvelopeLabel {
+  xml: string;
+  attributes: string[];
+}
+
 // What opens the envelopes of a document.
 export interface EnvelopeOpener {
   open(envelope: Uint8Array): Promise<OpenedEnvelope>;
@@ -47,21 +54,26 @@ export class EnvelopeClient implements EnvelopeOpener {
     this.#client = new OpenTDF({ platformUrl, interceptors: [relayThroughPortal], disableDPoP: true });
   }
 
-  // The envelope carries the portion label as a handling assertion, bound to
-  // the envelope, and names the stack's KAS.
-  async seal(text: string, labelXml: string): Promise<SealedEnvelope> {
-    const label: AssertionConfig = {
+  // The envelope names the stack's KAS, carries the label's attribute values
+  // and the label itself as a handling assertion, bound to the envelope.
+  async seal(text: string, label: EnvelopeLabel): Promise<SealedEnvelope> {
+    // Without attribute values, the KAS would hand the key to anyone signed in.
+    if (label.attributes.length === 0) {
+      return { status: 'failed', reason: 'the label gives no attribute value to restrict its readers' };
+    }
+    const assertion: AssertionConfig = {
       id: 'portion-label',
       type: 'handling',
       scope: 'tdo',
       appliesToState: 'unencrypted',
-      statement: { format: 'xml', schema: LABEL_NAMESPACE, value: labelXml },
+      statement: { format: 'xml', schema: LABEL_NAMESPACE, value: label.xml },
     };
     try {
       const stream = await this.#client.createTDF({
         source: { type: 'buffer', location: new TextEncoder().encode(text) },
         defaultKASEndpoint: this.#kasUrl,
-        assertionConfigs: [label],
+        attributes: label.attributes,
+        assertionConfigs: [assertion],
       });
       return { status: 'sealed', envelope: new Uint8Array(await new Response(stream).arrayBuffer()) };
     } catch (error: unknown) {

@@ -2,7 +2,7 @@ import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
 import type { OfficeApi } from './office-api.ts';
 import { runCommand } from './onlyoffice.ts';
-import { type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, type LabelView } from './policy.ts';
+import { type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, fetchLabelAttributes, type LabelView } from './policy.ts';
 
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 export const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
@@ -144,15 +144,16 @@ function readDocumentCommand(): DocumentSnapshot {
 // be encrypted is not inserted.
 export async function insertPortion(portion: NewPortion, envelopes: EnvelopeClient): Promise<InsertionResult> {
   const { label } = portion;
-  const [labelXml, documentLabel] = await Promise.all([
+  const [labelXml, attributes, documentLabel] = await Promise.all([
     fetchAdatp4774(label.policy, label.code),
+    fetchLabelAttributes(label.policy, label.code),
     fetchDocumentLabel({
       policy: label.policy,
       baseLabelCode: portion.baseLabelCode,
       portionLabelCodes: [...portion.existingLabelCodes, label.code],
     }),
   ]);
-  const sealed = await envelopes.seal(portion.text, labelXml);
+  const sealed = await envelopes.seal(portion.text, { xml: labelXml, attributes });
   if (sealed.status === 'failed') {
     return { status: 'not-encrypted', reason: sealed.reason };
   }

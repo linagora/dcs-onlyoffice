@@ -4,7 +4,7 @@ import { envelopeManifest } from './support/envelopes.ts';
 import { expect, test } from './support/fixtures.ts';
 import { PLATFORM } from './support/opentdf.ts';
 import { insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
-import { fillPortionForm, forceSavedDocx, insertPortion, storedDocx } from './support/portions.ts';
+import { fillPortionForm, forceSavedDocx, insertPortion, leaveAndWaitForSave } from './support/portions.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -40,9 +40,14 @@ test('an inserted portion is stored as an envelope and read back in the panel', 
     categories: [{ type: 'RESTRICTIVE', tagName: 'Special Handling', values: ['SPECIAL FRANCE'] }],
   });
 
-  // The envelope names the stack's KAS and carries the same label, bound to it.
+  // The envelope names the stack's KAS, carries the same label, bound to it,
+  // and the label's attribute values, which the KAS decides access with.
   const manifest = await envelopeManifest(part);
   expect(manifest.keyAccessUrls).toEqual([`${PLATFORM}/kas`]);
+  expect(manifest.dataAttributes).toEqual([
+    'https://demo-fr.dcs.linagora.com/attr/classification/value/diffusion-restreinte',
+    'https://demo-fr.dcs.linagora.com/attr/special-handling/value/special-france',
+  ]);
   expect(manifest.assertions.map((assertion) => assertion.type)).toEqual(['handling']);
   expect(labelOfXml(manifest.assertions[0]?.statement ?? '')).toEqual(portionLabel);
 
@@ -56,13 +61,8 @@ test('portions survive saving to DOCX and reopening', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   const secret = `Fictional reopened paragraph ${Date.now()}`;
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
-  // Fast co-editing sends changes asynchronously; let them reach the server.
-  await page.waitForTimeout(2_000);
 
-  await page.goto('/');
-  await expect
-    .poll(async () => (await storedDocx(page, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
-    .toBe(1);
+  await leaveAndWaitForSave([page], documentId, 1);
 
   await openDocument(page, documentId);
   await expect(pluginPanel(page).getByTestId('portion-text')).toHaveText([secret]);
@@ -126,11 +126,7 @@ test('a portion that cannot be decrypted says why, and is read once it can be', 
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   const secret = `Fictional retried paragraph ${Date.now()}`;
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
-  await page.waitForTimeout(2_000);
-  await page.goto('/');
-  await expect
-    .poll(async () => (await storedDocx(page, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
-    .toBe(1);
+  await leaveAndWaitForSave([page], documentId, 1);
 
   const relay = '**/api/opentdf/**';
   await page.route(relay, async (route) =>
@@ -158,6 +154,23 @@ test('a text that cannot be encrypted is not inserted', async ({ page }) => {
   await expect(panel.getByTestId('portion-item')).toHaveCount(0);
   const docx = await forceSavedDocx(page, documentId, () => true);
   expect(docx.contentControls).toEqual([]);
+  expect(docx.portionParts).toEqual([]);
+});
+
+// An envelope without attribute values would be handed to anyone signed in.
+test('a label that gives no attribute value is not used to encrypt', async ({ page }) => {
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  const attributes = '**/api/policy/policies/*/labels/attributes';
+  await page.route(attributes, async (route) => route.fulfill({ json: { attributes: [] } }));
+  const panel = pluginPanel(page);
+  await fillPortionForm(page, { marking: SPECIAL_FRANCE, text: `Fictional unrestricted paragraph ${Date.now()}` });
+
+  await panel.getByRole('button', { name: 'Insert protected portion' }).click();
+
+  await expect(panel.getByTestId('insertion-failure')).toContainText('The text could not be encrypted, so nothing was inserted');
+  await page.unroute(attributes);
+  await expect(panel.getByTestId('portion-item')).toHaveCount(0);
+  const docx = await forceSavedDocx(page, documentId, () => true);
   expect(docx.portionParts).toEqual([]);
 });
 

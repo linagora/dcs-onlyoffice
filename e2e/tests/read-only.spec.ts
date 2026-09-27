@@ -1,7 +1,7 @@
 import { editorPageConfig, openNewDocument, waitForEditorReady } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
-import { insertPortion, storedDocx } from './support/portions.ts';
+import { insertPortion, leaveAndWaitForSave } from './support/portions.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 
@@ -11,11 +11,7 @@ test('a document opened read-only shows its portions in the panel', async ({ pag
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   const secret = `Fictional read-only paragraph ${Date.now()}`;
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
-  await page.waitForTimeout(2_000);
-  await page.goto('/');
-  await expect
-    .poll(async () => (await storedDocx(page, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
-    .toBe(1);
+  await leaveAndWaitForSave([page], documentId, 1);
 
   await page.getByRole('link', { name: `Read ${documentId}.docx` }).click();
   await waitForEditorReady(page);

@@ -4,8 +4,11 @@ import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, insertPortion } from './support/portions.ts';
 
+const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const RELEASABLE_TO_NATO = 'DIFFUSION RESTREINTE – DIFFUSION OTAN';
-const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
+// Bob's clearance lets him read both labels; a portion released to NATO is
+// more restrictive than a document that is not.
+const WITH_MORE_RESTRICTIVE_PORTIONS = `${DIFFUSION_RESTREINTE} – CONTIENT DES PORTIONS PLUS RESTRICTIVES`;
 
 // Undocumented behaviour 5: Custom XML parts written by one author reach the
 // other authors of a co-editing session.
@@ -15,15 +18,13 @@ test('portions and the document label reach a co-author without reloading', asyn
   await openDocument(bob, documentId);
   await expect(pluginPanel(bob).getByTestId('identity-name')).toHaveText('Bob Walker');
 
-  await pluginPanel(page).getByLabel('Base label').selectOption({ label: RELEASABLE_TO_NATO });
-  await expect(pluginPanel(bob).getByTestId('document-label-marking')).toHaveText(RELEASABLE_TO_NATO);
+  await pluginPanel(page).getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
+  await expect(pluginPanel(bob).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
 
   const secret = `Fictional shared portion ${Date.now()}`;
-  await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
+  await insertPortion(page, { marking: RELEASABLE_TO_NATO, text: secret });
   await expect(pluginPanel(bob).getByTestId('portion-text')).toHaveText([secret]);
-  await expect(pluginPanel(bob).getByTestId('document-label-marking')).toHaveText(
-    `${RELEASABLE_TO_NATO} – CONTIENT DES PORTIONS PLUS RESTRICTIVES`,
-  );
+  await expect(pluginPanel(bob).getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
   await bob.context().close();
 });
 
@@ -36,15 +37,15 @@ test('portions inserted at the same moment by two authors are both kept, with th
   await openDocument(bob, documentId);
   const alicePanel = pluginPanel(page);
   const bobPanel = pluginPanel(bob);
-  await alicePanel.getByLabel('Base label').selectOption({ label: RELEASABLE_TO_NATO });
-  await expect(bobPanel.getByTestId('document-label-marking')).toHaveText(RELEASABLE_TO_NATO);
+  await alicePanel.getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
+  await expect(bobPanel.getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
 
   // Alice's portion is no more restrictive than the base label; Bob's is.
   const aliceText = `Fictional portion by Alice ${Date.now()}`;
   const bobText = `Fictional portion by Bob ${Date.now()}`;
   const drafts = [
-    { author: page, panel: alicePanel, marking: RELEASABLE_TO_NATO, text: aliceText, position: { x: 400, y: 300 } },
-    { author: bob, panel: bobPanel, marking: SPECIAL_FRANCE, text: bobText, position: { x: 400, y: 420 } },
+    { author: page, panel: alicePanel, marking: DIFFUSION_RESTREINTE, text: aliceText, position: { x: 400, y: 300 } },
+    { author: bob, panel: bobPanel, marking: RELEASABLE_TO_NATO, text: bobText, position: { x: 400, y: 420 } },
   ];
   for (const draft of drafts) {
     await draft.author.frameLocator('iframe[name="frameEditor"]').locator('#editor_sdk').click({ position: draft.position });
@@ -53,10 +54,9 @@ test('portions inserted at the same moment by two authors are both kept, with th
   }
   await Promise.all(drafts.map((draft) => draft.panel.getByRole('button', { name: 'Insert protected portion' }).click()));
 
-  const expectedLabel = `${RELEASABLE_TO_NATO} – CONTIENT DES PORTIONS PLUS RESTRICTIVES`;
   for (const panel of [alicePanel, bobPanel]) {
     await expect.poll(async () => (await panel.getByTestId('portion-text').allTextContents()).sort()).toEqual([aliceText, bobText].sort());
-    await expect(panel.getByTestId('document-label-marking')).toHaveText(expectedLabel);
+    await expect(panel.getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
   }
   const docx = await forceSavedDocx(
     page,

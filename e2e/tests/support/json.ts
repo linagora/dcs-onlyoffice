@@ -13,3 +13,8 @@ export function stringField(value: unknown, name: string): string | null {
   const found = field(value, name);
   return typeof found === 'string' ? found : null;
 }
+
+// The string fields of that name, in a list of objects.
+export function stringsOf(values: unknown[], name: string): string[] {
+  return values.map((value) => stringField(value, name)).filter((found): found is string => found !== null);
+}

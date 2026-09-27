@@ -25,10 +25,50 @@ export async function insertPortion(page: Page, portion: NewPortion): Promise<vo
   await expect(panel.getByTestId('portion-item')).toHaveCount(before + 1);
 }
 
+export interface ShownPortion {
+  marking: string;
+  text: string | null;
+  notice: string | null;
+}
+
+// What a reader's panel shows of each portion, by marking: the text, or the
+// notice that stands in for it. Portions inserted at the same place keep no
+// predictable order.
+export async function shownPortions(reader: Page): Promise<ShownPortion[]> {
+  // One snapshot of the list: it re-renders while envelopes are opened.
+  const shown = await pluginPanel(reader)
+    .getByTestId('portion-item')
+    .evaluateAll((items) =>
+      items.map((item) => {
+        const textOf = (testId: string): string | null => item.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.innerText ?? null;
+        return { marking: textOf('portion-marking') ?? '', text: textOf('portion-text'), notice: textOf('portion-notice') };
+      }),
+    );
+  return shown.sort((left, right) => left.marking.localeCompare(right.marking));
+}
+
 export async function storedDocx(page: Page, documentId: string): Promise<DocxInspection> {
   const response = await browserFetch(page, `/documents/${documentId}/download`);
   expect(response.status).toBe(200);
   return inspectDocx(response.body);
+}
+
+// Leaves the editor on every page that has the document open, then waits for
+// the Document Server to store it, which it does once the last editor has
+// left, with the number of portions the test expects.
+export async function leaveAndWaitForSave(editors: Page[], documentId: string, portionCount: number): Promise<void> {
+  const [first] = editors;
+  if (first === undefined) {
+    throw new Error('No editor to leave');
+  }
+  // Fast co-editing sends changes asynchronously; let them reach the server.
+  await first.waitForTimeout(2_000);
+  for (const editor of editors) {
+    await editor.goto('/');
+  }
+  await expect
+    .poll(async () => (await storedDocx(first, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
+    .toBe(portionCount);
 }
 
 // Force-saves until the stored file shows what the test waits for.

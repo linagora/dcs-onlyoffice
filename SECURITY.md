@@ -26,7 +26,10 @@ Vulnerabilities of ONLYOFFICE Docs, OpenTDF, LemonLDAP::NG or other dependencies
 
 These are known properties of the demonstrator, not vulnerabilities:
 
-- Portions are not encrypted yet. Their text is stored in the DOCX, base64-encoded, and passes through the Document Server. Encryption comes with iteration 3.
+- Nothing prevents a reader from copying the decrypted text of a portion from the labelling panel into the document body, where it is stored in clear and passes through the Document Server.
+- Unencrypted portions, written before encryption existed, keep their text base64-encoded in the DOCX; they can still be read, but no longer created.
+- Portions encrypted before access by clearance carry no attribute value, and OpenTDF hands their key to anyone signed in.
+- OpenTDF answers a decision it could not make, for instance when the clearance directory cannot be read, the same way as a refusal: the panel shows both as "Access denied" until it is reopened.
 - The `standalone` profile is for development and isolated demos: it uses a local certificate authority, fictional accounts whose password is their login, and it allows the OAuth password grant for the tests.
 - Portal sessions live in memory, and ONLYOFFICE Docs Community Edition keeps editing sessions in memory: a restart signs users out and closes open sessions.
 

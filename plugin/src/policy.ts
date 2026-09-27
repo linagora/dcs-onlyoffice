@@ -40,20 +40,26 @@ export async function fetchDefaultPolicyLabels(): Promise<LabelView[]> {
 
 // ADatP-4774 XML of a label, created now for the calling user.
 export async function fetchAdatp4774(policy: string, code: string): Promise<string> {
-  const response = await fetch(`${RELAY}/policies/${encodeURIComponent(policy)}/labels/adatp4774`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
-  });
-  if (!response.ok) {
-    throw new Error(`The policy service refused label ${code} (${response.status})`);
-  }
-  const body: unknown = await response.json();
+  const body = await postJson(`${RELAY}/policies/${encodeURIComponent(policy)}/labels/adatp4774`, { code }, `The policy service refused label ${code}`);
   if (typeof body !== 'object' || body === null || !('xml' in body) || typeof body.xml !== 'string') {
     throw new Error('Unexpected ADatP-4774 answer');
   }
   return body.xml;
+}
+
+// The attribute values an envelope carries for a label, which OpenTDF grants
+// to the clearances that allow it.
+export async function fetchLabelAttributes(policy: string, code: string): Promise<string[]> {
+  const body = await postJson(
+    `${RELAY}/policies/${encodeURIComponent(policy)}/labels/attributes`,
+    { code },
+    `The policy service gave no attributes for label ${code}`,
+  );
+  const attributes: unknown = typeof body === 'object' && body !== null && 'attributes' in body ? body.attributes : null;
+  if (!Array.isArray(attributes) || !attributes.every((attribute: unknown): attribute is string => typeof attribute === 'string')) {
+    throw new Error('Unexpected attributes answer');
+  }
+  return attributes;
 }
 
 export interface DocumentLabel {
@@ -72,16 +78,11 @@ export interface DocumentLabelRequest {
 // Document label computed from the base label and the portions' labels, with
 // its ADatP-4778.2 binding part.
 export async function fetchDocumentLabel(request: DocumentLabelRequest): Promise<DocumentLabel> {
-  const response = await fetch(`${RELAY}/policies/${encodeURIComponent(request.policy)}/document-label`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base: request.baseLabelCode, portions: request.portionLabelCodes }),
-  });
-  if (!response.ok) {
-    throw new Error(`The policy service could not compute the document label (${response.status})`);
-  }
-  const body: unknown = await response.json();
+  const body = await postJson(
+    `${RELAY}/policies/${encodeURIComponent(request.policy)}/document-label`,
+    { base: request.baseLabelCode, portions: request.portionLabelCodes },
+    'The policy service could not compute the document label',
+  );
   if (
     typeof body !== 'object' ||
     body === null ||
@@ -101,6 +102,20 @@ async function getJson(url: string): Promise<unknown> {
   const response = await fetch(url, { credentials: 'same-origin' });
   if (!response.ok) {
     throw new Error(`${url} answered ${response.status}`);
+  }
+  return response.json();
+}
+
+// A refused call fails with the given message and the answer's status.
+async function postJson(url: string, body: unknown, refusal: string): Promise<unknown> {
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`${refusal} (${response.status})`);
   }
   return response.json();
 }
