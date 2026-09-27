@@ -49,6 +49,16 @@ jobs:
           set -o pipefail
           docker compose run --rm --no-deps opentdf-provisioning | tee /dev/stderr \
             | jq -es 'map(select(.changes)) | any(.msg == "KAS key provisioned") and any(.msg == "Policy provisioned") and all([.changes[]] | add == 0)'
+      - name: Check that OpenTDF connects with a role that cannot reach the clearance directory
+        working-directory: deploy
+        run: |
+          set -o pipefail
+          docker compose exec -T postgres psql -U opentdf -d opentdf -At -v ON_ERROR_STOP=1 -c "
+            SELECT NOT rolsuper
+                   AND NOT has_schema_privilege(oid, 'directory', 'USAGE') AND NOT has_schema_privilege(oid, 'directory', 'CREATE')
+                   AND EXISTS (SELECT FROM pg_namespace WHERE nspname = 'opentdf_policy' AND nspowner = r.oid)
+                   AND EXISTS (SELECT FROM pg_stat_activity WHERE usename = rolname)
+              FROM pg_roles r WHERE rolname = 'dcs_opentdf'" | tee /dev/stderr | grep -qx t
       - name: Install browsers
         run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium firefox
       - name: Run end-to-end tests
@@ -56,6 +66,38 @@ jobs:
       - name: Search the Document Server's working files for portion texts
         if: ${{ !cancelled() }}
         run: pnpm --filter @dcs/e2e search-document-server
+      # Last, since the platform loses its tables until the setup runs again.
+      - name: Check that the database setup hands the platform's objects over
+        if: ${{ !cancelled() }}
+        working-directory: deploy
+        run: |
+          set -o pipefail
+          # As in a stack created when the platform connected as the superuser.
+          docker compose exec -T postgres psql -U opentdf -d opentdf -q -v ON_ERROR_STOP=1 -c 'REASSIGN OWNED BY dcs_opentdf TO opentdf'
+          docker compose run --rm --no-deps database-setup
+          docker compose exec -T postgres psql -U opentdf -d opentdf -At -v ON_ERROR_STOP=1 -c "
+            WITH platform AS (SELECT oid FROM pg_namespace WHERE nspname LIKE 'opentdf\_%')
+            SELECT count(*) > 0
+                   AND NOT EXISTS (SELECT FROM pg_namespace n JOIN platform USING (oid) WHERE n.nspowner <> 'dcs_opentdf'::regrole)
+                   AND NOT EXISTS (SELECT FROM pg_class c JOIN platform ON platform.oid = c.relnamespace WHERE c.relowner <> 'dcs_opentdf'::regrole)
+                   AND NOT EXISTS (SELECT FROM pg_type t JOIN platform ON platform.oid = t.typnamespace WHERE t.typowner <> 'dcs_opentdf'::regrole)
+                   AND NOT EXISTS (SELECT FROM pg_proc p JOIN platform ON platform.oid = p.pronamespace WHERE p.proowner <> 'dcs_opentdf'::regrole)
+              FROM platform" | tee /dev/stderr | grep -qx t
+      - name: Check that the database setup ignores what the platform's role plants in its search path
+        if: ${{ !cancelled() }}
+        working-directory: deploy
+        run: |
+          # The platform's role may create schemas, among them one named after
+          # the superuser, which a default search path looks in first.
+          docker compose exec -T postgres psql -U dcs_opentdf -d opentdf -q -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE SCHEMA opentdf;
+          CREATE FUNCTION opentdf.trap(oid, regrole) RETURNS boolean LANGUAGE plpgsql AS $$
+          BEGIN
+            RAISE EXCEPTION 'the setup ran code of the platform''s role as %', current_user;
+          END $$;
+          CREATE OPERATOR opentdf.<> (LEFTARG = oid, RIGHTARG = regrole, FUNCTION = opentdf.trap);
+          SQL
+          docker compose run --rm --no-deps database-setup
       - name: Collect stack logs
         if: failure()
         working-directory: deploy
