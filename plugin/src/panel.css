@@ -1,0 +1,150 @@
+body {
+  margin: 0;
+}
+
+.panel {
+  padding: 12px;
+  font-size: 12px;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-divider, #dfdfdf);
+}
+
+.identity-name {
+  font-weight: 700;
+}
+
+.identity-account,
+.muted {
+  color: var(--text-secondary, #6b6b6b);
+  margin: 0;
+}
+
+h2 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary, #6b6b6b);
+  margin: 12px 0 6px;
+}
+
+.label-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.label-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.label-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.error {
+  color: #c62828;
+  margin: 0;
+}
+
+fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+legend,
+.field > span {
+  display: block;
+  font-weight: 700;
+  margin: 6px 0 4px;
+}
+
+.label-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  resize: vertical;
+}
+
+.portion-form button {
+  margin-top: 8px;
+}
+
+.portion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.portion-item {
+  border-bottom: 1px solid var(--border-divider, #dfdfdf);
+}
+
+.portion-item[aria-current='true'] {
+  background: var(--highlight-button-hover, #e0e0e0);
+}
+
+.portion-select {
+  display: block;
+  width: 100%;
+  padding: 6px 4px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hint {
+  margin: 0 0 6px;
+  color: var(--text-secondary, #6b6b6b);
+}
+
+.portion-marking {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.portion-text {
+  display: block;
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}
+
+.field select {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+}
+
+.document-marking {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-weight: 700;
+}

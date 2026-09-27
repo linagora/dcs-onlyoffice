@@ -1,0 +1,97 @@
+{
+  "authentication": "JsonFile",
+  "cfgAuthor": "DCS ONLYOFFICE (local IdP for development, CI and standalone demos)",
+  "cfgDate": "1790380800",
+  "cfgLog": "Local OpenID Connect provider with fictional accounts - not for production",
+  "cfgNum": 1,
+  "demoExportedVars": {
+    "cn": "cn",
+    "mail": "mail",
+    "uid": "uid"
+  },
+  "domain": "__DOMAIN__",
+  "exportedHeaders": {},
+  "exportedVars": {},
+  "globalStorage": "Apache::Session::File",
+  "globalStorageOptions": {
+    "Directory": "/var/lib/lemonldap-ng/sessions",
+    "LockDirectory": "/var/lib/lemonldap-ng/sessions/lock",
+    "generateModule": "Lemonldap::NG::Common::Apache::Session::Generate::SHA256"
+  },
+  "groups": {},
+  "issuerDBOpenIDConnectActivation": 1,
+  "jsonFileUserPath": "/idp/users.json",
+  "locationRules": {},
+  "macros": {},
+  "oidcRPMetaDataExportedVars": {
+    "dcs-maquette": {
+      "email": "mail",
+      "family_name": "sn",
+      "given_name": "givenName",
+      "groups": "groups;string;always",
+      "name": "cn",
+      "preferred_username": "uid"
+    }
+  },
+  "oidcRPMetaDataMacros": {
+    "dcs-maquette": {}
+  },
+  "oidcRPMetaDataOptions": {
+    "dcs-maquette": {
+      "oidcRPMetaDataOptionsAccessTokenClaims": 1,
+      "oidcRPMetaDataOptionsAccessTokenExpiration": 300,
+      "oidcRPMetaDataOptionsAccessTokenJWT": 1,
+      "oidcRPMetaDataOptionsAccessTokenSignAlg": "RS256",
+      "oidcRPMetaDataOptionsActivation": 1,
+      "oidcRPMetaDataOptionsAdditionalAudiences": "https://tdf.__DOMAIN__",
+      "oidcRPMetaDataOptionsAllowClientCredentialsGrant": 0,
+      "oidcRPMetaDataOptionsAllowOffline": 0,
+      "oidcRPMetaDataOptionsAllowPasswordGrant": 1,
+      "oidcRPMetaDataOptionsAuthMethod": "client_secret_basic",
+      "oidcRPMetaDataOptionsAuthorizationCodeExpiration": 60,
+      "oidcRPMetaDataOptionsBypassConsent": 1,
+      "oidcRPMetaDataOptionsClientID": "dcs-maquette",
+      "oidcRPMetaDataOptionsClientSecret": "%SERVERENV:DCS_OIDC_CLIENT_SECRET%",
+      "oidcRPMetaDataOptionsDisplayName": "DCS demonstrator",
+      "oidcRPMetaDataOptionsIDTokenExpiration": 300,
+      "oidcRPMetaDataOptionsIDTokenForceClaims": 1,
+      "oidcRPMetaDataOptionsIDTokenSignAlg": "RS256",
+      "oidcRPMetaDataOptionsLogoutBypassConfirm": 1,
+      "oidcRPMetaDataOptionsPostLogoutRedirectUris": "https://portail.__DOMAIN__/",
+      "oidcRPMetaDataOptionsPublic": 0,
+      "oidcRPMetaDataOptionsRedirectUris": "https://portail.__DOMAIN__/auth/callback",
+      "oidcRPMetaDataOptionsRefreshToken": 1,
+      "oidcRPMetaDataOptionsRefreshTokenRotation": 0,
+      "oidcRPMetaDataOptionsRequirePKCE": 1,
+      "oidcRPMetaDataOptionsRule": "inGroup('dcs-maquette')",
+      "oidcRPMetaDataOptionsUserIDAttr": "uid"
+    }
+  },
+  "oidcRPMetaDataOptionsExtraClaims": {
+    "dcs-maquette": {
+      "groups": "groups"
+    }
+  },
+  "oidcRPMetaDataScopeRules": {
+    "dcs-maquette": {}
+  },
+  "oidcServiceAllowAuthorizationCodeFlow": 1,
+  "oidcServiceAllowHybridFlow": 0,
+  "oidcServiceAllowImplicitFlow": 0,
+  "oidcServiceIgnoreScopeForClaims": 0,
+  "oidcServiceKeyTypeSig": "RSA",
+  "oidcServiceMetaDataDisallowNoneAlg": 1,
+  "passwordDB": "Null",
+  "persistentStorage": "Apache::Session::File",
+  "persistentStorageOptions": {
+    "Directory": "/var/lib/lemonldap-ng/psessions",
+    "LockDirectory": "/var/lib/lemonldap-ng/psessions/lock"
+  },
+  "portal": "https://idp.__DOMAIN__/",
+  "portalSkin": "bootstrap5",
+  "registerDB": "Null",
+  "sameSite": "Lax",
+  "securedCookie": 1,
+  "userDB": "Same",
+  "whatToTrace": "uid"
+}

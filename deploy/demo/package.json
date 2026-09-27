@@ -1,0 +1,14 @@
+{
+  "name": "@dcs/demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate-documents.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "docx": "9.7.2",
+    "typescript": "7.0.2"
+  }
+}

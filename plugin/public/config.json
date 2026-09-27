@@ -1,0 +1,51 @@
+{
+  "name": "Confidentiality labels",
+  "guid": "asc.{A48B4807-1FF4-4518-A708-D28D90EFFB58}",
+  "version": "0.1.0",
+  "baseUrl": "",
+  "variations": [
+    {
+      "description": "Confidentiality labels of the document and of its protected portions",
+      "url": "index.html",
+      "icons": [
+        "resources/icon.svg",
+        "resources/icon.svg"
+      ],
+      "icons2": [
+        {
+          "style": "light",
+          "*": {
+            "normal": "resources/icon.svg"
+          }
+        },
+        {
+          "style": "dark",
+          "*": {
+            "normal": "resources/icon-dark.svg"
+          }
+        }
+      ],
+      "isViewer": true,
+      "EditorsSupport": [
+        "word"
+      ],
+      "type": "panelRight",
+      "isVisual": true,
+      "isModal": false,
+      "isInsideMode": true,
+      "initDataType": "none",
+      "initData": "",
+      "isUpdateOleOnResize": false,
+      "buttons": [],
+      "events": [
+        "onDocumentContentReady",
+        "onChangeContentControl",
+        "onFocusContentControl",
+        "onBlurContentControl",
+        "onContextMenuShow",
+        "onContextMenuClick",
+        "onToolbarMenuClick"
+      ]
+    }
+  ]
+}

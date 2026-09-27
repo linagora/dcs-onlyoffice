@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<spif:SPIF xmlns:spif="http://www.xmlspif.org/spif"
+    schemaVersion="2.1" version="1" creationDate="20260926120000Z"
+    originatorDN="CN=Example Policy Authority,O=Example,C=XX"
+    keyIdentifier="00"
+    privilegeId="1.3.26.0.4774.5.24.1" rbacId="1.3.26.0.4774.5.24.1">
+  <spif:securityPolicyId name="EXAMPLE" id="2.25.283505922519774543341581604402970826256"/>
+  <spif:securityClassifications>
+    <spif:securityClassification name="UNCLASSIFIED" lacv="1" hierarchy="1" color="green">
+      <spif:markingData xml:lang="fr" phrase="NON CLASSIFIE">
+        <spif:code>pageTopBottom</spif:code>
+      </spif:markingData>
+    </spif:securityClassification>
+    <spif:securityClassification name="RESTRICTED" lacv="2" hierarchy="2" color="#FF8C00">
+      <spif:markingData xml:lang="fr" phrase="RESTREINT">
+        <spif:code>pageTopBottom</spif:code>
+      </spif:markingData>
+    </spif:securityClassification>
+  </spif:securityClassifications>
+  <spif:securityCategoryTagSets>
+    <spif:securityCategoryTagSet name="Special Handling"
+        id="2.25.283505922519774543341581604402970826256.1">
+      <spif:securityCategoryTag name="Special Handling" tagType="restrictive">
+        <spif:tagCategory name="ALPHA" lacv="1">
+          <spif:excludedClass>UNCLASSIFIED</spif:excludedClass>
+        </spif:tagCategory>
+        <spif:tagCategory name="BRAVO" lacv="2">
+          <spif:excludedClass>UNCLASSIFIED</spif:excludedClass>
+          <spif:excludedCategory tagSetRef="Releasable To" tagType="enumerated"
+              enumType="permissive" all="true"/>
+        </spif:tagCategory>
+        <spif:markingQualifier markingCode="pageTopBottom">
+          <spif:qualifier markingQualifier=" " qualifierCode="separator"/>
+        </spif:markingQualifier>
+      </spif:securityCategoryTag>
+    </spif:securityCategoryTagSet>
+    <spif:securityCategoryTagSet name="Releasable To"
+        id="2.25.283505922519774543341581604402970826256.2">
+      <spif:securityCategoryTag name="Releasable To" tagType="enumerated"
+          enumType="permissive">
+        <spif:tagCategory name="XAA" lacv="1"/>
+        <spif:tagCategory name="XBB" lacv="2">
+          <spif:requiredCategory operation="all">
+            <spif:categoryGroup tagSetRef="Releasable To" tagType="enumerated"
+                enumType="permissive" lacv="1"/>
+          </spif:requiredCategory>
+        </spif:tagCategory>
+        <spif:markingQualifier markingCode="pageTopBottom">
+          <spif:qualifier markingQualifier="REL TO " qualifierCode="prefix"/>
+          <spif:qualifier markingQualifier=", " qualifierCode="separator"/>
+        </spif:markingQualifier>
+      </spif:securityCategoryTag>
+    </spif:securityCategoryTagSet>
+    <spif:securityCategoryTagSet name="Administrative"
+        id="2.25.283505922519774543341581604402970826256.3">
+      <spif:securityCategoryTag name="Administrative" tagType="tagType7"
+          tag7Encoding="bitSetAttributes">
+        <spif:tagCategory name="STAFF" lacv="1"/>
+        <spif:tagCategory name="MEDICAL" lacv="2"/>
+        <spif:markingQualifier markingCode="pageTopBottom">
+          <spif:qualifier markingQualifier=" " qualifierCode="separator"/>
+        </spif:markingQualifier>
+      </spif:securityCategoryTag>
+    </spif:securityCategoryTagSet>
+  </spif:securityCategoryTagSets>
+</spif:SPIF>

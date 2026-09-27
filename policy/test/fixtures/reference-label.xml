@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<slab:originatorConfidentialityLabel
+    xmlns:slab="urn:nato:stanag:4774:confidentialitymetadatalabel:1:0"
+    ReviewDateTime="2031-09-26T00:00:00Z">
+  <slab:ConfidentialityInformation>
+    <slab:PolicyIdentifier
+        URI="urn:oid:2.25.283505922519774543341581604402970826256">EXAMPLE</slab:PolicyIdentifier>
+    <slab:Classification>RESTRICTED</slab:Classification>
+    <slab:Category Type="RESTRICTIVE" TagName="Special Handling"
+        URI="urn:oid:2.25.283505922519774543341581604402970826256.1">
+      <slab:GenericValue>ALPHA</slab:GenericValue>
+    </slab:Category>
+    <slab:Category Type="PERMISSIVE" TagName="Releasable To"
+        URI="urn:oid:2.25.283505922519774543341581604402970826256.2">
+      <slab:GenericValue>XAA</slab:GenericValue>
+      <slab:GenericValue>XBB</slab:GenericValue>
+    </slab:Category>
+  </slab:ConfidentialityInformation>
+  <slab:OriginatorID IDType="rfc822Name">author@example.org</slab:OriginatorID>
+  <slab:CreationDateTime>2026-09-26T12:00:00Z</slab:CreationDateTime>
+</slab:originatorConfidentialityLabel>

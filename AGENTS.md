@@ -1,6 +1,9 @@
 ## Conventions
 
 - Everything in this repository is written in English: code, comments, README, docs, commit messages and issues.
+- Follow CONTRIBUTING.md for the TypeScript conventions, tests, commits and pull requests.
+- Commits are signed with SSH; `main` only accepts verified signatures.
+- Files, commit messages, pull requests and issues carry no attribution to AI tools: no co-author trailers, no "generated with" lines.
 
 ## Agent skills
 

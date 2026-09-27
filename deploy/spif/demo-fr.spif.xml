@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fictitious demonstration policy, built only from public French markings.
+  It is not an official security policy. The OID sits under the 2.25 UUID
+  arc so that it cannot collide with a real policy.
+-->
+<spif:SPIF xmlns:spif="http://www.xmlspif.org/spif"
+    schemaVersion="2.1" version="1" creationDate="20260926000000Z"
+    originatorDN="CN=DCS ONLYOFFICE demo policy authority,O=DCS ONLYOFFICE demo,C=FR"
+    keyIdentifier="00"
+    privilegeId="1.3.26.0.4774.5.24.1" rbacId="1.3.26.0.4774.5.24.1">
+  <spif:securityPolicyId name="DEMO-FR" id="2.25.166231019600111174217682845337071458325"/>
+  <spif:securityClassifications>
+    <spif:securityClassification name="NON PROTEGE" lacv="1" hierarchy="1" color="#2E7D32">
+      <spif:markingData xml:lang="fr" phrase="NON PROTÉGÉ">
+        <spif:code>pageTopBottom</spif:code>
+      </spif:markingData>
+    </spif:securityClassification>
+    <spif:securityClassification name="DIFFUSION RESTREINTE" lacv="2" hierarchy="2" color="#E8590C">
+      <spif:markingData xml:lang="fr" phrase="DIFFUSION RESTREINTE">
+        <spif:code>pageTopBottom</spif:code>
+      </spif:markingData>
+    </spif:securityClassification>
+  </spif:securityClassifications>
+  <spif:securityCategoryTagSets>
+    <spif:securityCategoryTagSet name="Special Handling"
+        id="2.25.166231019600111174217682845337071458325.1">
+      <spif:securityCategoryTag name="Special Handling" tagType="restrictive">
+        <!-- A national caveat: never below DIFFUSION RESTREINTE, never releasable. -->
+        <spif:tagCategory name="SPECIAL FRANCE" lacv="1">
+          <spif:markingData xml:lang="fr" phrase="SPÉCIAL FRANCE">
+            <spif:code>pageTopBottom</spif:code>
+          </spif:markingData>
+          <spif:excludedClass>NON PROTEGE</spif:excludedClass>
+          <spif:excludedCategory tagSetRef="Releasable To" tagType="enumerated"
+              enumType="permissive" all="true"/>
+        </spif:tagCategory>
+      </spif:securityCategoryTag>
+    </spif:securityCategoryTagSet>
+    <spif:securityCategoryTagSet name="Releasable To"
+        id="2.25.166231019600111174217682845337071458325.2">
+      <spif:securityCategoryTag name="Releasable To" tagType="enumerated" enumType="permissive">
+        <!-- Releasing to NATO only means something for protected information. -->
+        <spif:tagCategory name="NATO" lacv="1">
+          <spif:markingData xml:lang="fr" phrase="OTAN">
+            <spif:code>pageTopBottom</spif:code>
+          </spif:markingData>
+          <spif:excludedClass>NON PROTEGE</spif:excludedClass>
+        </spif:tagCategory>
+        <spif:markingQualifier markingCode="pageTopBottom">
+          <spif:qualifier markingQualifier="DIFFUSION " qualifierCode="prefix"/>
+          <spif:qualifier markingQualifier=", " qualifierCode="separator"/>
+        </spif:markingQualifier>
+      </spif:securityCategoryTag>
+    </spif:securityCategoryTagSet>
+    <!-- Informative: added to the document label when portions are more
+         restrictive than its unprotected content. Authors never pick it. -->
+    <spif:securityCategoryTagSet name="Composition"
+        id="2.25.166231019600111174217682845337071458325.3">
+      <spif:securityCategoryTag name="Composition" tagType="tagType7" tag7Encoding="bitSetAttributes">
+        <spif:tagCategory name="MORE RESTRICTIVE PORTIONS" lacv="1">
+          <spif:markingData xml:lang="fr" phrase="CONTIENT DES PORTIONS PLUS RESTRICTIVES">
+            <spif:code>pageTopBottom</spif:code>
+          </spif:markingData>
+        </spif:tagCategory>
+      </spif:securityCategoryTag>
+    </spif:securityCategoryTagSet>
+  </spif:securityCategoryTagSets>
+  <!-- French markings do not print the policy name. -->
+  <spif:markingData phrase="">
+    <spif:code>replacePolicy</spif:code>
+  </spif:markingData>
+  <spif:markingQualifier markingCode="pageTopBottom">
+    <spif:qualifier markingQualifier=" – " qualifierCode="separator"/>
+  </spif:markingQualifier>
+  <spif:extensions>
+    <dcs:rollupIndicator xmlns:dcs="urn:linagora:dcs:spif:1"
+        tagSet="Composition" category="MORE RESTRICTIVE PORTIONS"/>
+  </spif:extensions>
+</spif:SPIF>

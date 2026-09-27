@@ -1,0 +1,16 @@
+{
+  "name": "@dcs/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^22.0.0",
+    "@xmldom/xmldom": "0.9.12",
+    "jszip": "3.10.2",
+    "typescript": "7.0.2"
+  }
+}

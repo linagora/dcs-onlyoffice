@@ -1,0 +1,48 @@
+{
+	admin off
+	skip_install_trust
+	pki {
+		ca local {
+			name "DCS ONLYOFFICE local CA"
+			root {
+				cert /pki/public/ca.crt
+				key /pki/private/ca.key
+			}
+		}
+	}
+}
+
+(local_tls) {
+	tls {
+		issuer internal {
+			ca local
+		}
+	}
+}
+
+portail.{$DOMAIN} {
+	import local_tls
+	@internal path /internal/*
+	respond @internal 404
+	reverse_proxy portal:3000
+}
+
+docs.{$DOMAIN} {
+	import local_tls
+	reverse_proxy onlyoffice:80
+}
+
+idp.{$DOMAIN} {
+	import local_tls
+	reverse_proxy idp:80
+}
+
+# h2c keeps gRPC clients working as well as Connect JSON over HTTP/1.1.
+tdf.{$DOMAIN} {
+	import local_tls
+	reverse_proxy h2c://opentdf:8080 {
+		transport http {
+			versions h2c 2 1.1
+		}
+	}
+}

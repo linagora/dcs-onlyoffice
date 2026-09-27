@@ -1,0 +1,6 @@
+packages:
+  - portal
+  - policy
+  - plugin
+  - e2e
+  - deploy/demo

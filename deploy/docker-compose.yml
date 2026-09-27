@@ -1,0 +1,221 @@
+name: dcs
+
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:9.4.0.1
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      JWT_HEADER: Authorization
+      JWT_IN_BODY: "true"
+      # Documents and save callbacks travel over the private Compose network.
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      # Default plugins are downloaded from the internet; the stack must run offline.
+      PLUGINS_ENABLED: "false"
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+      - onlyoffice-logs:/var/log/onlyoffice
+      # Loaded after the configuration the entrypoint rewrites. Disables the
+      # 5-minute DNS cache, which kept a recreated portal's old address.
+      - ./onlyoffice/local-production-linux.json:/etc/onlyoffice/documentserver/local-production-linux.json:ro
+    # For an external reverse proxy (hosted mode); loopback by default.
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${DOCS_PORT:-6141}:80"
+    healthcheck:
+      # The entrypoint generates the fonts and restarts the editing services
+      # after nginx already answers; its last step tails the logs. The bracket
+      # keeps pgrep from matching this healthcheck's own command line.
+      test: ["CMD-SHELL", "pgrep -f 'xargs tail -[F]' >/dev/null && curl -fsS http://localhost/healthcheck | grep -q true"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+    restart: unless-stopped
+
+  portal:
+    build:
+      context: ..
+      dockerfile: portal/Dockerfile
+    image: dcs/portal:dev
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      ONLYOFFICE_INTERNAL_URL: http://onlyoffice
+      PORTAL_INTERNAL_URL: http://portal:3000
+      DOCUMENTS_DIR: /data/documents
+      TEMPLATES_DIR: /templates
+      OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID in .env}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      # Trusts the standalone proxy's certificates for server-to-server calls.
+      NODE_EXTRA_CA_CERTS: /pki/public/ca.crt
+      POLICY_INTERNAL_URL: http://policy:3001
+    volumes:
+      - documents:/data/documents
+      - ./demo/documents:/templates:ro
+      - pki-public:/pki/public:ro
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORTAL_PORT:-6140}:3000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      policy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Not published: the plugin reaches it through the portal's relay.
+  policy:
+    build:
+      context: ..
+      dockerfile: policy/Dockerfile
+    image: dcs/policy:dev
+    environment:
+      SPIF_DIR: /spif
+      MARKING_LANGUAGE: ${MARKING_LANGUAGE:-fr}
+      ROLLUP_RULE: ${ROLLUP_RULE:-clear-parts}
+    volumes:
+      - ./spif:/spif:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  init:
+    build:
+      context: ./init
+    image: dcs/init:dev
+    volumes:
+      - ./demo/documents:/demo/documents:ro
+      - documents:/data/documents
+      - pki-public:/pki/public
+      - pki-private:/pki/private
+      - opentdf-keys:/opentdf/keys
+
+  postgres:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_USER: opentdf
+      POSTGRES_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
+      POSTGRES_DB: opentdf
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opentdf -d opentdf"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  opentdf:
+    build: ./opentdf
+    image: dcs/opentdf:dev
+    command: ["start", "--config-file", "/etc/opentdf/opentdf.yaml"]
+    environment:
+      OPENTDF_DB_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
+      OPENTDF_SERVER_AUTH_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
+      OPENTDF_SERVER_AUTH_AUDIENCE: ${OIDC_AUDIENCE:-https://tdf.${DOMAIN}}
+      OPENTDF_SERVER_CORS_ALLOWEDORIGINS: https://portail.${DOMAIN}
+      # Extra trust anchors for a private CA; the image's public bundle stays.
+      SSL_CERT_DIR: /etc/opentdf/ca
+    volumes:
+      - ./opentdf/opentdf.yaml:/etc/opentdf/opentdf.yaml:ro
+      - opentdf-keys:/etc/opentdf/keys:ro
+      - pki-public:/etc/opentdf/ca:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      # Startup fails at once if the IdP cannot be reached; in the standalone
+      # profile the IdP sits behind the local proxy.
+      proxy:
+        condition: service_healthy
+        required: false
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${TDF_PORT:-6142}:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  idp:
+    image: yadd/lemonldap-ng-full:2.23.4-1
+    profiles: [standalone]
+    environment:
+      SSODOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      PORTAL: https://idp.${DOMAIN}
+      LOGLEVEL: info
+      LOGGER: stderr
+      USERLOGGER: stderr
+      FORWARDED_BY: 172.16.0.0/12
+      DCS_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+    volumes:
+      - ./idp/lmConf-1.json:/seed/lmConf-1.json:ro
+      - ./idp/users.json:/idp/users.json:ro
+      - ./idp/00-dcs-idp-config:/etc/cont-init.d/00-dcs-idp-config:ro
+      - idp-conf:/var/lib/lemonldap-ng/conf
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2.11.4-alpine
+    profiles: [standalone]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports:
+      - "${PROXY_BIND:-127.0.0.1}:443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - pki-public:/pki/public:ro
+      - pki-private:/pki/private:ro
+    networks:
+      default:
+        # Containers reach each other through the same public names as browsers.
+        aliases:
+          - portail.${DOMAIN}
+          - docs.${DOMAIN}
+          - idp.${DOMAIN}
+          - tdf.${DOMAIN}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      portal:
+        condition: service_healthy
+      onlyoffice:
+        condition: service_healthy
+      idp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 443"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  documents:
+  onlyoffice-data:
+  onlyoffice-logs:
+  caddy-data:
+  pki-public:
+  pki-private:
+  idp-conf:
+  opentdf-keys:
+  postgres-data:
