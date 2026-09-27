@@ -12,6 +12,7 @@ import {
   validateLabel,
 } from './labels.ts';
 import { type Marking, renderMarking } from './marking.ts';
+import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
 import { computeDocumentLabel, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
@@ -63,6 +64,16 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
   app.get('/healthz', async () => ({ status: 'ok' }));
 
   app.get('/policies', async () => policies.map((policy) => ({ name: policy.name, oid: policy.oid })));
+
+  // What the provisioning job applies to OpenTDF.
+  app.get<{ Params: PolicyParams }>('/policies/:policy/opentdf', async (request, reply) => {
+    const policy = findPolicy(request.params.policy);
+    if (policy === null) {
+      return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
+    }
+    const derivation = deriveOpentdfState(policy, policies);
+    return derivation.ok ? derivation.state : reply.code(422).send({ error: derivation.error });
+  });
 
   app.get<{ Params: PolicyParams; Querystring: LanguageQuery }>('/policies/:policy/labels', async (request, reply) => {
     const policy = findPolicy(request.params.policy);
@@ -121,6 +132,24 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       return { xml, label: toView(policy, validation.label, request.query.lang ?? defaultLanguage) };
     },
   );
+
+  // The attribute values an envelope carries for a label.
+  app.post<{ Params: PolicyParams }>('/policies/:policy/labels/attributes', async (request, reply) => {
+    const policy = findPolicy(request.params.policy);
+    if (policy === null) {
+      return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
+    }
+    const code = readCode(request.body);
+    if (code === null) {
+      return reply.code(400).send({ error: 'Expected { code }' });
+    }
+    const label = labelFromCode(policy, code);
+    if (label === null) {
+      return reply.code(422).send({ error: `${code} is not a valid label of ${policy.name}` });
+    }
+    const attributes = labelAttributes(policy, policies, label);
+    return attributes.ok ? { attributes: attributes.attributes } : reply.code(422).send({ error: attributes.error });
+  });
 
   app.post<{ Params: PolicyParams; Querystring: LanguageQuery }>(
     '/policies/:policy/document-label',

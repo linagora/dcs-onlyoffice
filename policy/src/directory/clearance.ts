@@ -45,9 +45,22 @@ export type ClearanceCheck = { ok: true; clearance: Clearance } | { ok: false; e
 const LIST_SEPARATOR = ',';
 const QUALIFIER_SEPARATOR = ':';
 
+export const CLASSIFICATIONS_CLAIM = 'classifications';
+export const CATEGORIES_CLAIM = 'categories';
+
 // How the directory writes a held category: "<tag set>:<category>".
 export function categoryText(category: HeldCategory): string {
   return `${category.tagSet}${QUALIFIER_SEPARATOR}${category.name}`;
+}
+
+// The value of the classifications claim that stands for a classification.
+export function classificationClaim(policy: string, classification: string): string {
+  return `${policy}${QUALIFIER_SEPARATOR}${classification}`;
+}
+
+// The value of the categories claim that stands for a held category.
+export function categoryClaim(policy: string, category: HeldCategory): string {
+  return `${policy}${QUALIFIER_SEPARATOR}${categoryText(category)}`;
 }
 
 export function checkClearance(request: ClearanceRequest, policies: SecurityPolicy[]): ClearanceCheck {
