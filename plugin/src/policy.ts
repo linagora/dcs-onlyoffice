@@ -31,11 +31,20 @@ export async function fetchDefaultPolicyLabels(): Promise<LabelView[]> {
   if (typeof first !== 'object' || first === null || !('name' in first) || typeof first.name !== 'string') {
     throw new Error('Unexpected policy list');
   }
-  const labels = await getJson(`${RELAY}/policies/${encodeURIComponent(first.name)}/labels`);
-  if (!Array.isArray(labels) || !labels.every(isLabelView)) {
+  return labelListOf(await getJson(`${RELAY}/policies/${encodeURIComponent(first.name)}/labels`));
+}
+
+// The labels of a policy that the signed-in person's clearance allows, which
+// the policy service reads from the clearance directory.
+export async function fetchAllowedLabels(policy: string): Promise<LabelView[]> {
+  return labelListOf(await getJson(`${RELAY}/policies/${encodeURIComponent(policy)}/labels/allowed`));
+}
+
+function labelListOf(body: unknown): LabelView[] {
+  if (!Array.isArray(body) || !body.every(isLabelView)) {
     throw new Error('Unexpected label list');
   }
-  return labels;
+  return body;
 }
 
 // ADatP-4774 XML of a label, created now for the calling user.

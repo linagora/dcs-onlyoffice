@@ -19,13 +19,13 @@ A document often mixes information of different sensitivity: a report releasable
 
 DCS ONLYOFFICE lets authors insert **protected portions** into a document edited in ONLYOFFICE Docs:
 
-- each portion carries its own **ADatP-4774 confidentiality label**, chosen from the labels the security policy allows;
+- each portion carries its own **ADatP-4774 confidentiality label**, chosen from the labels that the security policy and the author's clearance allow;
 - the protected text is typed in a side panel and **never reaches the document body**, which only shows a locked, coloured placeholder;
 - that text is **encrypted in the author's browser** with [OpenTDF](https://opentdf.io) into an envelope stored in the file, next to the portion's label, and OpenTDF only hands its key to **readers whose clearance allows the label**;
 - the document carries a **label computed from its content**, stored as the standard **ADatP-4778.2 OOXML binding**, so that other labelling tools can read it;
 - the security policy is never hard-coded: it is read from an **Open XML SPIF** file.
 
-Iteration 3 is in progress: next, the panel will only offer the labels a person's clearance allows, administrators will edit clearances in the portal, and portion keys will be wrapped with hybrid post-quantum key encapsulation.
+Iteration 3 is in progress: next, administrators will edit clearances in the portal, and portion keys will be wrapped with hybrid post-quantum key encapsulation.
 
 > [!IMPORTANT]
 > This is a **demonstrator**, not a product. It uses fictional data and a fictional policy only, and is not hardened for production or for real classified information.
@@ -34,7 +34,7 @@ Iteration 3 is in progress: next, the panel will only offer the labels a person'
 
 - **Single sign-on** with OpenID Connect (authorization code with PKCE); tokens stay on the server, the browser only holds a session cookie.
 - **Document portal**: document list, new documents from templates, editing and read-only sessions, saving through the Document Server callbacks.
-- **Labelling panel** in the editor: shows the signed-in user, lists the valid labels, inserts protected portions and highlights the portion under the cursor. Entry points are also in the editor's context menu and **Insert** tab. The panel speaks English or French, following the editor's language.
+- **Labelling panel** in the editor: shows the signed-in user, offers new portions only the labels the signed-in person's clearance allows, inserts protected portions and highlights the portion under the cursor. Entry points are also in the editor's context menu and **Insert** tab. The panel speaks English or French, following the editor's language.
 - **Document label** computed from a base label and the portions' labels, with two rules: `clear-parts` (the base label plus an indicator when a portion is more restrictive) or `high-water-mark` (the ADatP-4774.1 dominant label).
 - **Co-editing**: portions and the document label reach co-authors in real time; concurrent insertions converge to the right label.
 - **Policy service**: Open XML SPIF 2.1 reader, valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part.

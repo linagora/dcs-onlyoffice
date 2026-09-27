@@ -7,7 +7,7 @@ import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import { callEditorMethod, type PluginInfo } from './onlyoffice.ts';
-import { type DocumentLabelRequest, fetchDefaultPolicyLabels, type LabelView } from './policy.ts';
+import { type DocumentLabelRequest, fetchAllowedLabels, fetchDefaultPolicyLabels, type LabelView } from './policy.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList } from './PortionList.tsx';
 import { type InsertionResult, insertPortion, type StoredPortion, writeDocumentLabel } from './portions.ts';
@@ -39,6 +39,10 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
   const policy = labelList[0]?.policy ?? null;
+  // New portions only offer the labels the person's clearance allows: an
+  // author never writes what they could not read. Null until the policy is known.
+  const allowedLabels = useLoadable<LabelView[] | null>(async () => (policy === null ? null : fetchAllowedLabels(policy)), [policy]);
+  const offeredLabels = allowedLabels.status === 'loaded' ? allowedLabels.value : null;
   // Until the author picks one, the base label is the least restrictive.
   const baseLabelCode = documentState?.baseLabelCode ?? labelList[0]?.code ?? null;
   const portions = documentState?.portions ?? NO_PORTIONS;
@@ -56,7 +60,8 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const requestInsertion = useCallback((): void => {
     setInsertionRequested(true);
   }, []);
-  useInsertionEntryPoints(pluginReady, !readOnly, requestInsertion);
+  // The editor's menus only offer an insertion the panel can carry out.
+  useInsertionEntryPoints(pluginReady, !readOnly && offeredLabels !== null && offeredLabels.length > 0, requestInsertion);
 
   const selectPortion = (portion: StoredPortion): void => {
     callEditorMethod('SelectContentControl', [portion.internalId]).catch((error: unknown) => {
@@ -134,7 +139,15 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
           {!readOnly && (
             <section aria-labelledby="new-portion-title">
               <h2 id="new-portion-title">{messages.newPortionTitle}</h2>
-              <PortionForm labels={labelList} insertionRequested={insertionRequested} onInsert={insert} />
+              {allowedLabels.status === 'failed' && <p class="error">{messages.allowedLabelsFailed(allowedLabels.reason)}</p>}
+              {offeredLabels !== null && offeredLabels.length === 0 && (
+                <p class="muted" data-testid="no-allowed-label">
+                  {messages.noAllowedLabel}
+                </p>
+              )}
+              {offeredLabels !== null && offeredLabels.length > 0 && (
+                <PortionForm labels={offeredLabels} insertionRequested={insertionRequested} onInsert={insert} />
+              )}
             </section>
           )}
         </>
