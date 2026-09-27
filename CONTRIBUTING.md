@@ -26,6 +26,7 @@ pnpm typecheck    # every package
 pnpm test         # policy service API tests, no stack needed
 pnpm e2e          # end-to-end tests against the running stack
 pnpm --filter @dcs/e2e search-document-server   # then: no portion text among ONLYOFFICE's working files
+pnpm --filter @dcs/e2e check-internal-route     # the Document Server's route serves a document to its own token only
 ```
 
 The portal and the policy service run their TypeScript sources directly with Node.js type stripping, so after a change to them, rebuild their images: `docker compose up -d --build`.

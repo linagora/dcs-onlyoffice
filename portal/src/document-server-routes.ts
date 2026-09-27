@@ -1,19 +1,19 @@
 import { createReadStream } from 'node:fs';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+import type { BaseLabelAudit } from './base-label-audit.ts';
 import { refreshBindingReferences } from './binding.ts';
 import type { PortalConfig } from './config.ts';
-import type { BaseLabelAudit } from './base-label-audit.ts';
 import { type BaseLabels, baseLabelCodeOf } from './document-labels.ts';
 import { DOCX_CONTENT_TYPE, findDocument, type SaveKind, saveDocumentContent } from './documents.ts';
+import { INTERNAL_DOCUMENTS_PATH, internalDocumentUrl } from './editor-config.ts';
 import {
-  bearerToken,
   CALLBACK_FAILED,
   CALLBACK_RECEIVED,
   CALLBACK_STATUS,
   type CallbackPayload,
   readVerifiedCallback,
+  readVerifiedDownloadUrl,
   toInternalUrl,
-  verifyOnlyofficeToken,
 } from './onlyoffice.ts';
 
 interface DocumentParams {
@@ -31,10 +31,12 @@ export interface SaveAudit {
 export function registerDocumentServerRoutes(app: FastifyInstance, config: PortalConfig, saveAudit: SaveAudit): FastifyInstance {
   // Routes under /internal are only reachable from the Compose network: the
   // reverse proxy refuses them.
-  app.get<{ Params: DocumentParams }>('/internal/documents/:id/content', async (request, reply) => {
-    if (!(await isSignedByDocumentServer(request.headers.authorization, config.onlyofficeJwtSecret))) {
-      request.log.warn({ documentId: request.params.id }, 'Rejected an unsigned document download');
-      return reply.code(401).send({ error: 'Unsigned request' });
+  // Only a Document Server download token for this very document's URL.
+  app.get<{ Params: DocumentParams }>(`${INTERNAL_DOCUMENTS_PATH}/:id/content`, async (request, reply) => {
+    const url = await readVerifiedDownloadUrl(request.headers.authorization, config.onlyofficeJwtSecret);
+    if (url !== internalDocumentUrl(config, request.params.id, 'content')) {
+      request.log.warn({ documentId: request.params.id }, 'Rejected a document download without a Document Server token for it');
+      return reply.code(401).send({ error: 'No Document Server token for this document' });
     }
     const document = await findDocument(config.documentsDirectory, request.params.id);
     if (document === null) {
@@ -43,7 +45,7 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
     return reply.type(DOCX_CONTENT_TYPE).send(createReadStream(document.filePath));
   });
 
-  app.post<{ Params: DocumentParams }>('/internal/documents/:id/callback', async (request, reply) => {
+  app.post<{ Params: DocumentParams }>(`${INTERNAL_DOCUMENTS_PATH}/:id/callback`, async (request, reply) => {
     const callback = await readVerifiedCallback(
       request.body,
       request.headers.authorization,
@@ -90,12 +92,6 @@ async function inArrivalOrder<T>(documentId: string, task: () => Promise<T>): Pr
 async function runAfter<T>(previous: Promise<unknown>, task: () => Promise<T>): Promise<T> {
   await previous;
   return task();
-}
-
-// With JWT enabled, the Document Server signs its requests to the document URL.
-async function isSignedByDocumentServer(authorization: string | undefined, secret: string): Promise<boolean> {
-  const token = bearerToken(authorization);
-  return token !== null && (await verifyOnlyofficeToken(token, secret)) !== null;
 }
 
 async function storeCallbackFile(
