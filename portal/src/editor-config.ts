@@ -59,6 +59,14 @@ export function isEditorLanguage(value: unknown): value is EditorLanguage {
   return languages.includes(value);
 }
 
+// The routes the Document Server calls, on the Compose network: the reverse
+// proxy refuses /internal/.
+export const INTERNAL_DOCUMENTS_PATH = '/internal/documents';
+
+export function internalDocumentUrl(config: PortalConfig, documentId: string, route: 'content' | 'callback'): string {
+  return `${config.portalInternalUrl}${INTERNAL_DOCUMENTS_PATH}/${documentId}/${route}`;
+}
+
 export function buildEditorConfig(
   document: StoredDocument,
   user: EditorUser,
@@ -67,18 +75,17 @@ export function buildEditorConfig(
   language: EditorLanguage,
   config: PortalConfig,
 ): EditorConfig {
-  const documentUrl = `${config.portalInternalUrl}/internal/documents/${document.id}`;
   return {
     document: {
       fileType: 'docx',
       key: document.key,
       title: document.fileName,
-      url: `${documentUrl}/content`,
+      url: internalDocumentUrl(config, document.id, 'content'),
       permissions: { edit: mode === 'edit', download: true },
     },
     documentType: 'word',
     editorConfig: {
-      callbackUrl: `${documentUrl}/callback`,
+      callbackUrl: internalDocumentUrl(config, document.id, 'callback'),
       lang: language,
       mode,
       user,

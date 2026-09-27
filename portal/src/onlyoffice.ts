@@ -66,6 +66,16 @@ export async function readVerifiedCallback(
   return parseCallbackPayload(isRecord(verified.payload) ? verified.payload : verified);
 }
 
+// The Document Server signs its download requests with { payload: { url } }:
+// the URL of a verified token of that shape, null for any other token, such
+// as an editor configuration, which every browser receives.
+export async function readVerifiedDownloadUrl(authorization: string | undefined, secret: string): Promise<string | null> {
+  const token = bearerToken(authorization);
+  const verified = token === null ? null : await verifyOnlyofficeToken(token, secret);
+  const payload: unknown = verified === null ? null : verified.payload;
+  return isRecord(payload) && typeof payload.url === 'string' ? payload.url : null;
+}
+
 export function bearerToken(authorization: string | undefined): string | null {
   return authorization?.startsWith('Bearer ') === true ? authorization.slice('Bearer '.length) : null;
 }

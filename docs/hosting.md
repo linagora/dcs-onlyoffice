@@ -86,7 +86,7 @@ The policy service loads these files when it starts, so run `docker compose rest
 - redirects HTTP to HTTPS;
 - passes websockets to the Document Server, which co-editing needs;
 - sends `X-Forwarded-Proto` and `X-Forwarded-Host`;
-- refuses `/internal/`, which only the Document Server may call from the Compose network.
+- refuses `/internal/`, which only the Document Server may call from the Compose network. The portal also serves a document there only to a Document Server download token for that document, since its published port can be reached without the proxy.
 
 No authentication gate may sit in front of these sites: the editor's websockets and the token-authenticated OpenTDF calls would break.
 

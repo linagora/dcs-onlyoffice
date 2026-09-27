@@ -59,6 +59,8 @@ jobs:
                    AND EXISTS (SELECT FROM pg_namespace WHERE nspname = 'opentdf_policy' AND nspowner = r.oid)
                    AND EXISTS (SELECT FROM pg_stat_activity WHERE usename = rolname)
               FROM pg_roles r WHERE rolname = 'dcs_opentdf'" | tee /dev/stderr | grep -qx t
+      - name: Check that the internal route serves a document only for a Document Server token that names it
+        run: pnpm --filter @dcs/e2e check-internal-route
       - name: Install browsers
         run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium firefox
       - name: Run end-to-end tests

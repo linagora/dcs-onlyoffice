@@ -36,6 +36,7 @@ These are known properties of the demonstrator, not vulnerabilities:
 - Lowering a base label is logged, not prevented: someone able to edit the file outside the panel could still lower it.
 - The portal's refusal controls who opens a document; the document's content in clear stays in clear in the portal's storage and on the Document Server. The document list shows how many documents a person may not open, and an address tells whether a document exists.
 - OpenTDF answers a decision it could not make, for instance when the clearance directory cannot be read, the same way as a refusal: the panel shows both as "Access denied" until it is reopened.
+- The Document Server fetches the addresses an editor makes it fetch, private ones included, and signs its requests: the portal's internal route cannot tell a download of the edited document from one an editor provoked.
 - The `standalone` profile is for development and isolated demos: it uses a local certificate authority, fictional accounts whose password is their login, and it allows the OAuth password grant for the tests.
 - Portal sessions live in memory, and ONLYOFFICE Docs Community Edition keeps editing sessions in memory: a restart signs users out and closes open sessions.
 

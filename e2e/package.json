@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "e2e": "playwright test",
+    "check-internal-route": "node scripts/check-internal-route.ts",
     "search-document-server": "node scripts/search-document-server.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
