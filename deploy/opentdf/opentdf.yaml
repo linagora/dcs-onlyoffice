@@ -1,6 +1,7 @@
-# OpenTDF platform v0.27.0: running and trusting the IdP; nothing encrypts yet.
+# OpenTDF platform v0.27.0: trusts the IdP and resolves each person's
+# clearances from the clearance directory.
 # Environment variables only override keys present in this file: the issuer,
-# audience, allowed origin and database password below are placeholders that
+# audience, allowed origin and database passwords below are placeholders that
 # docker-compose.yml overrides.
 
 logger:
@@ -22,8 +23,54 @@ mode: all
 
 services:
   entityresolution:
-    # The default "keycloak" mode would query a Keycloak admin API.
-    mode: claims
+    # Each person's clearances come from the clearance directory, looked up by
+    # the email of the access token (ADR 0002). A preview in OpenTDF 0.27.
+    mode: multi-strategy
+    failure_strategy: fail-fast
+    providers:
+      directory:
+        type: sql
+        connection:
+          driver: postgres
+          host: postgres
+          port: 5432
+          database: opentdf
+          username: dcs_directory_reader
+          password: placeholder
+          ssl_mode: disable
+    mapping_strategies:
+      - name: clearance_directory
+        provider: directory
+        entity_type: subject
+        conditions:
+          jwt_claims:
+            - claim: email
+              operator: exists
+        # Always one row: a person without a clearance valid now gets empty
+        # lists, hence no access. Lists are joined with commas, since the
+        # driver's array format is not portable: the policy service's
+        # directory module describes the format and refuses names that would
+        # break it.
+        query: |
+          WITH valid AS (
+            SELECT policy, classification, categories
+            FROM directory.clearances
+            WHERE email = lower($1) AND now() >= valid_from AND now() < valid_until
+          )
+          SELECT
+            coalesce((SELECT string_agg(policy || ':' || classification, ',') FROM valid), '') AS classifications,
+            coalesce((SELECT string_agg(valid.policy || ':' || category, ',') FROM valid, unnest(valid.categories) AS category), '') AS categories
+        input_mapping:
+          - jwt_claim: email
+            parameter: email
+            required: true
+        output_mapping:
+          - source_column: classifications
+            claim_name: classifications
+            transformation: csv_to_array
+          - source_column: categories
+            claim_name: categories
+            transformation: csv_to_array
   kas:
     keyring:
       - kid: r1

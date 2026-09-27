@@ -5,6 +5,10 @@ export function sameName(left: string, right: string): boolean {
   return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 }
 
+export function policyNamed(policies: SecurityPolicy[], name: string): SecurityPolicy | null {
+  return policies.find((candidate) => sameName(candidate.name, name)) ?? null;
+}
+
 export function classificationNamed(policy: SecurityPolicy, name: string): SecurityClassification | null {
   return policy.classifications.find((candidate) => sameName(candidate.name, name)) ?? null;
 }

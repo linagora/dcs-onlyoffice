@@ -12,3 +12,5 @@ coverage/
 test-results/
 playwright-report/
 blob-report/
+# Seeds with real people's addresses stay on the host.
+deploy/directory/seeds/local-*.json

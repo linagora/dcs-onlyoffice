@@ -20,7 +20,7 @@ With LemonLDAP::NG, these are options of the relying party: JWT format for acces
 
 ## Configuration
 
-Create `deploy/.env` with `deploy/scripts/init-env.sh`, which generates the secrets, then set:
+Create `deploy/.env` with `deploy/scripts/init-env.sh`, which generates the secrets, then set the values below. After an upgrade, run the script again: it adds the secrets a new version introduces and changes nothing else.
 
 | Variable | Hosted value |
 | --- | --- |

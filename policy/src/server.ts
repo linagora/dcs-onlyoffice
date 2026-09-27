@@ -1,6 +1,7 @@
 import { fastify, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
+import { type ClearanceDirectoryOptions, prepareClearanceDirectory } from './directory/seed.ts';
 import {
   enumerateValidLabels,
   type Label,
@@ -13,11 +14,12 @@ import {
 import { type Marking, renderMarking } from './marking.ts';
 import { computeDocumentLabel, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
-import { sameName } from './spif/lookup.ts';
+import { policyNamed } from './spif/lookup.ts';
 import { loadPolicies } from './spif/reader.ts';
 
 export interface PolicyServerOptions {
   spifDirectory: string;
+  clearanceDirectory?: ClearanceDirectoryOptions;
   markingLanguage?: string;
   reviewPeriodYears?: number;
   rollupRule?: RollupRule;
@@ -48,9 +50,15 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
   const now = options.now ?? ((): Date => new Date());
   const rollupRule = options.rollupRule ?? 'clear-parts';
   const app = fastify({ logger: options.logger ?? false });
+  const { clearanceDirectory } = options;
+  if (clearanceDirectory !== undefined) {
+    app.log.info(await prepareClearanceDirectory(clearanceDirectory, policies), 'Clearance directory ready');
+    app.addHook('onClose', async () => {
+      await clearanceDirectory.store.close();
+    });
+  }
 
-  const findPolicy = (name: string): SecurityPolicy | null =>
-    policies.find((policy) => sameName(policy.name, name)) ?? null;
+  const findPolicy = (name: string): SecurityPolicy | null => policyNamed(policies, name);
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
