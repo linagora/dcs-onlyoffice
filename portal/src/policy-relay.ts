@@ -12,7 +12,10 @@ export function registerPolicyRelay(app: FastifyInstance, policyInternalUrl: str
     url: `${RELAY_PREFIX}/*`,
     handler: async (request, reply) => {
       const { user } = requireSession(request);
-      const target = new URL(request.url.slice(RELAY_PREFIX.length), policyInternalUrl);
+      const target = policyServiceUrl(request.url.slice(RELAY_PREFIX.length), policyInternalUrl);
+      if (target === null) {
+        return reply.code(400).send({ error: 'Invalid policy path' });
+      }
       const response = await fetch(target, {
         method: request.method,
         headers: { 'Content-Type': 'application/json', ...identityHeaders(user) },
@@ -25,6 +28,15 @@ export function registerPolicyRelay(app: FastifyInstance, policyInternalUrl: str
     },
   });
   return app;
+}
+
+// The relayed path must stay a path of the policy service: a suffix starting
+// with "//" (or a backslash, which URLs read as a slash) would otherwise name
+// another host.
+function policyServiceUrl(suffix: string, policyInternalUrl: string): URL | null {
+  const base = new URL(policyInternalUrl);
+  const target = new URL(suffix.replace(/^[/\\]+/, '/'), base);
+  return target.origin === base.origin ? target : null;
 }
 
 // Header values must stay ASCII, so free-text fields are URI-encoded.

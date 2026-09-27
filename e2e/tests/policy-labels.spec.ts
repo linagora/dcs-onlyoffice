@@ -23,3 +23,13 @@ test('the portal relays policy requests only for signed-in users', async ({ page
   });
   expect(status).toEqual({ signedIn: 200, anonymous: 401 });
 });
+
+// A path starting with "//" after the relay prefix would name another host.
+test('the policy relay reaches no other host than the policy service', async ({ page }) => {
+  const answer = await page.evaluate(async () => {
+    const response = await fetch('/api/policy//portal:3000/healthz', { credentials: 'same-origin' });
+    return { status: response.status, body: await response.text() };
+  });
+  expect(answer.body).not.toContain('"status":"ok"');
+  expect(answer.status).toBe(404);
+});
