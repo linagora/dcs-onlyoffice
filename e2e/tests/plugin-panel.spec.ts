@@ -1,6 +1,6 @@
 import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
-import { pluginFrame, pluginInfoIdentity, pluginPanel } from './support/plugin.ts';
+import { breakEditorCommands, pluginFrame, pluginInfoIdentity, pluginPanel, restoreEditorCommands } from './support/plugin.ts';
 
 test('the labelling panel opens with the document and shows who is signed in', async ({ page }) => {
   await openDocument(page, 'exercise-northwind');
@@ -41,4 +41,17 @@ test('the editor exposes the user identity to the plugin', async ({ page }) => {
   const identity = await pluginInfoIdentity(frame);
   test.info().annotations.push({ type: 'Asc.plugin.info identity', description: JSON.stringify(identity) });
   expect(identity).toEqual({ userId: 'alice', userName: 'Alice Martin' });
+});
+
+test('the panel warns while the document cannot be reread, until a reread succeeds', async ({ page }) => {
+  await openDocument(page, 'exercise-northwind');
+  const panel = pluginPanel(page);
+  await expect(panel.getByTestId('identity-name')).toHaveText('Alice Martin');
+  const frame = await pluginFrame(page);
+
+  await breakEditorCommands(frame, 'Fictional editor failure');
+  await expect(panel.getByTestId('reread-warning')).toContainText('Fictional editor failure');
+
+  await restoreEditorCommands(frame);
+  await expect(panel.getByTestId('reread-warning')).toHaveCount(0);
 });

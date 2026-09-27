@@ -5,17 +5,22 @@ export interface PluginInfoIdentity {
   userName: string | null;
 }
 
+type CallCommand = (command: () => unknown, isClose: boolean, isCalc: boolean, callback: (result: unknown) => void) => void;
+
 // What the editor's plugin runtime installs on the plugin frame's window.
 interface AscPluginRuntime {
   plugin?: {
     info?: Record<string, unknown>;
     executeMethod?: (method: string, args: unknown[], callback: (result: unknown) => void) => void;
+    callCommand?: CallCommand;
   };
 }
 
 declare global {
   interface Window {
     Asc?: AscPluginRuntime;
+    // The editor's own callCommand, kept while a test simulates a failure.
+    dcsWorkingCallCommand?: CallCommand;
   }
 }
 
@@ -63,4 +68,28 @@ export async function executeEditorMethod(frame: Frame, name: string, parameters
       }),
     { name, parameters },
   );
+}
+
+// Simulates an editor that fails every command the plugin sends, as if the
+// editor had broken, until restoreEditorCommands is called.
+export async function breakEditorCommands(frame: Frame, message: string): Promise<void> {
+  await frame.evaluate((failure) => {
+    const plugin = window.Asc?.plugin;
+    if (plugin?.callCommand === undefined) {
+      throw new Error('The plugin runtime has no callCommand');
+    }
+    window.dcsWorkingCallCommand = plugin.callCommand;
+    plugin.callCommand = () => {
+      throw new Error(failure);
+    };
+  }, message);
+}
+
+export async function restoreEditorCommands(frame: Frame): Promise<void> {
+  await frame.evaluate(() => {
+    const plugin = window.Asc?.plugin;
+    if (plugin !== undefined && window.dcsWorkingCallCommand !== undefined) {
+      plugin.callCommand = window.dcsWorkingCallCommand;
+    }
+  });
 }
