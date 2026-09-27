@@ -150,7 +150,7 @@ function readTagSet(element: Element): CategoryTagSet {
     codeArc: oid.slice(oid.lastIndexOf('.') + 1),
     type: categoryType(tag, name),
     singleSelection: tag.getAttribute('singleSelection') === 'true',
-    maxSelection: maxSelection === null || maxSelection === '' ? null : Number.parseInt(maxSelection, 10),
+    maxSelection: maxSelection === null || maxSelection === '' ? null : parseInteger(maxSelection, 'maxSelection', tag),
     categories: children(tag, 'tagCategory').map(readTagCategory),
     qualifiers: readQualifiers(tag),
   };
@@ -204,7 +204,7 @@ function readCategoryGroup(element: Element): CategoryGroup {
   const lacv = element.getAttribute('lacv');
   return {
     tagSet: requiredAttribute(element, 'tagSetRef'),
-    lacv: lacv === null || lacv === '' ? null : Number.parseInt(lacv, 10),
+    lacv: lacv === null || lacv === '' ? null : parseInteger(lacv, 'lacv', element),
   };
 }
 
@@ -352,9 +352,13 @@ function requiredAttribute(element: Element, name: string): string {
 }
 
 function integerAttribute(element: Element, name: string): number {
-  const value = Number.parseInt(requiredAttribute(element, name), 10);
-  if (!Number.isInteger(value)) {
-    throw new SpifError(`attribute ${name} on ${element.localName} must be an integer`);
+  return parseInteger(requiredAttribute(element, name), name, element);
+}
+
+// Number.parseInt would read "2oops" as 2: the whole value must be digits.
+function parseInteger(text: string, name: string, element: Element): number {
+  if (!/^\d+$/.test(text)) {
+    throw new SpifError(`attribute ${name} on ${element.localName} must be a non-negative integer, not "${text}"`);
   }
-  return value;
+  return Number(text);
 }

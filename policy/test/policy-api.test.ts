@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
@@ -494,4 +496,17 @@ describe('policy service start-up', () => {
   it('refuses to start on a SPIF it cannot read, naming the file', async () => {
     await assert.rejects(buildPolicyServer({ spifDirectory: BROKEN_SPIFS }), /broken\.spif\.xml/);
   });
+
+  // A lenient parse would read "2oops" as 2, and a NaN limit would never apply.
+  for (const maxSelection of ['2oops', 'none']) {
+    it(`refuses a SPIF whose maxSelection is ${maxSelection}`, async () => {
+      const directory = await mkdtemp(path.join(tmpdir(), 'dcs-spif-'));
+      const demo = readFileSync(path.join(DEMO_SPIFS, 'demo-fr.spif.xml'), 'utf8');
+      await writeFile(
+        path.join(directory, 'demo-fr.spif.xml'),
+        demo.replace('tagType="enumerated" enumType="permissive">', `tagType="enumerated" enumType="permissive" maxSelection="${maxSelection}">`),
+      );
+      await assert.rejects(buildPolicyServer({ spifDirectory: directory }), /maxSelection/);
+    });
+  }
 });
