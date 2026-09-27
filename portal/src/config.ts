@@ -9,6 +9,7 @@ export interface PortalConfig {
   portalInternalUrl: string;
   onlyofficeInternalUrl: string;
   policyInternalUrl: string;
+  opentdfInternalUrl: string;
   onlyofficeJwtSecret: string;
   // Language editors open in, unless a document's address asks for another.
   editorLanguage: EditorLanguage;
@@ -31,6 +32,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     portalInternalUrl: env.PORTAL_INTERNAL_URL ?? 'http://portal:3000',
     onlyofficeInternalUrl: env.ONLYOFFICE_INTERNAL_URL ?? 'http://onlyoffice',
     policyInternalUrl: env.POLICY_INTERNAL_URL ?? 'http://policy:3001',
+    opentdfInternalUrl: env.OPENTDF_INTERNAL_URL ?? 'http://opentdf:8080',
     onlyofficeJwtSecret: requireEnv(env, 'ONLYOFFICE_JWT_SECRET'),
     editorLanguage: readEditorLanguage(env),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',

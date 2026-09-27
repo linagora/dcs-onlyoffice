@@ -1,7 +1,9 @@
-import type { Page } from '@playwright/test';
-import type { DemoAccount } from './support/accounts.ts';
+import type { Frame, Page } from '@playwright/test';
+import { DEMO_ACCOUNTS, type DemoAccount, signedInPage } from './support/accounts.ts';
 import { deploymentSetting } from './support/deployment.ts';
+import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { pluginFrame } from './support/plugin.ts';
 
 const DOMAIN = process.env.DOMAIN ?? 'dcs.test';
 const PLATFORM = `https://tdf.${DOMAIN}`;
@@ -85,4 +87,110 @@ test('the portal hands no access token to the browser', async ({ page }) => {
   const status = await page.evaluate(async () => (await fetch('/api/token', { credentials: 'same-origin' })).status);
 
   expect(status).toBe(404);
+});
+
+interface ConnectAnswer {
+  status: number;
+  body: unknown;
+}
+
+interface RelayRequest {
+  method: string;
+  // Whether the call carries the Connect protocol header the web SDK sends.
+  connect: boolean;
+  // A token the browser would add itself.
+  authorization: string | null;
+  signedIn: boolean;
+}
+
+const SDK_CALL = { connect: true, authorization: null, signedIn: true } as const;
+
+const LIST_KAS = 'policy.kasregistry.KeyAccessServerRegistryService/ListKeyAccessServers';
+
+// Calls the portal's OpenTDF relay as the web SDK does: a Connect unary call,
+// in JSON, from a page of the portal's origin.
+async function callRelay(target: Page | Frame, request: RelayRequest): Promise<ConnectAnswer> {
+  return target.evaluate(async ({ method, connect, authorization, signedIn }) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (connect) {
+      headers['Connect-Protocol-Version'] = '1';
+    }
+    if (authorization !== null) {
+      headers.Authorization = authorization;
+    }
+    const response = await fetch(`/api/opentdf/${method}`, {
+      method: 'POST',
+      credentials: signedIn ? 'same-origin' : 'omit',
+      headers,
+      body: '{}',
+    });
+    const text = await response.text();
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch (error: unknown) {
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+    }
+    return { status: response.status, body };
+  }, request);
+}
+
+// Calls OpenTDF directly with a token, as the relay should.
+async function callPlatform(page: Page, method: string, token: string | null): Promise<ConnectAnswer> {
+  return page.evaluate(
+    async ({ platform, method, token }) => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1' };
+      if (token !== null) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const response = await fetch(`${platform}/${method}`, { method: 'POST', headers, body: '{}' });
+      return { status: response.status, body: await response.json() };
+    },
+    { platform: PLATFORM, method, token },
+  );
+}
+
+test("the portal relays the plugin's OpenTDF calls with the signed-in person's token", async ({ page, account }) => {
+  await openDocument(page, 'exercise-northwind');
+  const frame = await pluginFrame(page);
+  const direct = await callPlatform(page, LIST_KAS, await requestAccessToken(page, account));
+
+  // A token sent by the browser is never the one that reaches OpenTDF.
+  const relayed = await callRelay(frame, { ...SDK_CALL, method: LIST_KAS, authorization: 'Bearer not-a-token' });
+
+  expect(direct.status).toBe(200);
+  expect(relayed).toEqual(direct);
+});
+
+test('the relay refuses other calls, calls without the Connect protocol and anonymous callers', async ({ page }) => {
+  expect(await callRelay(page, { ...SDK_CALL, method: 'policy.namespaces.NamespaceService/ListNamespaces' })).toMatchObject({ status: 404 });
+  expect(await callRelay(page, { ...SDK_CALL, method: LIST_KAS, connect: false })).toMatchObject({ status: 415 });
+  expect(await callRelay(page, { ...SDK_CALL, method: LIST_KAS, signedIn: false })).toMatchObject({ status: 401 });
+});
+
+// A token issued now expires after the portal's first tokens: once OpenTDF
+// refuses it, a relayed call only succeeds with a refreshed token. Waiting
+// that long covers the IdP's token lifetime and OpenTDF's clock skew.
+test('once access tokens expire, the relay renews them, unless the person has signed out of the IdP', async ({ page, account, browser }) => {
+  const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
+  try {
+    expect(await callRelay(page, { ...SDK_CALL, method: LIST_KAS })).toMatchObject({ status: 200 });
+    expect(await callRelay(bob, { ...SDK_CALL, method: LIST_KAS })).toMatchObject({ status: 200 });
+    const witness = await requestAccessToken(page, account);
+    await bob.goto(`${IDP}/?logout=1`);
+
+    await expect
+      .poll(async () => (await callPlatform(page, LIST_KAS, witness)).status, { timeout: 200_000, intervals: [5_000] })
+      .toBe(401);
+
+    expect(await callRelay(page, { ...SDK_CALL, method: LIST_KAS })).toMatchObject({ status: 200 });
+    await bob.goto('/healthz');
+    expect(await callRelay(bob, { ...SDK_CALL, method: LIST_KAS })).toMatchObject({ status: 401 });
+    await bob.goto('/');
+    await expect(bob).toHaveURL(/\/\/idp\./);
+  } finally {
+    await bob.context().close();
+  }
 });

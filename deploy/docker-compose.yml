@@ -52,6 +52,7 @@ services:
       # Trusts the standalone proxy's certificates for server-to-server calls.
       NODE_EXTRA_CA_CERTS: /pki/public/ca.crt
       POLICY_INTERNAL_URL: http://policy:3001
+      OPENTDF_INTERNAL_URL: http://opentdf:8080
     volumes:
       - documents:/data/documents
       - ./demo/documents:/templates:ro

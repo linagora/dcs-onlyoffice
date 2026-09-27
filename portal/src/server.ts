@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fastifyCookie } from '@fastify/cookie';
 import { fastifyStatic } from '@fastify/static';
 import { fastify, type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { AccessTokens } from './auth/access-tokens.ts';
 import { OidcClient } from './auth/oidc.ts';
 import { registerAuth, requireSession } from './auth/routes.ts';
 import { SessionStore } from './auth/sessions.ts';
@@ -11,6 +12,7 @@ import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { createDocumentFromTemplate, DOCX_CONTENT_TYPE, findDocument, listDocuments, listTemplates } from './documents.ts';
 import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
 import { requestForceSave } from './onlyoffice.ts';
+import { registerOpentdfRelay } from './opentdf-relay.ts';
 import { renderDocumentListPage, renderEditorPage } from './pages.ts';
 import { registerPluginRoutes } from './plugin-routes.ts';
 import { registerPolicyRelay } from './policy-relay.ts';
@@ -40,11 +42,9 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   });
   const plugin = registerPluginRoutes(app, config);
   app.register(fastifyCookie);
-  registerAuth(app, {
-    oidc: new OidcClient(config.oidc),
-    sessions: new SessionStore(SESSION_LIFETIME_MS),
-    portalPublicUrl: config.portalPublicUrl,
-  });
+  const oidc = new OidcClient(config.oidc);
+  const sessions = new SessionStore(SESSION_LIFETIME_MS);
+  registerAuth(app, { oidc, sessions, portalPublicUrl: config.portalPublicUrl });
   app.addContentTypeParser(
     'application/x-www-form-urlencoded',
     { parseAs: 'string' },
@@ -66,6 +66,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   app.get('/api/me', async (request) => requireSession(request).user);
   registerPolicyRelay(app, config.policyInternalUrl);
+  registerOpentdfRelay(app, { opentdfInternalUrl: config.opentdfInternalUrl, accessTokens: new AccessTokens(oidc, sessions) });
 
   app.post<{ Body: CreateDocumentBody }>('/documents', async (request, reply) => {
     const templateId = request.body.template ?? '';
