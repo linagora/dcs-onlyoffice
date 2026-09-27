@@ -83,12 +83,9 @@ function addRollupIndicator(policy: SecurityPolicy, label: Label): Label | null 
   return highWaterMark(policy, [label, { ...label, categories: [...label.categories, ...extra.categories] }]);
 }
 
-// True when a reader allowed by `base` may be refused `portion`, following the
-// SPIF access control decision (as spiffing implements it): the
-// classification must be covered, every restrictive category held, and one
-// value of each permissive category held. Informative categories take no
-// part in it. OpenTDF's anyOf attribute rule reads permissive values the
-// same way.
+// True when a reader allowed by `base` may be refused `portion` by the access
+// decision (see access.ts). OpenTDF's anyOf attribute rule reads permissive
+// values the same way.
 export function isMoreRestrictive(policy: SecurityPolicy, portion: Label, base: Label): boolean {
   const hierarchyOf = (label: Label): number =>
     classificationNamed(policy, label.classification)?.hierarchy ?? 0;

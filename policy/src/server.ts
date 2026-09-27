@@ -1,6 +1,8 @@
 import { fastify, type FastifyInstance, type FastifyRequest } from 'fastify';
+import { accessDecision } from './access.ts';
 import { reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
+import { type ClearanceTerms, type ClearanceTermsRequest, readClearanceTerms } from './directory/clearance.ts';
 import { type ClearanceDirectoryOptions, prepareClearanceDirectory } from './directory/seed.ts';
 import {
   enumerateValidLabels,
@@ -151,6 +153,31 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     return attributes.ok ? { attributes: attributes.attributes } : reply.code(422).send({ error: attributes.error });
   });
 
+  // Whether a clearance lets its holder read a label.
+  app.post<{ Params: PolicyParams }>('/policies/:policy/access-decision', async (request, reply) => {
+    const policy = findPolicy(request.params.policy);
+    if (policy === null) {
+      return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
+    }
+    const body = readDecisionRequest(request.body);
+    if (body === null) {
+      return reply.code(400).send({ error: 'Expected { code, clearance: { classification, categories: ["<tag set>:<category>"] } or null }' });
+    }
+    const label = labelFromCode(policy, body.code);
+    if (label === null) {
+      return reply.code(422).send({ error: `${body.code} is not a valid label of ${policy.name}` });
+    }
+    let terms: ClearanceTerms | null = null;
+    if (body.clearance !== null) {
+      const read = readClearanceTerms(policy, body.clearance);
+      if (!read.ok) {
+        return reply.code(422).send({ error: read.error });
+      }
+      terms = read.terms;
+    }
+    return { granted: accessDecision(policy, terms, label) };
+  });
+
   app.post<{ Params: PolicyParams; Querystring: LanguageQuery }>(
     '/policies/:policy/document-label',
     async (request, reply) => {
@@ -198,6 +225,30 @@ function labelFromCode(policy: SecurityPolicy, code: string): Label | null {
   const request = parseLabelCode(policy, code);
   const validation = request === null ? null : validateLabel(policy, request);
   return validation !== null && validation.valid ? validation.label : null;
+}
+
+interface DecisionRequest {
+  code: string;
+  clearance: ClearanceTermsRequest | null;
+}
+
+function readDecisionRequest(body: unknown): DecisionRequest | null {
+  const code = readCode(body);
+  if (code === null || typeof body !== 'object' || body === null || !('clearance' in body)) {
+    return null;
+  }
+  const { clearance } = body;
+  if (clearance === null) {
+    return { code, clearance: null };
+  }
+  if (typeof clearance !== 'object' || !('classification' in clearance) || typeof clearance.classification !== 'string' || !('categories' in clearance)) {
+    return null;
+  }
+  const categories = unknownArray(clearance.categories);
+  if (categories === null || !categories.every((category): category is string => typeof category === 'string')) {
+    return null;
+  }
+  return { code, clearance: { classification: clearance.classification, categories } };
 }
 
 interface DocumentLabelRequest {
