@@ -79,7 +79,6 @@ describe('policy API with the demo SPIF', () => {
       labels.map((label) => label.marking.text),
       [
         'NON PROTÉGÉ',
-        'NON PROTÉGÉ – DIFFUSION OTAN',
         'DIFFUSION RESTREINTE',
         'DIFFUSION RESTREINTE – SPÉCIAL FRANCE',
         'DIFFUSION RESTREINTE – DIFFUSION OTAN',
@@ -93,7 +92,6 @@ describe('policy API with the demo SPIF', () => {
       labels.map((label) => [label.code, label.marking.color]),
       [
         ['DEMO-FR:1', '#2E7D32'],
-        ['DEMO-FR:1/2.1', '#2E7D32'],
         ['DEMO-FR:2', '#E8590C'],
         ['DEMO-FR:2/1.1', '#E8590C'],
         ['DEMO-FR:2/2.1', '#E8590C'],
@@ -129,6 +127,14 @@ describe('policy API with the demo SPIF', () => {
     const answer = await validateDemo({
       classification: 'NON PROTEGE',
       categories: [{ tagSet: 'Special Handling', values: ['SPECIAL FRANCE'] }],
+    });
+    assert.equal(answer.valid, false);
+  });
+
+  it('refuses a release to NATO on NON PROTEGE', async () => {
+    const answer = await validateDemo({
+      classification: 'NON PROTEGE',
+      categories: [{ tagSet: 'Releasable To', values: ['NATO'] }],
     });
     assert.equal(answer.valid, false);
   });
@@ -316,7 +322,6 @@ describe('document label rollup with the demo SPIF', () => {
   });
 
   const NP = 'DEMO-FR:1';
-  const NP_NATO = 'DEMO-FR:1/2.1';
   const DR = 'DEMO-FR:2';
   const DR_SF = 'DEMO-FR:2/1.1';
   const DR_NATO = 'DEMO-FR:2/2.1';
@@ -329,17 +334,10 @@ describe('document label rollup with the demo SPIF', () => {
   // portion releasable to NATO only is more restrictive than it, while a
   // portion without release category never is on that account.
   const clearPartsMatrix: Record<string, Record<string, string>> = {
-    [NP]: { [NP]: NP, [NP_NATO]: 'DEMO-FR:1/3.1', [DR]: 'DEMO-FR:1/3.1', [DR_SF]: 'DEMO-FR:1/3.1', [DR_NATO]: 'DEMO-FR:1/3.1' },
-    [NP_NATO]: {
-      [NP]: NP_NATO,
-      [NP_NATO]: NP_NATO,
-      [DR]: 'DEMO-FR:1/2.1/3.1',
-      [DR_SF]: 'DEMO-FR:1/2.1/3.1',
-      [DR_NATO]: 'DEMO-FR:1/2.1/3.1',
-    },
-    [DR]: { [NP]: DR, [NP_NATO]: 'DEMO-FR:2/3.1', [DR]: DR, [DR_SF]: 'DEMO-FR:2/3.1', [DR_NATO]: 'DEMO-FR:2/3.1' },
-    [DR_SF]: { [NP]: DR_SF, [NP_NATO]: 'DEMO-FR:2/1.1/3.1', [DR]: DR_SF, [DR_SF]: DR_SF, [DR_NATO]: 'DEMO-FR:2/1.1/3.1' },
-    [DR_NATO]: { [NP]: DR_NATO, [NP_NATO]: DR_NATO, [DR]: DR_NATO, [DR_SF]: 'DEMO-FR:2/2.1/3.1', [DR_NATO]: DR_NATO },
+    [NP]: { [NP]: NP, [DR]: 'DEMO-FR:1/3.1', [DR_SF]: 'DEMO-FR:1/3.1', [DR_NATO]: 'DEMO-FR:1/3.1' },
+    [DR]: { [NP]: DR, [DR]: DR, [DR_SF]: 'DEMO-FR:2/3.1', [DR_NATO]: 'DEMO-FR:2/3.1' },
+    [DR_SF]: { [NP]: DR_SF, [DR]: DR_SF, [DR_SF]: DR_SF, [DR_NATO]: 'DEMO-FR:2/1.1/3.1' },
+    [DR_NATO]: { [NP]: DR_NATO, [DR]: DR_NATO, [DR_SF]: 'DEMO-FR:2/2.1/3.1', [DR_NATO]: DR_NATO },
   };
   for (const [base, row] of Object.entries(clearPartsMatrix)) {
     for (const [portion, expected] of Object.entries(row)) {
@@ -368,11 +366,10 @@ describe('document label rollup with the demo SPIF', () => {
   // although the access decision would refuse the second part to a reader
   // without NATO. The clear-parts rule flags that case.
   const highWaterMarkMatrix: Record<string, Record<string, string>> = {
-    [NP]: { [NP]: NP, [NP_NATO]: NP, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR },
-    [NP_NATO]: { [NP]: NP, [NP_NATO]: NP_NATO, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR_NATO },
-    [DR]: { [NP]: DR, [NP_NATO]: DR, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR },
-    [DR_SF]: { [NP]: DR_SF, [NP_NATO]: DR_SF, [DR]: DR_SF, [DR_SF]: DR_SF, [DR_NATO]: DR_SF },
-    [DR_NATO]: { [NP]: DR, [NP_NATO]: DR_NATO, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR_NATO },
+    [NP]: { [NP]: NP, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR },
+    [DR]: { [NP]: DR, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR },
+    [DR_SF]: { [NP]: DR_SF, [DR]: DR_SF, [DR_SF]: DR_SF, [DR_NATO]: DR_SF },
+    [DR_NATO]: { [NP]: DR, [DR]: DR, [DR_SF]: DR_SF, [DR_NATO]: DR_NATO },
   };
   for (const [base, row] of Object.entries(highWaterMarkMatrix)) {
     for (const [portion, expected] of Object.entries(row)) {
@@ -383,8 +380,8 @@ describe('document label rollup with the demo SPIF', () => {
   }
 
   const highWaterMarkSeveralPortionsCases: [string, string[], string][] = [
-    [NP_NATO, [DR_NATO, NP_NATO], DR_NATO],
-    [NP_NATO, [DR_NATO, NP], DR],
+    [DR_NATO, [DR_NATO, DR_NATO], DR_NATO],
+    [DR_NATO, [DR_NATO, NP], DR],
     [DR_NATO, [], DR_NATO],
   ];
   for (const [base, portions, expected] of highWaterMarkSeveralPortionsCases) {

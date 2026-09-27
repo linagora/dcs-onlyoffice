@@ -40,10 +40,12 @@
     <spif:securityCategoryTagSet name="Releasable To"
         id="2.25.166231019600111174217682845337071458325.2">
       <spif:securityCategoryTag name="Releasable To" tagType="enumerated" enumType="permissive">
+        <!-- Releasing to NATO only means something for protected information. -->
         <spif:tagCategory name="NATO" lacv="1">
           <spif:markingData xml:lang="fr" phrase="OTAN">
             <spif:code>pageTopBottom</spif:code>
           </spif:markingData>
+          <spif:excludedClass>NON PROTEGE</spif:excludedClass>
         </spif:tagCategory>
         <spif:markingQualifier markingCode="pageTopBottom">
           <spif:qualifier markingQualifier="DIFFUSION " qualifierCode="prefix"/>
