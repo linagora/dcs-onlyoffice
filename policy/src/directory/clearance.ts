@@ -7,35 +7,46 @@ export interface HeldCategory {
   name: string;
 }
 
-// A clearance as a seed file or an administrator gives it, before its security
-// policy has checked it.
-export interface ClearanceRequest {
+// The terms of a clearance as a request gives them, before its security
+// policy has checked them.
+export interface ClearanceTermsRequest {
+  classification: string;
+  // Each "<tag set>:<category>".
+  categories: string[];
+}
+
+// A clearance as a seed file or an administrator gives it.
+export interface ClearanceRequest extends ClearanceTermsRequest {
   email: string;
   name: string;
   nationality: string | null;
   policy: string;
-  classification: string;
-  // Each "<tag set>:<category>".
-  categories: string[];
   validFrom: Date;
   validUntil: Date;
 }
 
-// What one person may read under one security policy, every name spelled as
-// the SPIF does, since OpenTDF matches names exactly.
-export interface Clearance {
+// What a clearance lets its holder read under its security policy: the
+// highest classification and the categories held, every name spelled as the
+// SPIF does, since OpenTDF matches names exactly.
+export interface ClearanceTerms {
+  classification: string;
+  categories: HeldCategory[];
+}
+
+// What one person may read under one security policy.
+export interface Clearance extends ClearanceTerms {
   email: string;
   name: string;
   // Shown to administrators only: no access rule reads it.
   nationality: string | null;
   policy: string;
-  classification: string;
-  categories: HeldCategory[];
   validFrom: Date;
   validUntil: Date;
 }
 
 export type ClearanceCheck = { ok: true; clearance: Clearance } | { ok: false; error: string };
+
+export type ClearanceTermsCheck = { ok: true; terms: ClearanceTerms } | { ok: false; error: string };
 
 // OpenTDF's entity resolution turns the clearances valid now into two claims
 // (see deploy/opentdf/opentdf.yaml): "classifications", each
@@ -45,9 +56,22 @@ export type ClearanceCheck = { ok: true; clearance: Clearance } | { ok: false; e
 const LIST_SEPARATOR = ',';
 const QUALIFIER_SEPARATOR = ':';
 
+export const CLASSIFICATIONS_CLAIM = 'classifications';
+export const CATEGORIES_CLAIM = 'categories';
+
 // How the directory writes a held category: "<tag set>:<category>".
 export function categoryText(category: HeldCategory): string {
   return `${category.tagSet}${QUALIFIER_SEPARATOR}${category.name}`;
+}
+
+// The value of the classifications claim that stands for a classification.
+export function classificationClaim(policy: string, classification: string): string {
+  return `${policy}${QUALIFIER_SEPARATOR}${classification}`;
+}
+
+// The value of the categories claim that stands for a held category.
+export function categoryClaim(policy: string, category: HeldCategory): string {
+  return `${policy}${QUALIFIER_SEPARATOR}${categoryText(category)}`;
 }
 
 export function checkClearance(request: ClearanceRequest, policies: SecurityPolicy[]): ClearanceCheck {
@@ -59,27 +83,13 @@ export function checkClearance(request: ClearanceRequest, policies: SecurityPoli
   if (policy === null) {
     return { ok: false, error: `${email}: unknown security policy ${request.policy}` };
   }
-  const classification = classificationNamed(policy, request.classification);
-  if (classification === null) {
-    return { ok: false, error: `${email}: ${policy.name} has no classification ${request.classification}` };
+  const read = readClearanceTerms(policy, request);
+  if (!read.ok) {
+    return { ok: false, error: `${email}: ${read.error}` };
   }
-  const categories: HeldCategory[] = [];
-  for (const text of request.categories) {
-    const separator = text.indexOf(QUALIFIER_SEPARATOR);
-    const tagSet = separator <= 0 ? null : tagSetNamed(policy, text.slice(0, separator));
-    const category = tagSet === null ? null : categoryNamed(tagSet, text.slice(separator + 1));
-    if (tagSet === null || category === null) {
-      return { ok: false, error: `${email}: ${policy.name} has no category ${text}` };
-    }
-    if (tagSet.type === 'INFORMATIVE') {
-      return { ok: false, error: `${email}: the informative category ${tagSet.name}:${category.name} grants no access` };
-    }
-    if (!categories.some((held) => held.tagSet === tagSet.name && held.name === category.name)) {
-      categories.push({ tagSet: tagSet.name, name: category.name });
-    }
-  }
+  const { classification, categories } = read.terms;
   const qualifiers = [policy.name, ...categories.map((held) => held.tagSet)];
-  const names = [...qualifiers, classification.name, ...categories.map((held) => held.name)];
+  const names = [...qualifiers, classification, ...categories.map((held) => held.name)];
   if (names.some((name) => name.includes(LIST_SEPARATOR)) || qualifiers.some((name) => name.includes(QUALIFIER_SEPARATOR))) {
     return { ok: false, error: `${email}: the clearance directory cannot hold names that contain its separators` };
   }
@@ -93,10 +103,34 @@ export function checkClearance(request: ClearanceRequest, policies: SecurityPoli
       name: request.name,
       nationality: request.nationality,
       policy: policy.name,
-      classification: classification.name,
+      classification,
       categories,
       validFrom: request.validFrom,
       validUntil: request.validUntil,
     },
   };
+}
+
+// Checks the terms of a clearance under a policy, and spells them as it does.
+export function readClearanceTerms(policy: SecurityPolicy, request: ClearanceTermsRequest): ClearanceTermsCheck {
+  const classification = classificationNamed(policy, request.classification);
+  if (classification === null) {
+    return { ok: false, error: `${policy.name} has no classification ${request.classification}` };
+  }
+  const categories: HeldCategory[] = [];
+  for (const text of request.categories) {
+    const separator = text.indexOf(QUALIFIER_SEPARATOR);
+    const tagSet = separator <= 0 ? null : tagSetNamed(policy, text.slice(0, separator));
+    const category = tagSet === null ? null : categoryNamed(tagSet, text.slice(separator + 1));
+    if (tagSet === null || category === null) {
+      return { ok: false, error: `${policy.name} has no category ${text}` };
+    }
+    if (tagSet.type === 'INFORMATIVE') {
+      return { ok: false, error: `the informative category ${tagSet.name}:${category.name} grants no access` };
+    }
+    if (!categories.some((held) => held.tagSet === tagSet.name && held.name === category.name)) {
+      categories.push({ tagSet: tagSet.name, name: category.name });
+    }
+  }
+  return { ok: true, terms: { classification: classification.name, categories } };
 }

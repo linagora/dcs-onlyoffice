@@ -112,6 +112,7 @@ function readPolicy(root: Element, sourceFile: string): SecurityPolicy {
     name: requiredAttribute(policyId, 'name'),
     oid: requiredAttribute(policyId, 'id'),
     rollupIndicator: readRollupIndicator(root),
+    attributeNamespace: readAttributeNamespace(root),
     classifications,
     tagSets,
     policyPhrase: readPolicyPhrase(root),
@@ -248,17 +249,21 @@ function readPolicyPhrase(root: Element): string | null {
   return replacement === undefined ? null : replacement.phrase;
 }
 
-// Project extension, declared in the SPIF's `extensions` element.
 function readRollupIndicator(root: Element): RollupIndicator | null {
+  const indicator = projectExtension(root, 'rollupIndicator');
+  return indicator === null ? null : { tagSet: requiredAttribute(indicator, 'tagSet'), category: requiredAttribute(indicator, 'category') };
+}
+
+// Host names ignore case; OpenTDF writes them in lower case.
+function readAttributeNamespace(root: Element): string | null {
+  const declaration = projectExtension(root, 'attributeNamespace');
+  return declaration === null ? null : requiredAttribute(declaration, 'name').toLowerCase();
+}
+
+// Project extensions sit in the SPIF's `extensions` element.
+function projectExtension(root: Element, localName: string): Element | null {
   const extensions = optionalChild(root, 'extensions');
-  if (extensions === null) {
-    return null;
-  }
-  const indicator = Array.from(extensions.getElementsByTagNameNS(EXTENSION_NAMESPACE, 'rollupIndicator'))[0];
-  if (indicator === undefined) {
-    return null;
-  }
-  return { tagSet: requiredAttribute(indicator, 'tagSet'), category: requiredAttribute(indicator, 'category') };
+  return extensions === null ? null : (Array.from(extensions.getElementsByTagNameNS(EXTENSION_NAMESPACE, localName))[0] ?? null);
 }
 
 function checkConsistency(policy: SecurityPolicy): SecurityPolicy {

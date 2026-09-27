@@ -65,6 +65,22 @@
       "oidcRPMetaDataOptionsRequirePKCE": 1,
       "oidcRPMetaDataOptionsRule": "inGroup('dcs-maquette')",
       "oidcRPMetaDataOptionsUserIDAttr": "uid"
+    },
+    "dcs-provisioner": {
+      "oidcRPMetaDataOptionsAccessTokenExpiration": 300,
+      "oidcRPMetaDataOptionsAccessTokenJWT": 1,
+      "oidcRPMetaDataOptionsAccessTokenSignAlg": "RS256",
+      "oidcRPMetaDataOptionsActivation": 1,
+      "oidcRPMetaDataOptionsAdditionalAudiences": "https://tdf.__DOMAIN__",
+      "oidcRPMetaDataOptionsAllowClientCredentialsGrant": 1,
+      "oidcRPMetaDataOptionsAllowOffline": 0,
+      "oidcRPMetaDataOptionsAllowPasswordGrant": 0,
+      "oidcRPMetaDataOptionsAuthMethod": "client_secret_basic",
+      "oidcRPMetaDataOptionsClientID": "dcs-provisioner",
+      "oidcRPMetaDataOptionsClientSecret": "%SERVERENV:DCS_PROVISIONER_CLIENT_SECRET%",
+      "oidcRPMetaDataOptionsDisplayName": "DCS OpenTDF provisioning",
+      "oidcRPMetaDataOptionsPublic": 0,
+      "oidcRPMetaDataOptionsRefreshToken": 0
     }
   },
   "oidcRPMetaDataOptionsExtraClaims": {

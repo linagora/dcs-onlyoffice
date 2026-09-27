@@ -73,8 +73,11 @@
   <spif:markingQualifier markingCode="pageTopBottom">
     <spif:qualifier markingQualifier=" – " qualifierCode="separator"/>
   </spif:markingQualifier>
-  <spif:extensions>
-    <dcs:rollupIndicator xmlns:dcs="urn:linagora:dcs:spif:1"
-        tagSet="Composition" category="MORE RESTRICTIVE PORTIONS"/>
+  <spif:extensions xmlns:dcs="urn:linagora:dcs:spif:1">
+    <dcs:rollupIndicator tagSet="Composition" category="MORE RESTRICTIVE PORTIONS"/>
+    <!-- Where OpenTDF keeps the attributes derived from this policy. Attribute
+         names are written in every envelope: it can never change once
+         documents exist (docs/adr/0003). -->
+    <dcs:attributeNamespace name="demo-fr.dcs.linagora.com"/>
   </spif:extensions>
 </spif:SPIF>

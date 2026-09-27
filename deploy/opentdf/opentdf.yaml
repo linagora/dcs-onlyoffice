@@ -89,15 +89,24 @@ server:
     cache_refresh_interval: 15m
     skew: 1m
     policy:
+      # Version 2 also names the client a token was issued to, so that the
+      # provisioning job's client credentials can be granted a role.
+      version: v2
       username_claim: preferred_username
       groups_claim: groups
       # LemonLDAP::NG access tokens carry client_id, not azp.
       client_id_claim: client_id
-      # Setting extension drops the built-in opentdf-admin/opentdf-standard roles.
-      # The group names are those registered at the corporate SSO.
+      # Appended to the built-in policy. The group names are those registered
+      # at the corporate SSO. dcs-provisioner is only allowed the client
+      # credentials grant: no person can hold its tokens. The built-in policy
+      # also gives roles to the groups opentdf-admin and opentdf-standard,
+      # which the deny lines take back: only this stack's groups get a role.
       extension: |
-        g, dcs-maquette-admin, role:admin
-        g, dcs-maquette, role:standard
+        g, role:dcs-maquette-admin, role:admin
+        g, role:dcs-maquette, role:standard
+        g, client:dcs-provisioner, role:admin
+        p, role:opentdf-admin, *, *, deny
+        p, role:opentdf-standard, *, *, deny
   cors:
     enabled: true
     allowedorigins:

@@ -43,6 +43,12 @@ jobs:
       - name: Start the stack
         working-directory: deploy
         run: docker compose --profile standalone up -d --build --wait --wait-timeout 600
+      - name: Check that provisioning OpenTDF again changes nothing
+        working-directory: deploy
+        run: |
+          set -o pipefail
+          docker compose run --rm --no-deps opentdf-provisioning | tee /dev/stderr \
+            | jq -es 'map(select(.msg == "Policy provisioned")) | length > 0 and all(.[]; [.changes[]] | add == 0)'
       - name: Install browsers
         run: pnpm --filter @dcs/e2e exec playwright install --with-deps chromium firefox
       - name: Run end-to-end tests

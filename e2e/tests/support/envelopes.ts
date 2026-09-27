@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { PortionPart } from './docx.ts';
+import { arrayField, field, stringField } from './json.ts';
 
 export interface EnvelopeAssertion {
   type: string | null;
@@ -28,18 +29,4 @@ export async function envelopeManifest(part: PortionPart): Promise<EnvelopeManif
       statement: stringField(field(assertion, 'statement'), 'value'),
     })),
   };
-}
-
-function field(value: unknown, name: string): unknown {
-  return typeof value === 'object' && value !== null && name in value ? (value as Record<string, unknown>)[name] : null; // SAFETY: object checked just before
-}
-
-function arrayField(value: unknown, name: string): unknown[] {
-  const found = field(value, name);
-  return Array.isArray(found) ? found : [];
-}
-
-function stringField(value: unknown, name: string): string | null {
-  const found = field(value, name);
-  return typeof found === 'string' ? found : null;
 }

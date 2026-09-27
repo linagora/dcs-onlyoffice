@@ -64,6 +64,11 @@ services:
         condition: service_completed_successfully
       policy:
         condition: service_healthy
+      # Waited for, but a failed provisioning, reported by compose, leaves the
+      # portal up: encrypted portions are refused until it succeeds.
+      opentdf-provisioning:
+        condition: service_completed_successfully
+        required: false
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
       interval: 10s
@@ -98,6 +103,34 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  # Applies to OpenTDF the attributes and subject mappings that the policy
+  # service derives from each SPIF, then exits. Running it again changes
+  # nothing.
+  opentdf-provisioning:
+    build:
+      context: ..
+      dockerfile: policy/Dockerfile
+    image: dcs/policy:dev
+    command: ["node", "src/provision.ts"]
+    environment:
+      POLICY_URL: http://policy:3001
+      OPENTDF_URL: http://opentdf:8080
+      OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
+      # OpenTDF makes this client an administrator (deploy/opentdf/opentdf.yaml).
+      PROVISIONER_CLIENT_ID: dcs-provisioner
+      PROVISIONER_CLIENT_SECRET: ${OPENTDF_PROVISIONER_CLIENT_SECRET:?set OPENTDF_PROVISIONER_CLIENT_SECRET in .env}
+      NODE_EXTRA_CA_CERTS: /pki/public/ca.crt
+    volumes:
+      - pki-public:/pki/public:ro
+    depends_on:
+      opentdf:
+        condition: service_healthy
+      policy:
+        condition: service_healthy
+      proxy:
+        condition: service_healthy
+        required: false
 
   init:
     build:
@@ -192,6 +225,7 @@ services:
       USERLOGGER: stderr
       FORWARDED_BY: 172.16.0.0/12
       DCS_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+      DCS_PROVISIONER_CLIENT_SECRET: ${OPENTDF_PROVISIONER_CLIENT_SECRET:?set OPENTDF_PROVISIONER_CLIENT_SECRET in .env}
     volumes:
       - ./idp/lmConf-1.json:/seed/lmConf-1.json:ro
       - ./idp/users.json:/idp/users.json:ro
@@ -225,11 +259,11 @@ services:
           - docs.${DOMAIN}
           - idp.${DOMAIN}
           - tdf.${DOMAIN}
+    # Not the portal: it waits for provisioning, which needs OpenTDF, which
+    # needs the IdP behind this proxy.
     depends_on:
       init:
         condition: service_completed_successfully
-      portal:
-        condition: service_healthy
       onlyoffice:
         condition: service_healthy
       idp:

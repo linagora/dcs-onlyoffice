@@ -71,6 +71,8 @@ export interface SecurityPolicy {
   name: string;
   oid: string;
   rollupIndicator: RollupIndicator | null;
+  // Where OpenTDF keeps the attributes derived from the policy (ADR 0003).
+  attributeNamespace: string | null;
   classifications: SecurityClassification[];
   tagSets: CategoryTagSet[];
   policyPhrase: string | null;
