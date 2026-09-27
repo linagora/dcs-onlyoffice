@@ -49,7 +49,7 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
     <form class="portion-form" onSubmit={submit}>
       {insertionRequested && (
         <p class="hint" data-testid="insertion-requested">
-          Pick a label and type the text: the portion goes where the cursor is in the document.
+          Pick a label and type the text: the portion goes after the paragraph that holds the cursor.
         </p>
       )}
       <fieldset>
