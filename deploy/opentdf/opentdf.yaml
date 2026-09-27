@@ -1,8 +1,8 @@
 # OpenTDF platform v0.27.0: trusts the IdP and resolves each person's
 # clearances from the clearance directory.
 # Environment variables only override keys present in this file: the issuer,
-# audience, allowed origin and database passwords below are placeholders that
-# docker-compose.yml overrides.
+# audience, allowed origin, database passwords, KAS root key and KAS address
+# below are placeholders that docker-compose.yml overrides.
 
 logger:
   level: info
@@ -72,11 +72,16 @@ services:
             claim_name: categories
             transformation: csv_to_array
   kas:
-    keyring:
-      - kid: r1
-        alg: rsa:2048
-      - kid: e1
-        alg: ec:secp256r1
+    # The KAS keys live in the platform's key registry, their private halves
+    # wrapped with the root key; the provisioning job creates the hybrid key
+    # and makes it the base key, whose KAS address new envelopes name.
+    key_management: true
+    root_key: placeholder
+    registered_kas_uri: https://placeholder.invalid/kas
+    preview:
+      # Required to unwrap hybrid-wrapped key access objects
+      # (hpqt:secp384r1-mlkem1024).
+      hybrid_tdf_enabled: true
 
 server:
   port: 8080
@@ -118,13 +123,3 @@ server:
     reflectionEnabled: false
   cryptoProvider:
     type: standard
-    standard:
-      keys:
-        - kid: r1
-          alg: rsa:2048
-          private: /etc/opentdf/keys/kas-private.pem
-          cert: /etc/opentdf/keys/kas-cert.pem
-        - kid: e1
-          alg: ec:secp256r1
-          private: /etc/opentdf/keys/kas-ec-private.pem
-          cert: /etc/opentdf/keys/kas-ec-cert.pem

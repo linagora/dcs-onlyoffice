@@ -3,7 +3,7 @@ import { labelOfXml } from './support/docx.ts';
 import { envelopeManifest } from './support/envelopes.ts';
 import { expect, test } from './support/fixtures.ts';
 import { canaryText, markedText, PORTION_MARKER } from './support/marker.ts';
-import { PLATFORM } from './support/opentdf.ts';
+import { PLATFORM, platformBaseKey } from './support/opentdf.ts';
 import { insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
 import { fillPortionForm, forceSavedDocx, insertPortion, leaveAndWaitForSave } from './support/portions.ts';
 
@@ -41,10 +41,14 @@ test('an inserted portion is stored as an envelope and read back in the panel', 
     categories: [{ type: 'RESTRICTIVE', tagName: 'Special Handling', values: ['SPECIAL FRANCE'] }],
   });
 
-  // The envelope names the stack's KAS, carries the same label, bound to it,
-  // and the label's attribute values, which the KAS decides access with.
+  // The envelope names the stack's KAS and wraps its key for the KAS's base
+  // key, which combines ECDH P-384 with ML-KEM-1024. It carries the same label,
+  // bound to it, and the label's attribute values, which the KAS decides
+  // access with.
+  const baseKey = await platformBaseKey(page);
+  expect(baseKey).toEqual({ kasUri: `${PLATFORM}/kas`, kid: expect.any(String), algorithm: 'hpqt:secp384r1-mlkem1024' });
   const manifest = await envelopeManifest(part);
-  expect(manifest.keyAccessUrls).toEqual([`${PLATFORM}/kas`]);
+  expect(manifest.keyAccess).toEqual([{ type: 'hybrid-wrapped', url: `${PLATFORM}/kas`, kid: baseKey.kid }]);
   expect(manifest.dataAttributes).toEqual([
     'https://demo-fr.dcs.linagora.com/attr/classification/value/diffusion-restreinte',
     'https://demo-fr.dcs.linagora.com/attr/special-handling/value/special-france',
@@ -57,8 +61,9 @@ test('an inserted portion is stored as an envelope and read back in the panel', 
 });
 
 // Undocumented behaviour 4: content-control tags and Custom XML parts survive
-// the Document Server's DOCX save and a later reopening.
-test('portions survive saving to DOCX and reopening', async ({ page }) => {
+// the Document Server's DOCX save and a later reopening. The test also runs on
+// Firefox, since the hybrid key wrapping relies on each browser's WebCrypto.
+test('portions survive saving to DOCX and reopening', { tag: '@cross-browser' }, async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   const secret = markedText('Fictional reopened paragraph');
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });

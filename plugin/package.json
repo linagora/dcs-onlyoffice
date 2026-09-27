@@ -7,7 +7,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@opentdf/sdk": "0.21.0",
+    "@opentdf/sdk": "file:vendor/opentdf-sdk-0.21.0-hybrid.1.tgz",
     "preact": "10.29.8"
   },
   "devDependencies": {

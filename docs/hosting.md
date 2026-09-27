@@ -16,7 +16,7 @@ In hosted mode, the stack runs on a Docker host behind an existing reverse proxy
   - the platform's URL, `https://tdf.<DOMAIN>`, as an additional audience of the access token (or set `OIDC_AUDIENCE` to the audience the provider issues, often the client id);
   - online refresh tokens.
 
-- **Provisioning client** `dcs-provisioner`, registered at the same provider, for the job that writes OpenTDF's attributes when the stack starts:
+- **Provisioning client** `dcs-provisioner`, registered at the same provider, for the job that writes OpenTDF's KAS key and attributes when the stack starts:
   - confidential client allowed the client credentials grant only: no redirect URI, no password grant, since OpenTDF makes it an administrator;
   - the scope `openid` allowed;
   - access tokens as JWT signed RS256 with a key id, carrying the `client_id` claim and the audience `https://tdf.<DOMAIN>`.
@@ -41,6 +41,8 @@ Create `deploy/.env` with `deploy/scripts/init-env.sh`, which generates the secr
 
 `deploy/.env` holds secrets: it is ignored by Git and must stay on the host.
 
+`OPENTDF_KAS_ROOT_KEY` wraps the KAS's private keys, which OpenTDF keeps in its database. Back up the key with the database, and never change it once the stack has started: without it, no envelope can be read. Versions before the hybrid key wrapped portion keys with static RSA keys, which the KAS no longer loads: the portions they encrypted can no longer be read. After such an upgrade, the `dcs_opentdf-keys` volume still holds those keys; delete it with `docker volume rm dcs_opentdf-keys` once you no longer need them.
+
 ## Reverse proxy
 
 `deploy/nginx/dcs.conf.template` is an nginx site for the three host names. Render it with `envsubst`, as its header shows. It:
@@ -61,7 +63,7 @@ docker compose up -d --build --wait
 
 The OpenTDF platform stops at startup when it cannot fetch the provider's discovery document or keys; it restarts automatically until the provider is reachable.
 
-Once OpenTDF and the policy service are healthy, the `opentdf-provisioning` job applies the attributes derived from each SPIF, then exits; running it again changes nothing. The job owns the subject mappings of these attributes: a mapping written by hand on one of their values is removed at its next run. When it fails, for instance because the provisioning client is not registered yet, `docker compose up --wait` reports it and exits with an error, while the rest of the stack keeps running: until provisioning succeeds, OpenTDF refuses the portions encrypted with the labels' attributes. Its reason is in `docker compose logs opentdf-provisioning`, and `docker compose up -d` runs it again.
+Once OpenTDF and the policy service are healthy, the `opentdf-provisioning` job creates the KAS's hybrid key in OpenTDF's key registry, makes it the base key that new envelopes use, applies the attributes derived from each SPIF, then exits; running it again changes nothing. The job owns the subject mappings of these attributes: a mapping written by hand on one of their values is removed at its next run. It also owns the base key, which it sets back to its hybrid key at each run. When it fails, for instance because the provisioning client is not registered yet, `docker compose up --wait` reports it and exits with an error, while the rest of the stack keeps running: until provisioning succeeds, no portion can be encrypted, and OpenTDF refuses the key of those encrypted with the labels' attributes. Its reason is in `docker compose logs opentdf-provisioning`, and `docker compose up -d` runs it again.
 
 ## Checks
 
@@ -69,9 +71,10 @@ Once OpenTDF and the policy service are healthy, the `opentdf-provisioning` job 
 curl -fsS https://portail.<DOMAIN>/healthz          # {"status":"ok"}
 curl -fsS https://docs.<DOMAIN>/healthcheck         # true
 curl -fsS https://tdf.<DOMAIN>/healthz              # {"status":"SERVING"}
+curl -fsS https://tdf.<DOMAIN>/.well-known/opentdf-configuration | jq -r .base_key.public_key.algorithm   # hpqt:secp384r1-mlkem1024
 curl -sI https://portail.<DOMAIN>/ | grep -i location   # redirects to the sign-in
 ```
 
-`docker compose logs opentdf-provisioning` ends with `Policy provisioned` for each policy.
+`docker compose logs opentdf-provisioning` shows `KAS key provisioned`, then `Policy provisioned` for each policy.
 
 Then sign in with an account of the provider, open a demo document and check that the labelling panel shows your name.

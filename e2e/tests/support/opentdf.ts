@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import type { DemoAccount } from './accounts.ts';
 import { deploymentSetting } from './deployment.ts';
+import { field, stringField } from './json.ts';
 
 const DOMAIN = process.env.DOMAIN ?? 'dcs.test';
 export const PLATFORM = `https://tdf.${DOMAIN}`;
@@ -46,6 +47,25 @@ export async function requestAccessToken(page: Page, account: DemoAccount): Prom
   );
   await idpPage.close();
   return accessToken;
+}
+
+export interface BaseKey {
+  kasUri: string | null;
+  kid: string | null;
+  algorithm: string | null;
+}
+
+// The KAS key that new envelopes wrap their key for, as the platform's
+// well-known configuration publishes it, read from a page of the portal's
+// origin.
+export async function platformBaseKey(page: Page): Promise<BaseKey> {
+  const configuration = await page.evaluate(async (platform) => {
+    const body: unknown = await (await fetch(`${platform}/.well-known/opentdf-configuration`)).json();
+    return body;
+  }, PLATFORM);
+  const baseKey = field(configuration, 'base_key');
+  const publicKey = field(baseKey, 'public_key');
+  return { kasUri: stringField(baseKey, 'kas_uri'), kid: stringField(publicKey, 'kid'), algorithm: stringField(publicKey, 'algorithm') };
 }
 
 // Calls OpenTDF directly, as a Connect unary call in JSON, from a page of the
