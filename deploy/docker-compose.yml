@@ -102,7 +102,7 @@ services:
       - ./spif:/spif:ro
       - ./directory/seeds:/directory/seeds:ro
     depends_on:
-      directory-setup:
+      database-setup:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
@@ -153,20 +153,24 @@ services:
       - pki-public:/pki/public
       - pki-private:/pki/private
 
-  # Roles and schema of the clearance directory, which the policy service owns
-  # and OpenTDF's entity resolution reads.
-  directory-setup:
+  # Roles and schemas of the stack's PostgreSQL: the platform's, which OpenTDF
+  # owns, and the clearance directory's, which the policy service owns and
+  # OpenTDF's entity resolution reads.
+  database-setup:
     image: postgres:17.11-alpine
     command: ["/bin/sh", "/setup/setup.sh"]
     environment:
       PGHOST: postgres
       PGDATABASE: opentdf
       PGUSER: opentdf
+      # The superuser's: the setting keeps the name it had when the platform
+      # connected as the superuser.
       PGPASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
+      OPENTDF_PLATFORM_DB_PASSWORD: ${OPENTDF_PLATFORM_DB_PASSWORD:?set OPENTDF_PLATFORM_DB_PASSWORD in .env}
       DIRECTORY_DB_PASSWORD: ${DIRECTORY_DB_PASSWORD:?set DIRECTORY_DB_PASSWORD in .env}
       DIRECTORY_READER_PASSWORD: ${DIRECTORY_READER_PASSWORD:?set DIRECTORY_READER_PASSWORD in .env}
     volumes:
-      - ./directory/setup.sh:/setup/setup.sh:ro
+      - ./postgres/setup.sh:/setup/setup.sh:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,6 +178,7 @@ services:
   postgres:
     image: postgres:17.11-alpine
     environment:
+      # The superuser, which only the database setup job uses.
       POSTGRES_USER: opentdf
       POSTGRES_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
       POSTGRES_DB: opentdf
@@ -191,7 +196,8 @@ services:
     image: dcs/opentdf:dev
     command: ["start", "--config-file", "/etc/opentdf/opentdf.yaml"]
     environment:
-      OPENTDF_DB_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
+      # The platform's own role, not the superuser (deploy/postgres/setup.sh).
+      OPENTDF_DB_PASSWORD: ${OPENTDF_PLATFORM_DB_PASSWORD:?set OPENTDF_PLATFORM_DB_PASSWORD in .env}
       OPENTDF_SERVICES_ENTITYRESOLUTION_PROVIDERS_DIRECTORY_CONNECTION_PASSWORD: ${DIRECTORY_READER_PASSWORD:?set DIRECTORY_READER_PASSWORD in .env}
       OPENTDF_SERVICES_KAS_ROOT_KEY: ${OPENTDF_KAS_ROOT_KEY:?set OPENTDF_KAS_ROOT_KEY in .env}
       OPENTDF_SERVICES_KAS_REGISTERED_KAS_URI: *kas-uri
@@ -208,7 +214,7 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-      directory-setup:
+      database-setup:
         condition: service_completed_successfully
       # Startup fails at once if the IdP cannot be reached; in the standalone
       # profile the IdP sits behind the local proxy.

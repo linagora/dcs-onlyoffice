@@ -13,7 +13,7 @@ db:
   host: postgres
   port: 5432
   database: opentdf
-  user: opentdf
+  user: dcs_opentdf
   password: placeholder
   sslmode: disable
   schema: opentdf
