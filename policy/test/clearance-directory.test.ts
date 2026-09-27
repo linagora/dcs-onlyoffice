@@ -167,6 +167,96 @@ describe('labels a clearance allows', () => {
   });
 });
 
+// Anyone may raise a document's base label. Lowering it, which shows the
+// document's content in clear to more readers, is reserved to administrators
+// whose clearance allows the current label.
+describe('base labels a caller may set', () => {
+  let server: FastifyInstance;
+  before(async () => {
+    server = await buildPolicyServer({
+      spifDirectory: DEMO_SPIFS,
+      clearanceDirectory: { store: new RecordingStore(), seedFolder: DEMO_SEEDS },
+      now: (): Date => new Date('2026-09-26T12:00:00Z'),
+    });
+  });
+  after(async () => {
+    await server.close();
+  });
+
+  const EVERY_LABEL = ['DEMO-FR:1', 'DEMO-FR:2', 'DEMO-FR:2/1.1', 'DEMO-FR:2/2.1'];
+
+  async function baseChoices(current: string | null, email: string, groups: string[] = []): Promise<string[]> {
+    const headers = { 'x-user-email': encodeURIComponent(email), 'x-user-groups': groups.map(encodeURIComponent).join(',') };
+    const query = current === null ? '' : `?current=${encodeURIComponent(current)}`;
+    const response = await server.inject({ method: 'GET', url: `/policies/DEMO-FR/labels/base-choices${query}`, headers });
+    assert.equal(response.statusCode, 200);
+    const labels: unknown = response.json();
+    assert.ok(Array.isArray(labels), 'expected a label list');
+    return labels.map((label: unknown) => (typeof label === 'object' && label !== null && 'code' in label ? String(label.code) : ''));
+  }
+
+  async function lowering(from: string, to: string): Promise<{ statusCode: number; body: unknown }> {
+    const response = await server.inject({ method: 'POST', url: '/labels/lowering', payload: { from, to } });
+    return { statusCode: response.statusCode, body: response.json() };
+  }
+
+  // The codes of the labels decided, and whether each is granted.
+  async function decisions(codes: (string | null)[], email: string | null): Promise<{ granted: boolean; code: string | null }[]> {
+    const headers = email === null ? {} : { 'x-user-email': encodeURIComponent(email) };
+    const response = await server.inject({ method: 'POST', url: '/labels/decisions', headers, payload: { codes } });
+    assert.equal(response.statusCode, 200);
+    const body: unknown = response.json();
+    assert.ok(typeof body === 'object' && body !== null && 'decisions' in body && Array.isArray(body.decisions), 'expected decisions');
+    return body.decisions.map((decision: unknown) => {
+      assert.ok(typeof decision === 'object' && decision !== null && 'granted' in decision && typeof decision.granted === 'boolean', 'expected a decision');
+      const label: unknown = 'label' in decision ? decision.label : null;
+      return { granted: decision.granted, code: typeof label === 'object' && label !== null && 'code' in label ? String(label.code) : null };
+    });
+  }
+
+  it('offers anyone the labels that do not lower the current one', async () => {
+    assert.deepEqual(await baseChoices('DEMO-FR:2', 'bob.walker@dcs.test', ['dcs-maquette']), ['DEMO-FR:2', 'DEMO-FR:2/1.1', 'DEMO-FR:2/2.1']);
+    assert.deepEqual(await baseChoices('DEMO-FR:2/1.1', 'bob.walker@dcs.test', ['dcs-maquette']), ['DEMO-FR:2/1.1']);
+  });
+
+  it('offers every label to an administrator whose clearance allows the current one', async () => {
+    assert.deepEqual(await baseChoices('DEMO-FR:2/1.1', 'alice.martin@dcs.test', ['dcs-maquette', 'dcs-maquette-admin']), EVERY_LABEL);
+    assert.deepEqual(await baseChoices('DEMO-FR:2/1.1', 'chloe.bernard@dcs.test', ['dcs-maquette-admin']), ['DEMO-FR:2/1.1']);
+  });
+
+  it('offers every label to a document without a base label yet', async () => {
+    assert.deepEqual(await baseChoices(null, 'chloe.bernard@dcs.test'), EVERY_LABEL);
+  });
+
+  it("decides who opens a document from its base label and the caller's clearance", async () => {
+    const codes = ['DEMO-FR:1', 'DEMO-FR:2/1.1', 'demo-fr:2/2.1'];
+    assert.deepEqual(await decisions(codes, 'bob.walker@dcs.test'), [
+      { granted: true, code: 'DEMO-FR:1' },
+      { granted: false, code: 'DEMO-FR:2/1.1' },
+      { granted: true, code: 'DEMO-FR:2/2.1' },
+    ]);
+    assert.deepEqual(await decisions(['DEMO-FR:1'], 'dan.moreau@dcs.test'), [{ granted: false, code: 'DEMO-FR:1' }]);
+  });
+
+  it('decides a document without a base label as the least restrictive label, and refuses an unknown one', async () => {
+    assert.deepEqual(await decisions([null], 'chloe.bernard@dcs.test'), [{ granted: true, code: 'DEMO-FR:1' }]);
+    assert.deepEqual(await decisions([null], 'dan.moreau@dcs.test'), [{ granted: false, code: 'DEMO-FR:1' }]);
+    assert.deepEqual(await decisions(['DEMO-FR:9', 'MARS:1'], 'alice.martin@dcs.test'), [
+      { granted: false, code: null },
+      { granted: false, code: null },
+    ]);
+  });
+
+  it('tells whether a new base label lowers the previous one', async () => {
+    assert.deepEqual(await lowering('DEMO-FR:2/1.1', 'DEMO-FR:2'), { statusCode: 200, body: { lowering: true } });
+    assert.deepEqual(await lowering('DEMO-FR:2', 'DEMO-FR:1'), { statusCode: 200, body: { lowering: true } });
+    assert.deepEqual(await lowering('DEMO-FR:2', 'DEMO-FR:2/1.1'), { statusCode: 200, body: { lowering: false } });
+    assert.deepEqual(await lowering('DEMO-FR:2', 'DEMO-FR:2/2.1'), { statusCode: 200, body: { lowering: false } });
+    assert.equal((await lowering('DEMO-FR:2', 'DEMO-FR:9')).statusCode, 422);
+    assert.equal((await lowering('DEMO-FR:2', 'MARS:1')).statusCode, 422);
+  });
+});
+
 describe('clearance directory administration', () => {
   let server: FastifyInstance;
   const SECRET = 'fictional-administration-secret';
