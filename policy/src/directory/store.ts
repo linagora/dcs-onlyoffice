@@ -1,5 +1,6 @@
 import pg from 'pg';
-import { type Clearance, categoryText } from './clearance.ts';
+import { type Clearance, categoryText, type HeldCategory, heldCategoryOf } from './clearance.ts';
+import { fieldOf } from './record.ts';
 
 // Where the clearance directory keeps its entries.
 export interface ClearanceStore {
@@ -8,6 +9,9 @@ export interface ClearanceStore {
   // Adds the clearances the store does not hold yet. An entry that exists,
   // possibly changed since by an administrator, stays as it is.
   addMissing(clearances: Clearance[]): Promise<number>;
+  // The entry of one person, by lower-case email address, under one policy,
+  // whatever its validity period.
+  clearanceOf(email: string, policy: string): Promise<Clearance | null>;
   close(): Promise<void>;
 }
 
@@ -41,6 +45,11 @@ CREATE TABLE IF NOT EXISTS directory.clearances (
 const GRANT_READER = `
 REVOKE ALL ON directory.clearances FROM ${READER_ROLE};
 GRANT SELECT (email, policy, classification, categories, valid_from, valid_until) ON directory.clearances TO ${READER_ROLE}`;
+
+const SELECT_ONE = `
+SELECT email, policy, name, nationality, classification, categories, valid_from, valid_until
+FROM directory.clearances
+WHERE email = $1 AND policy = $2`;
 
 const INSERT_MISSING = `
 INSERT INTO directory.clearances (email, policy, name, nationality, classification, categories, valid_from, valid_until)
@@ -77,7 +86,51 @@ export class PostgresClearanceStore implements ClearanceStore {
     return added;
   }
 
+  async clearanceOf(email: string, policy: string): Promise<Clearance | null> {
+    const result = await this.#pool.query(SELECT_ONE, [email, policy]);
+    const row: unknown = result.rows[0];
+    return row === undefined ? null : clearanceOfRow(row);
+  }
+
   async close(): Promise<void> {
     await this.#pool.end();
   }
+}
+
+// The driver gives timestamps as dates and arrays as arrays; anything else
+// means the table is not the one the service created.
+function clearanceOfRow(row: unknown): Clearance {
+  const column = (name: string): unknown => fieldOf(row, name);
+  const text = (name: string): string => {
+    const value = column(name);
+    if (typeof value !== 'string') {
+      throw new Error(`directory.clearances has no text in ${name}`);
+    }
+    return value;
+  };
+  const date = (name: string): Date => {
+    const value = column(name);
+    if (!(value instanceof Date)) {
+      throw new Error(`directory.clearances has no timestamp in ${name}`);
+    }
+    return value;
+  };
+  const categoryTexts = column('categories');
+  const categories = Array.isArray(categoryTexts)
+    ? categoryTexts.map((category: unknown) => (typeof category === 'string' ? heldCategoryOf(category) : null))
+    : null;
+  if (categories === null || categories.some((category) => category === null)) {
+    throw new Error('directory.clearances holds categories it cannot read');
+  }
+  const nationality = column('nationality');
+  return {
+    email: text('email'),
+    name: text('name'),
+    nationality: typeof nationality === 'string' ? nationality : null,
+    policy: text('policy'),
+    classification: text('classification'),
+    categories: categories.filter((category): category is HeldCategory => category !== null),
+    validFrom: date('valid_from'),
+    validUntil: date('valid_until'),
+  };
 }

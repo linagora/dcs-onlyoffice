@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { SecurityPolicy } from '../spif/model.ts';
 import { type Clearance, type ClearanceRequest, checkClearance } from './clearance.ts';
+import { fieldOf } from './record.ts';
 import type { ClearanceStore } from './store.ts';
 
 // The clearance directory, and the folder of JSON files that seed it.
@@ -60,7 +61,7 @@ function seedRequest(entry: unknown): ClearanceRequest | null {
   if (typeof entry !== 'object' || entry === null) {
     return null;
   }
-  const field = (name: string): unknown => (name in entry ? (entry as Record<string, unknown>)[name] : null); // SAFETY: object checked above
+  const field = (name: string): unknown => fieldOf(entry, name);
   const email = field('email');
   const name = field('name');
   const nationality = field('nationality');

@@ -3,6 +3,7 @@ import { accessDecision } from './access.ts';
 import { reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
 import { type ClearanceTerms, type ClearanceTermsRequest, readClearanceTerms } from './directory/clearance.ts';
+import { currentClearanceOf } from './directory/lookup.ts';
 import { type ClearanceDirectoryOptions, prepareClearanceDirectory } from './directory/seed.ts';
 import {
   enumerateValidLabels,
@@ -38,6 +39,8 @@ export interface LabelView {
   marking: Marking;
 }
 
+type LabelViews = { ok: true; views: LabelView[] } | { ok: false; error: string };
+
 interface PolicyParams {
   policy: string;
 }
@@ -63,6 +66,12 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
 
   const findPolicy = (name: string): SecurityPolicy | null => policyNamed(policies, name);
 
+  // The views of a policy's valid labels that `keep` keeps.
+  const labelViews = (policy: SecurityPolicy, language: string, keep: (label: Label) => boolean): LabelViews => {
+    const enumeration = enumerateValidLabels(policy);
+    return enumeration.ok ? { ok: true, views: enumeration.labels.filter(keep).map((label) => toView(policy, label, language)) } : enumeration;
+  };
+
   app.get('/healthz', async () => ({ status: 'ok' }));
 
   app.get('/policies', async () => policies.map((policy) => ({ name: policy.name, oid: policy.oid })));
@@ -82,12 +91,24 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     if (policy === null) {
       return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
     }
-    const enumeration = enumerateValidLabels(policy);
-    if (!enumeration.ok) {
-      return reply.code(422).send({ error: enumeration.error });
+    const views = labelViews(policy, request.query.lang ?? defaultLanguage, () => true);
+    return views.ok ? views.views : reply.code(422).send({ error: views.error });
+  });
+
+  // The labels the caller's clearance allows, for new portions: an author
+  // never writes what they could not read.
+  app.get<{ Params: PolicyParams; Querystring: LanguageQuery }>('/policies/:policy/labels/allowed', async (request, reply) => {
+    const policy = findPolicy(request.params.policy);
+    if (policy === null) {
+      return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
     }
-    const language = request.query.lang ?? defaultLanguage;
-    return enumeration.labels.map((label) => toView(policy, label, language));
+    if (clearanceDirectory === undefined) {
+      return reply.code(503).send({ error: 'The policy service keeps no clearance directory' });
+    }
+    const email = callerEmail(request);
+    const clearance = email === null ? null : await currentClearanceOf(clearanceDirectory.store, email, policy.name, now());
+    const views = labelViews(policy, request.query.lang ?? defaultLanguage, (label) => accessDecision(policy, clearance, label));
+    return views.ok ? views.views : reply.code(422).send({ error: views.error });
   });
 
   app.post<{ Params: PolicyParams; Querystring: LanguageQuery }>(
