@@ -16,7 +16,12 @@ In hosted mode, the stack runs on a Docker host behind an existing reverse proxy
   - the platform's URL, `https://tdf.<DOMAIN>`, as an additional audience of the access token (or set `OIDC_AUDIENCE` to the audience the provider issues, often the client id);
   - online refresh tokens.
 
-With LemonLDAP::NG, these are options of the relying party: JWT format for access tokens, claims released in access tokens, additional audiences, and the `groups` attribute exported as an array.
+- **Provisioning client** `dcs-provisioner`, registered at the same provider, for the job that writes OpenTDF's attributes when the stack starts:
+  - confidential client allowed the client credentials grant only: no redirect URI, no password grant, since OpenTDF makes it an administrator;
+  - the scope `openid` allowed;
+  - access tokens as JWT signed RS256 with a key id, carrying the `client_id` claim and the audience `https://tdf.<DOMAIN>`.
+
+With LemonLDAP::NG, these are options of the relying party: JWT format for access tokens, claims released in access tokens, additional audiences, the `groups` attribute exported as an array and, for the provisioning client, the client credentials grant.
 
 ## Configuration
 
@@ -32,6 +37,7 @@ Create `deploy/.env` with `deploy/scripts/init-env.sh`, which generates the secr
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | the registered client |
 | `OIDC_SCOPES` | `openid profile email groups` |
 | `OIDC_AUDIENCE` | only when access tokens do not carry `https://tdf.<DOMAIN>` in their audience |
+| `OPENTDF_PROVISIONER_CLIENT_SECRET` | the provisioning client's secret |
 
 `deploy/.env` holds secrets: it is ignored by Git and must stay on the host.
 
@@ -55,6 +61,8 @@ docker compose up -d --build --wait
 
 The OpenTDF platform stops at startup when it cannot fetch the provider's discovery document or keys; it restarts automatically until the provider is reachable.
 
+Once OpenTDF and the policy service are healthy, the `opentdf-provisioning` job applies the attributes derived from each SPIF, then exits; running it again changes nothing. The job owns the subject mappings of these attributes: a mapping written by hand on one of their values is removed at its next run. When it fails, for instance because the provisioning client is not registered yet, `docker compose up --wait` reports it and exits with an error, while the rest of the stack keeps running: until provisioning succeeds, OpenTDF refuses the portions encrypted with the labels' attributes. Its reason is in `docker compose logs opentdf-provisioning`, and `docker compose up -d` runs it again.
+
 ## Checks
 
 ```sh
@@ -63,5 +71,7 @@ curl -fsS https://docs.<DOMAIN>/healthcheck         # true
 curl -fsS https://tdf.<DOMAIN>/healthz              # {"status":"SERVING"}
 curl -sI https://portail.<DOMAIN>/ | grep -i location   # redirects to the sign-in
 ```
+
+`docker compose logs opentdf-provisioning` ends with `Policy provisioned` for each policy.
 
 Then sign in with an account of the provider, open a demo document and check that the labelling panel shows your name.
