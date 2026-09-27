@@ -1,4 +1,5 @@
 import { type Browser, expect, type Page } from '@playwright/test';
+import { watchEditorLoads } from './documents.ts';
 
 export interface DemoAccount {
   login: string;
@@ -35,6 +36,7 @@ export async function signedInPage(browser: Browser, account: DemoAccount): Prom
   const domain = process.env.DOMAIN ?? 'dcs.test';
   const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: `https://portail.${domain}` });
   const page = await context.newPage();
+  watchEditorLoads(page);
   await signIn(page, account);
   return page;
 }
