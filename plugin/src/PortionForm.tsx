@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { logProblem } from './log.ts';
+import { messages } from './messages.ts';
 import type { LabelView } from './policy.ts';
 
 export interface PortionFormProps {
@@ -49,11 +50,11 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
     <form class="portion-form" onSubmit={submit}>
       {insertionRequested && (
         <p class="hint" data-testid="insertion-requested">
-          Pick a label and type the text: the portion goes where the cursor is in the document.
+          {messages.insertionHint}
         </p>
       )}
       <fieldset>
-        <legend>Label</legend>
+        <legend>{messages.labelLegend}</legend>
         {labels.map((label) => (
           <label key={label.code} class="label-option">
             <input
@@ -71,7 +72,7 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
         ))}
       </fieldset>
       <label class="field">
-        <span>Portion text</span>
+        <span>{messages.portionText}</span>
         <textarea
           ref={textArea}
           rows={4}
@@ -82,9 +83,9 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
         />
       </label>
       <button type="submit" disabled={busy || selected === null || text.trim() === ''}>
-        Insert protected portion
+        {messages.insertButton}
       </button>
-      {failed && <p class="error">The portion could not be inserted.</p>}
+      {failed && <p class="error">{messages.insertionFailed}</p>}
     </form>
   );
 }

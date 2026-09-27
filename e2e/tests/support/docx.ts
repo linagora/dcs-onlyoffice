@@ -2,6 +2,7 @@ import { DOMParser, type Element, XMLSerializer } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 
 export interface ContentControl {
+  alias: string | null;
   tag: string | null;
   lock: string | null;
   text: string;
@@ -82,6 +83,7 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
     contentControls: elements(document, WORD_NAMESPACE, 'sdt').map((sdt) => {
       const properties = elements(sdt, WORD_NAMESPACE, 'sdtPr')[0];
       return {
+        alias: properties === undefined ? null : wordValue(properties, 'alias'),
         tag: properties === undefined ? null : wordValue(properties, 'tag'),
         lock: properties === undefined ? null : wordValue(properties, 'lock'),
         text: elements(sdt, WORD_NAMESPACE, 'sdtContent').map(textOf).join(''),

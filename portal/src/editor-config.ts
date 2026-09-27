@@ -18,7 +18,7 @@ export interface EditorConfig {
   documentType: 'word';
   editorConfig: {
     callbackUrl: string;
-    lang: string;
+    lang: EditorLanguage;
     mode: 'edit' | 'view';
     user: EditorUser;
     coEditing: { mode: 'fast'; change: boolean };
@@ -40,11 +40,23 @@ export interface SignedEditorConfig extends EditorConfig {
 
 export type EditorMode = 'edit' | 'view';
 
+// Languages the labelling plugin speaks (plugin/src/messages.ts); the editor
+// itself knows more.
+export type EditorLanguage = 'en' | 'fr';
+
+export const EDITOR_LANGUAGES: readonly EditorLanguage[] = ['en', 'fr'];
+
+export function isEditorLanguage(value: unknown): value is EditorLanguage {
+  const languages: readonly unknown[] = EDITOR_LANGUAGES;
+  return languages.includes(value);
+}
+
 export function buildEditorConfig(
   document: StoredDocument,
   user: EditorUser,
   plugin: EditorPlugin,
   mode: EditorMode,
+  language: EditorLanguage,
   config: PortalConfig,
 ): EditorConfig {
   const documentUrl = `${config.portalInternalUrl}/internal/documents/${document.id}`;
@@ -59,7 +71,7 @@ export function buildEditorConfig(
     documentType: 'word',
     editorConfig: {
       callbackUrl: `${documentUrl}/callback`,
-      lang: 'en',
+      lang: language,
       mode,
       user,
       coEditing: { mode: 'fast', change: false },

@@ -33,7 +33,7 @@ A later iteration encrypts each portion with [OpenTDF](https://opentdf.io), usin
 
 - **Single sign-on** with OpenID Connect (authorization code with PKCE); tokens stay on the server, the browser only holds a session cookie.
 - **Document portal**: document list, new documents from templates, editing and read-only sessions, saving through the Document Server callbacks.
-- **Labelling panel** in the editor: shows the signed-in user, lists the valid labels, inserts protected portions and highlights the portion under the cursor. Entry points are also in the editor's context menu and **Insert** tab.
+- **Labelling panel** in the editor: shows the signed-in user, lists the valid labels, inserts protected portions and highlights the portion under the cursor. Entry points are also in the editor's context menu and **Insert** tab. The panel speaks English or French, following the editor's language.
 - **Document label** computed from a base label and the portions' labels, with two rules: `clear-parts` (the base label plus an indicator when a portion is more restrictive) or `high-water-mark` (the ADatP-4774.1 dominant label).
 - **Co-editing**: portions and the document label reach co-authors in real time; concurrent insertions converge to the right label.
 - **Policy service**: Open XML SPIF 2.1 reader, valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part.
@@ -104,6 +104,7 @@ The stack reads `deploy/.env`, created from [`deploy/.env.example`](deploy/.env.
 | `COMPOSE_PROFILES` | `standalone` for the local proxy and IdP, empty for the hosted mode |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_SCOPES` | OpenID Connect provider and client |
 | `OIDC_AUDIENCE` | Audience OpenTDF expects in access tokens (default `https://tdf.<DOMAIN>`) |
+| `EDITOR_LANGUAGE` | Language of the editor and the labelling panel: `en` (default) or `fr`; `?lang=` in a document's address overrides it for one session |
 | `MARKING_LANGUAGE` | Language of the rendered markings (default `fr`, from the demo SPIF) |
 | `ROLLUP_RULE` | Document label rule: `clear-parts` (default) or `high-water-mark` |
 | `BIND_ADDRESS`, `PORTAL_PORT`, `DOCS_PORT`, `TDF_PORT` | Published ports in the hosted mode |

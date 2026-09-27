@@ -31,7 +31,7 @@ The portal and the policy service run their TypeScript sources directly with Nod
 
 ## Conventions
 
-Everything in the repository is written in English: code, comments, documentation, commit messages, issues and pull requests. Markings shown to users come from the SPIF, in the language it provides.
+Everything in the repository is written in English: code, comments, documentation, commit messages, issues and pull requests. Markings shown to users come from the SPIF, in the language it provides. The plugin's own texts are the exception: they exist in English and French, in `plugin/src/messages.ts` and in the `nameLocale` and `descriptionLocale` of `plugin/public/config.json`, and the tests quote them in the language they check. A new text needs both languages; technical error details stay in English.
 
 TypeScript is strict. Node.js strips types without transforming code, so only erasable syntax is allowed: no `enum`, `namespace` or constructor parameter properties. On top of that:
 

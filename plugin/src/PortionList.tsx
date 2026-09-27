@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import { messages } from './messages.ts';
 import type { LabelView } from './policy.ts';
 import type { StoredPortion } from './portions.ts';
 
@@ -12,9 +13,9 @@ export interface PortionListProps {
 export function PortionList({ portions, labels, activePortionId, onSelect }: PortionListProps): JSX.Element {
   return (
     <section class="portions" aria-labelledby="portions-title">
-      <h2 id="portions-title">Protected portions</h2>
+      <h2 id="portions-title">{messages.portionsTitle}</h2>
       {portions.length === 0 ? (
-        <p class="muted">No protected portion yet.</p>
+        <p class="muted">{messages.noPortion}</p>
       ) : (
         <ul class="portion-list">
           {portions.map((portion) => {
@@ -39,7 +40,7 @@ export function PortionList({ portions, labels, activePortionId, onSelect }: Por
                     <span data-testid="portion-marking">{label?.marking.text ?? portion.labelCode}</span>
                   </span>
                   <span class="portion-text" data-testid="portion-text">
-                    {portion.text ?? 'Content not available in this document.'}
+                    {portion.text ?? messages.portionTextUnavailable}
                   </span>
                 </button>
               </li>

@@ -1,3 +1,4 @@
+import { messages } from './messages.ts';
 import type { OfficeApi } from './office-api.ts';
 import { runCommand } from './onlyoffice.ts';
 import { type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, type LabelView } from './policy.ts';
@@ -148,9 +149,9 @@ export async function insertPortion(portion: NewPortion): Promise<boolean> {
     {
       portion: {
         tag: JSON.stringify(tag),
-        alias: 'Protected portion',
+        alias: messages.portionAlias,
         color: label.marking.color,
-        placeholder: `${label.marking.text} – protected portion`,
+        placeholder: messages.portionPlaceholder(label.marking.text),
         xml: buildPortionPart({ id, version: 1, labelCode: label.code, labelXml, text: portion.text }),
       },
       replacements: documentLabelReplacements(documentLabel.xml, portion.baseLabelCode, documentLabel.label.code),

@@ -44,6 +44,7 @@ services:
       PORTAL_INTERNAL_URL: http://portal:3000
       DOCUMENTS_DIR: /data/documents
       TEMPLATES_DIR: /templates
+      EDITOR_LANGUAGE: ${EDITOR_LANGUAGE:-en}
       OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID in .env}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { OidcSettings } from './auth/oidc.ts';
+import { EDITOR_LANGUAGES, type EditorLanguage, isEditorLanguage } from './editor-config.ts';
 
 export interface PortalConfig {
   domain: string;
@@ -9,6 +10,8 @@ export interface PortalConfig {
   onlyofficeInternalUrl: string;
   policyInternalUrl: string;
   onlyofficeJwtSecret: string;
+  // Language editors open in, unless a document's address asks for another.
+  editorLanguage: EditorLanguage;
   documentsDirectory: string;
   templatesDirectory: string;
   pluginDirectory: string;
@@ -29,6 +32,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     onlyofficeInternalUrl: env.ONLYOFFICE_INTERNAL_URL ?? 'http://onlyoffice',
     policyInternalUrl: env.POLICY_INTERNAL_URL ?? 'http://policy:3001',
     onlyofficeJwtSecret: requireEnv(env, 'ONLYOFFICE_JWT_SECRET'),
+    editorLanguage: readEditorLanguage(env),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
     templatesDirectory: env.TEMPLATES_DIR ?? '/templates',
     pluginDirectory: env.PLUGIN_DIR ?? path.join(import.meta.dirname, '..', 'plugin-dist'),
@@ -42,6 +46,14 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
       postLogoutRedirectUri: `${portalPublicUrl}/`,
     },
   };
+}
+
+function readEditorLanguage(env: NodeJS.ProcessEnv): EditorLanguage {
+  const language = env.EDITOR_LANGUAGE ?? 'en';
+  if (!isEditorLanguage(language)) {
+    throw new Error(`EDITOR_LANGUAGE must be one of ${EDITOR_LANGUAGES.join(', ')}`);
+  }
+  return language;
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, name: string): string {

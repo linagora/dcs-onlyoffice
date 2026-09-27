@@ -191,7 +191,9 @@ export interface ToolbarButton {
   icon: string;
 }
 
-// Buttons added to the standard "Insert" tab of the text editor.
+// Buttons added to the standard "Insert" tab of the text editor. The editor
+// keeps its own caption for a tab it already has, so the tab's text needs no
+// translation.
 export async function addInsertTabButton(button: ToolbarButton, onClick: () => void): Promise<boolean> {
   const plugin = window.Asc?.plugin;
   if (plugin?.attachToolbarMenuClickEvent === undefined) {
