@@ -1,3 +1,4 @@
+import { decodeJwt, errors } from 'jose';
 import * as client from 'openid-client';
 import type { SessionTokens, UserIdentity } from './sessions.ts';
 
@@ -71,8 +72,21 @@ export class OidcClient {
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token ?? null,
         idToken: tokens.id_token ?? null,
-        accessTokenExpiresAt: tokens.expires_in === undefined ? null : Date.now() + tokens.expires_in * 1000,
+        accessTokenExpiresAt: expiryOf(tokens.access_token, tokens.expires_in),
       },
+    };
+  }
+
+  // The IdP may leave out the refresh token or the ID token when it does not
+  // renew them: the previous ones then stay valid.
+  async refreshTokens(refreshToken: string, idToken: string | null): Promise<SessionTokens> {
+    const configuration = await this.#getConfiguration();
+    const tokens = await client.refreshTokenGrant(configuration, refreshToken);
+    return {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token ?? refreshToken,
+      idToken: tokens.id_token ?? idToken,
+      accessTokenExpiresAt: expiryOf(tokens.access_token, tokens.expires_in),
     };
   }
 
@@ -101,6 +115,23 @@ export class OidcClient {
       this.#configuration = discovery;
     }
     return this.#configuration;
+  }
+}
+
+// When the IdP does not say how long an access token lasts, the token's own
+// expiry does, if it is a JWT, as the hosted mode requires.
+function expiryOf(accessToken: string, expiresIn: number | undefined): number | null {
+  if (expiresIn !== undefined) {
+    return Date.now() + expiresIn * 1000;
+  }
+  try {
+    const { exp } = decodeJwt(accessToken);
+    return exp === undefined ? null : exp * 1000;
+  } catch (error: unknown) {
+    if (error instanceof errors.JWTInvalid) {
+      return null;
+    }
+    throw error;
   }
 }
 

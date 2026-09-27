@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from './auth/routes.ts';
 import type { UserIdentity } from './auth/sessions.ts';
+import { sendUpstreamResponse } from './upstream-response.ts';
 
 const RELAY_PREFIX = '/api/policy';
 
@@ -21,10 +22,7 @@ export function registerPolicyRelay(app: FastifyInstance, policyInternalUrl: str
         headers: { 'Content-Type': 'application/json', ...identityHeaders(user) },
         body: request.method === 'GET' ? null : JSON.stringify(request.body ?? {}),
       });
-      return reply
-        .code(response.status)
-        .type(response.headers.get('content-type') ?? 'application/json')
-        .send(Buffer.from(await response.arrayBuffer()));
+      return sendUpstreamResponse(reply, response);
     },
   });
   return app;

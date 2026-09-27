@@ -37,7 +37,7 @@ A later iteration encrypts each portion with [OpenTDF](https://opentdf.io), usin
 - **Document label** computed from a base label and the portions' labels, with two rules: `clear-parts` (the base label plus an indicator when a portion is more restrictive) or `high-water-mark` (the ADatP-4774.1 dominant label).
 - **Co-editing**: portions and the document label reach co-authors in real time; concurrent insertions converge to the right label.
 - **Policy service**: Open XML SPIF 2.1 reader, valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part.
-- **OpenTDF platform** already running and trusting the identity provider, ready for the encryption iteration.
+- **OpenTDF platform** running and trusting the identity provider, behind a relay on the portal that adds the access token the portal keeps and refreshes, so that the plugin's calls never need a token in the browser.
 - **End-to-end tests** against the whole stack in CI, which keeps a trace, a screenshot and the saved DOCX files of every test.
 
 ## Quick start
@@ -73,6 +73,7 @@ flowchart LR
   proxy --> docs[ONLYOFFICE Docs]
   proxy --> tdf[OpenTDF platform]
   portal --> policy[Policy service<br/>Open XML SPIF]
+  portal -->|relayed calls| tdf
   docs -->|load and save| portal
   portal -->|OpenID Connect| idp[Identity provider]
   tdf -->|token keys| idp
@@ -81,7 +82,7 @@ flowchart LR
 
 | Component | Role | Technology |
 | --- | --- | --- |
-| `portal` | Sign-in, document list and storage, editor configuration, relay to the policy service, serves the plugin | Node.js, Fastify, `openid-client` |
+| `portal` | Sign-in, document list and storage, editor configuration, relays to the policy service and to OpenTDF, serves the plugin | Node.js, Fastify, `openid-client` |
 | `plugin` | Labelling panel inside the editor | Preact, Vite, ONLYOFFICE plugin API |
 | `policy` | Reads SPIF files, validates labels, renders markings, computes the document label and its ADatP-4778.2 part | Node.js, Fastify |
 | ONLYOFFICE Docs | Document editing and co-editing | ONLYOFFICE Docs 9.4 Community Edition |

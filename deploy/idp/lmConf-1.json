@@ -39,7 +39,7 @@
   "oidcRPMetaDataOptions": {
     "dcs-maquette": {
       "oidcRPMetaDataOptionsAccessTokenClaims": 1,
-      "oidcRPMetaDataOptionsAccessTokenExpiration": 300,
+      "oidcRPMetaDataOptionsAccessTokenExpiration": 60,
       "oidcRPMetaDataOptionsAccessTokenJWT": 1,
       "oidcRPMetaDataOptionsAccessTokenSignAlg": "RS256",
       "oidcRPMetaDataOptionsActivation": 1,

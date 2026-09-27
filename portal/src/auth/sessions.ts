@@ -68,6 +68,15 @@ export class SessionStore {
     return session;
   }
 
+  // A refreshed session keeps its id and its lifetime.
+  replaceTokens(id: string, tokens: SessionTokens): Session | null {
+    const session = this.#sessions.get(id) ?? null;
+    if (session !== null) {
+      session.tokens = tokens;
+    }
+    return session;
+  }
+
   deleteSession(id: string): boolean {
     return this.#sessions.delete(id);
   }
