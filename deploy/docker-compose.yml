@@ -40,6 +40,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
       ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      DIRECTORY_ADMINISTRATION_SECRET: ${DIRECTORY_ADMINISTRATION_SECRET:?set DIRECTORY_ADMINISTRATION_SECRET in .env}
       ONLYOFFICE_INTERNAL_URL: http://onlyoffice
       PORTAL_INTERNAL_URL: http://portal:3000
       DOCUMENTS_DIR: /data/documents
@@ -91,6 +92,9 @@ services:
       DIRECTORY_DB_USER: dcs_directory
       DIRECTORY_DB_PASSWORD: ${DIRECTORY_DB_PASSWORD:?set DIRECTORY_DB_PASSWORD in .env}
       DIRECTORY_SEED_DIR: /directory/seeds
+      # Every container of the stack reaches this service: only the portal,
+      # which holds this secret, may change the clearance directory.
+      DIRECTORY_ADMINISTRATION_SECRET: ${DIRECTORY_ADMINISTRATION_SECRET:?set DIRECTORY_ADMINISTRATION_SECRET in .env}
     volumes:
       - ./spif:/spif:ro
       - ./directory/seeds:/directory/seeds:ro

@@ -71,6 +71,44 @@ export function heldCategoryOf(text: string): HeldCategory | null {
   return separator <= 0 ? null : { tagSet: text.slice(0, separator), name: text.slice(separator + 1) };
 }
 
+// A clearance as the directory's API shows it: categories as the directory
+// writes them, dates in ISO 8601.
+export interface ClearanceView {
+  email: string;
+  name: string;
+  nationality: string | null;
+  policy: string;
+  classification: string;
+  categories: string[];
+  validFrom: string;
+  validUntil: string;
+}
+
+export function clearanceView(clearance: Clearance): ClearanceView {
+  return {
+    email: clearance.email,
+    name: clearance.name,
+    nationality: clearance.nationality,
+    policy: clearance.policy,
+    classification: clearance.classification,
+    categories: clearance.categories.map(categoryText),
+    validFrom: clearance.validFrom.toISOString(),
+    validUntil: clearance.validUntil.toISOString(),
+  };
+}
+
+// What a clearance under a policy can hold: its classifications from the
+// lowest, and the categories of its restrictive and permissive tag sets, as
+// the directory writes them.
+export function clearanceChoicesOf(policy: SecurityPolicy): { classifications: string[]; categories: string[] } {
+  return {
+    classifications: [...policy.classifications].sort((left, right) => left.hierarchy - right.hierarchy).map((classification) => classification.name),
+    categories: policy.tagSets
+      .filter((tagSet) => tagSet.type !== 'INFORMATIVE')
+      .flatMap((tagSet) => tagSet.categories.map((category) => categoryText({ tagSet: tagSet.name, name: category.name }))),
+  };
+}
+
 // The directory keeps email addresses in lower case.
 export function normalizedEmail(email: string): string {
   return email.trim().toLowerCase();

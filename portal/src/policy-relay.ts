@@ -38,7 +38,7 @@ function policyServiceUrl(suffix: string, policyInternalUrl: string): URL | null
 }
 
 // Header values must stay ASCII, so free-text fields are URI-encoded.
-function identityHeaders(user: UserIdentity): Record<string, string> {
+export function identityHeaders(user: UserIdentity): Record<string, string> {
   return {
     'X-User-Id': encodeURIComponent(user.id),
     'X-User-Name': encodeURIComponent(user.name),

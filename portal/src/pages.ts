@@ -1,6 +1,33 @@
+import { isAdministrator } from './auth/administrators.ts';
 import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentTemplate, StoredDocument } from './documents.ts';
 import type { SignedEditorConfig } from './editor-config.ts';
+import { firstDayOf, lastDayOf } from './validity-period.ts';
+
+// A clearance as the policy service's directory shows it.
+export interface ClearanceEntry {
+  email: string;
+  name: string;
+  nationality: string | null;
+  policy: string;
+  classification: string;
+  // Each "<tag set>:<category>".
+  categories: string[];
+  validFrom: string;
+  validUntil: string;
+}
+
+// What a clearance under one policy can hold.
+export interface ClearanceChoices {
+  classifications: string[];
+  categories: string[];
+}
+
+// What the clearances page reports after a save.
+export interface PageNotice {
+  saved: string | null;
+  error: string | null;
+}
 
 export interface EditorPageOptions {
   title: string;
@@ -20,6 +47,13 @@ const STYLE = `
   td.actions a { margin-left: 0.8rem; }
   form { display: inline; }
   button { font: inherit; cursor: pointer; }
+  header a { color: #fff; }
+  td { vertical-align: top; }
+  form.clearance { display: grid; gap: 0.4rem; }
+  form.clearance fieldset { border: 1px solid #e4e7eb; padding: 0.3rem 0.6rem; }
+  form.clearance button { justify-self: start; }
+  .notice { padding: 0.5rem 0.8rem; border-radius: 4px; background: #e3f9e5; }
+  .notice.error { background: #ffe3e3; }
 `;
 
 export function renderDocumentListPage(
@@ -61,6 +95,65 @@ export function renderDocumentListPage(
   );
 }
 
+// One form per entry: the person and the policy are fixed, the terms and
+// the validity period are edited, among the choices the SPIF offers.
+export function renderClearancesPage(
+  user: UserIdentity,
+  entries: ClearanceEntry[],
+  choices: ReadonlyMap<string, ClearanceChoices>,
+  notice: PageNotice,
+): string {
+  const rows = entries
+    .map((entry) => {
+      const offered = choices.get(entry.policy) ?? { classifications: [entry.classification], categories: entry.categories };
+      const classifications = offered.classifications
+        .map((name) => `<option${name === entry.classification ? ' selected' : ''}>${escapeHtml(name)}</option>`)
+        .join('');
+      const categories = offered.categories
+        .map(
+          (category) =>
+            `<label><input type="checkbox" name="category" value="${escapeHtml(category)}"${entry.categories.includes(category) ? ' checked' : ''}> ${escapeHtml(category.replace(':', ': '))}</label>`,
+        )
+        .join('<br>');
+      return `<tr>
+  <td>${escapeHtml(entry.name)}<br><small>${escapeHtml(entry.email)}</small></td>
+  <td>${escapeHtml(entry.nationality ?? '')}</td>
+  <td>${escapeHtml(entry.policy)}</td>
+  <td>
+    <form class="clearance" method="post" action="/admin/clearances" aria-label="Clearance of ${escapeHtml(entry.email)}">
+      <input type="hidden" name="email" value="${escapeHtml(entry.email)}">
+      <input type="hidden" name="policy" value="${escapeHtml(entry.policy)}">
+      <label>Highest classification <select name="classification">${classifications}</select></label>
+      <fieldset><legend>Categories</legend>${categories}</fieldset>
+      <input type="hidden" name="validFromWas" value="${escapeHtml(entry.validFrom)}">
+      <input type="hidden" name="validUntilWas" value="${escapeHtml(entry.validUntil)}">
+      <label>Valid from <input type="date" name="validFrom" value="${escapeHtml(firstDayOf(entry.validFrom))}"></label>
+      <label>Valid through <input type="date" name="validThrough" value="${escapeHtml(lastDayOf(entry.validUntil))}"></label>
+      <button type="submit">Save</button>
+    </form>
+  </td>
+</tr>`;
+    })
+    .join('');
+  const messages = [
+    notice.saved === null ? '' : `<p class="notice" role="status">Clearance of ${escapeHtml(notice.saved)} saved.</p>`,
+    notice.error === null ? '' : `<p class="notice error" role="alert">${escapeHtml(notice.error)}</p>`,
+  ].join('');
+  return page(
+    'Clearances',
+    `${renderHeader(user)}
+<main>
+  <h2>Clearances</h2>
+  <p>A change applies at the next key request: a reader sees it once the document is reopened. A clearance is valid from the start of its first day to the end of its last day, UTC.</p>
+  ${messages}
+  <table>
+    <thead><tr><th>Person</th><th>Nationality</th><th>Policy</th><th>Clearance</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</main>`,
+  );
+}
+
 export function renderMessagePage(title: string, message: string): string {
   return page(
     title,
@@ -92,7 +185,8 @@ export function renderEditorPage(options: EditorPageOptions): string {
 
 function renderHeader(user: UserIdentity): string {
   return `<header>
-  <h1>DCS ONLYOFFICE</h1>
+  <h1><a href="/">DCS ONLYOFFICE</a></h1>
+  ${isAdministrator(user) ? '<a href="/admin/clearances">Clearances</a>' : ''}
   <span>Signed in as ${escapeHtml(user.name)}</span>
   <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>
 </header>`;
