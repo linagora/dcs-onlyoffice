@@ -31,6 +31,24 @@ export async function storedDocx(page: Page, documentId: string): Promise<DocxIn
   return inspectDocx(response.body);
 }
 
+// Leaves the editor on every page that has the document open, then waits for
+// the Document Server to store it, which it does once the last editor has
+// left, with the number of portions the test expects.
+export async function leaveAndWaitForSave(editors: Page[], documentId: string, portionCount: number): Promise<void> {
+  const [first] = editors;
+  if (first === undefined) {
+    throw new Error('No editor to leave');
+  }
+  // Fast co-editing sends changes asynchronously; let them reach the server.
+  await first.waitForTimeout(2_000);
+  for (const editor of editors) {
+    await editor.goto('/');
+  }
+  await expect
+    .poll(async () => (await storedDocx(first, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
+    .toBe(portionCount);
+}
+
 // Force-saves until the stored file shows what the test waits for.
 export async function forceSavedDocx(
   page: Page,
