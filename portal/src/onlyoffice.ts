@@ -20,6 +20,8 @@ export interface CallbackPayload {
   key: string;
   status: CallbackStatus;
   url: string | null;
+  // The ids of the users of the editing session.
+  users: string[];
 }
 
 export type ForceSaveOutcome = 'accepted' | 'no-changes' | 'unknown-document' | 'failed';
@@ -111,7 +113,8 @@ function parseCallbackPayload(value: unknown): CallbackPayload | null {
   if (!isRecord(value) || typeof value.key !== 'string' || typeof value.status !== 'number' || !isCallbackStatus(value.status)) {
     return null;
   }
-  return { key: value.key, status: value.status, url: typeof value.url === 'string' ? value.url : null };
+  const users = Array.isArray(value.users) ? value.users.filter((user: unknown): user is string => typeof user === 'string') : [];
+  return { key: value.key, status: value.status, url: typeof value.url === 'string' ? value.url : null, users };
 }
 
 function isCallbackStatus(value: number): value is CallbackStatus {

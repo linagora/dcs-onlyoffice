@@ -27,9 +27,11 @@ export interface EditorConfig {
 }
 
 // What the labelling plugin reads from the editor: the OpenTDF platform whose
-// KAS address goes into every envelope.
+// KAS address goes into every envelope, and the stored document, whose base
+// label changes it reports to the portal.
 export interface PluginOptions {
   opentdfUrl: string;
+  documentId: string;
 }
 
 export interface EditorPlugin {
@@ -84,7 +86,7 @@ export function buildEditorConfig(
       plugins: {
         autostart: [plugin.guid],
         pluginsData: [mode === 'view' ? plugin.viewConfigUrl : plugin.configUrl],
-        options: { [plugin.guid]: { opentdfUrl: config.opentdfPublicUrl } },
+        options: { [plugin.guid]: { opentdfUrl: config.opentdfPublicUrl, documentId: document.id } },
       },
     },
   };

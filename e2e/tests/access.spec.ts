@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
-import { openDocument, openNewDocument } from './support/documents.ts';
+import { browserFetch, openDocument, openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
@@ -62,13 +62,16 @@ test('a portion is read only by the people whose clearance allows its label, as 
   }
 });
 
-test('someone without a clearance is refused every protected portion', async ({ page, browser }) => {
+// A document without a base label counts as NON PROTÉGÉ, so without a
+// clearance no document opens. OpenTDF refuses such a person every portion
+// key too (access-decisions.spec.ts).
+test('someone without a clearance opens no document', async ({ page, browser }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   const dan = await signedInPage(browser, DEMO_ACCOUNTS.dan);
-  await openDocument(dan, documentId);
 
-  await insertPortion(page, { marking: NON_PROTEGE, text: markedText('Fictional public paragraph') });
-
-  await expect.poll(() => shownPortions(dan)).toEqual([{ marking: NON_PROTEGE, text: null, notice: 'Access denied' }]);
+  expect((await browserFetch(dan, `/documents/${documentId}/edit`)).status).toBe(403);
+  await dan.goto('/');
+  await expect(dan.locator('tr.restricted-document').first()).toBeVisible();
+  await expect(dan.locator('main a[href^="/documents/"]')).toHaveCount(0);
   await dan.context().close();
 });
