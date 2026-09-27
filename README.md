@@ -104,6 +104,7 @@ The stack reads `deploy/.env`, created from [`deploy/.env.example`](deploy/.env.
 | `COMPOSE_PROFILES` | `standalone` for the local proxy and IdP, empty for the hosted mode |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_SCOPES` | OpenID Connect provider and client |
 | `OIDC_AUDIENCE` | Audience OpenTDF expects in access tokens (default `https://tdf.<DOMAIN>`) |
+| `EDITOR_LANGUAGE` | Language of the editor and the labelling panel: `en` (default) or `fr`; `?lang=` in a document's address overrides it for one session |
 | `MARKING_LANGUAGE` | Language of the rendered markings (default `fr`, from the demo SPIF) |
 | `ROLLUP_RULE` | Document label rule: `clear-parts` (default) or `high-water-mark` |
 | `BIND_ADDRESS`, `PORTAL_PORT`, `DOCS_PORT`, `TDF_PORT` | Published ports in the hosted mode |

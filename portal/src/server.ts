@@ -9,7 +9,7 @@ import { SessionStore } from './auth/sessions.ts';
 import type { PortalConfig } from './config.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { createDocumentFromTemplate, DOCX_CONTENT_TYPE, findDocument, listDocuments, listTemplates } from './documents.ts';
-import { buildEditorConfig, type EditorMode, signEditorConfig } from './editor-config.ts';
+import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
 import { requestForceSave } from './onlyoffice.ts';
 import { renderDocumentListPage, renderEditorPage } from './pages.ts';
 import { registerPluginRoutes } from './plugin-routes.ts';
@@ -21,6 +21,12 @@ interface DocumentParams {
 
 interface CreateDocumentBody {
   template?: string;
+}
+
+interface EditorRoute {
+  Params: DocumentParams;
+  // Unchecked input: a repeated parameter arrives as an array.
+  Querystring: { lang?: unknown };
 }
 
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
@@ -70,14 +76,19 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.redirect(`/documents/${document.id}/edit`, 303);
   });
 
-  const openEditor = (mode: EditorMode) => async (request: FastifyRequest<{ Params: DocumentParams }>, reply: FastifyReply): Promise<FastifyReply> => {
+  const openEditor = (mode: EditorMode) => async (request: FastifyRequest<EditorRoute>, reply: FastifyReply): Promise<FastifyReply> => {
+    // A language in the address applies to this editing session only.
+    const language = request.query.lang ?? config.editorLanguage;
+    if (!isEditorLanguage(language)) {
+      return reply.code(400).send({ error: 'Unsupported language' });
+    }
     const document = await findDocument(config.documentsDirectory, request.params.id);
     if (document === null) {
       return reply.code(404).send({ error: 'Document not found' });
     }
     const { user } = requireSession(request);
     const editorConfig = await signEditorConfig(
-      buildEditorConfig(document, { id: user.id, name: user.name }, plugin, mode, config),
+      buildEditorConfig(document, { id: user.id, name: user.name }, plugin, mode, language, config),
       config.onlyofficeJwtSecret,
     );
     return reply.type('text/html; charset=utf-8').send(
@@ -88,8 +99,8 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       }),
     );
   };
-  app.get<{ Params: DocumentParams }>('/documents/:id/edit', openEditor('edit'));
-  app.get<{ Params: DocumentParams }>('/documents/:id/view', openEditor('view'));
+  app.get<EditorRoute>('/documents/:id/edit', openEditor('edit'));
+  app.get<EditorRoute>('/documents/:id/view', openEditor('view'));
 
   app.get<{ Params: DocumentParams }>('/documents/:id/download', async (request, reply) => {
     const document = await findDocument(config.documentsDirectory, request.params.id);
