@@ -56,6 +56,24 @@ export async function fetchAdatp4774(policy: string, code: string): Promise<stri
   return body.xml;
 }
 
+// The label that an ADatP-4774 label designates, under the policy it names;
+// null when the policy service finds no valid label in it.
+export async function fetchLabelOfAdatp4774(xml: string): Promise<LabelView | null> {
+  const response = await post(`${RELAY}/labels/parse`, { xml });
+  if (response.status === 400 || response.status === 422) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`The policy service could not read a label (${response.status})`);
+  }
+  const body: unknown = await response.json();
+  const label: unknown = typeof body === 'object' && body !== null && 'label' in body ? body.label : null;
+  if (!isLabelView(label)) {
+    throw new Error('Unexpected label answer');
+  }
+  return label;
+}
+
 // The attribute values an envelope carries for a label, which OpenTDF grants
 // to the clearances that allow it.
 export async function fetchLabelAttributes(policy: string, code: string): Promise<string[]> {
@@ -115,14 +133,18 @@ async function getJson(url: string): Promise<unknown> {
   return response.json();
 }
 
-// A refused call fails with the given message and the answer's status.
-async function postJson(url: string, body: unknown, refusal: string): Promise<unknown> {
-  const response = await fetch(url, {
+async function post(url: string, body: unknown): Promise<Response> {
+  return fetch(url, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+// A refused call fails with the given message and the answer's status.
+async function postJson(url: string, body: unknown, refusal: string): Promise<unknown> {
+  const response = await post(url, body);
   if (!response.ok) {
     throw new Error(`${refusal} (${response.status})`);
   }

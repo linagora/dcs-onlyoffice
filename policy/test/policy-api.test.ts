@@ -285,6 +285,60 @@ describe('ADatP-4774 serialization', () => {
   });
 });
 
+// The label bound in an envelope is ADatP-4774 XML: reading it back gives the
+// label it designates, which the panel compares with the portion's label in
+// clear.
+describe('ADatP-4774 reading', () => {
+  let exampleServer: FastifyInstance;
+  let demoServer: FastifyInstance;
+  before(async () => {
+    exampleServer = await buildPolicyServer({ spifDirectory: EXAMPLE_SPIFS, markingLanguage: 'en' });
+    demoServer = await buildPolicyServer({ spifDirectory: DEMO_SPIFS, markingLanguage: 'fr' });
+  });
+  after(async () => {
+    await exampleServer.close();
+    await demoServer.close();
+  });
+
+  async function read(server: FastifyInstance, payload: Record<string, string>): Promise<{ statusCode: number; body: unknown }> {
+    const response = await server.inject({ method: 'POST', url: '/labels/parse', payload });
+    return { statusCode: response.statusCode, body: response.json() };
+  }
+
+  it('reads the reference originator label', async () => {
+    const { statusCode, body } = await read(exampleServer, { xml: REFERENCE_LABEL });
+    assert.equal(statusCode, 200);
+    assert.equal(labelOf(body).code, 'EXAMPLE:2/1.1/2.1+2');
+  });
+
+  it('reads back the label a code was serialized to, with its marking', async () => {
+    const serialized = await demoServer.inject({ method: 'POST', url: '/policies/DEMO-FR/labels/adatp4774', payload: { code: 'DEMO-FR:2/1.1' } });
+    const { statusCode, body } = await read(demoServer, { xml: xmlOf(serialized.json()) });
+    assert.equal(statusCode, 200);
+    assert.equal(labelOf(body).code, 'DEMO-FR:2/1.1');
+    assert.equal(labelOf(body).marking.text, 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE');
+  });
+
+  it('refuses a label of a policy it does not hold, or that the policy does not allow', async () => {
+    assert.equal((await read(demoServer, { xml: REFERENCE_LABEL })).statusCode, 422);
+    assert.equal((await read(exampleServer, { xml: REFERENCE_LABEL.replace('XBB', 'XZZ') })).statusCode, 422);
+    const otherIdentifier = REFERENCE_LABEL.replace(/URI="urn:oid:[^"]*">EXAMPLE</, 'URI="urn:oid:1.2.3">EXAMPLE<');
+    assert.notEqual(otherIdentifier, REFERENCE_LABEL);
+    assert.equal((await read(exampleServer, { xml: otherIdentifier })).statusCode, 422);
+  });
+
+  it('refuses what is not an originator label in the form the service writes', async () => {
+    const twoClassifications = REFERENCE_LABEL.replace(/(<slab:Classification>[^<]*<\/slab:Classification>)/, '$1<slab:Classification>UNCLASSIFIED</slab:Classification>');
+    const lacvValue = REFERENCE_LABEL.replace('<slab:GenericValue>XBB</slab:GenericValue>', '<slab:LACV>2</slab:LACV>');
+    assert.notEqual(twoClassifications, REFERENCE_LABEL);
+    assert.notEqual(lacvValue, REFERENCE_LABEL);
+    for (const xml of [twoClassifications, lacvValue, '<!DOCTYPE label [<!ENTITY a "a">]><label/>', '<label/>', 'not xml']) {
+      assert.equal((await read(exampleServer, { xml })).statusCode, 400, xml.slice(0, 60));
+    }
+    assert.equal((await read(exampleServer, {})).statusCode, 400);
+  });
+});
+
 describe('document label rollup with the demo SPIF', () => {
   let clearParts: FastifyInstance;
   let highWaterMark: FastifyInstance;

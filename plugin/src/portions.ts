@@ -20,7 +20,11 @@ export type PortionContent = { encoding: 'ztdf'; envelope: string } | { encoding
 
 export interface StoredPortion {
   id: string;
+  // The label in clear: the code in the content control's tag, and the code
+  // and ADatP-4774 XML in the portion's part, null without a part.
   labelCode: string;
+  partLabelCode: string | null;
+  partLabelXml: string | null;
   version: number | null;
   // null when the part is missing or unreadable.
   content: PortionContent | null;
@@ -71,6 +75,7 @@ interface PortionPartContent {
   id: string;
   version: number;
   labelCode: string;
+  labelXml: string | null;
   content: PortionContent | null;
 }
 
@@ -217,6 +222,8 @@ export async function readDocumentState(): Promise<DocumentState> {
       {
         id: tag.id,
         labelCode: tag.label,
+        partLabelCode: content?.labelCode ?? null,
+        partLabelXml: content?.labelXml ?? null,
         version: content?.version ?? null,
         content: content?.content ?? null,
         internalId: control.internalId,
@@ -297,7 +304,14 @@ function parsePortionPart(xml: string): PortionPartContent | null {
     return null;
   }
   const content = root.getElementsByTagNameNS(PORTION_NAMESPACE, 'content')[0];
-  return { id, version, labelCode, content: content === undefined ? null : contentOf(content) };
+  const label = root.getElementsByTagNameNS(PORTION_NAMESPACE, 'label')[0]?.firstElementChild ?? null;
+  return {
+    id,
+    version,
+    labelCode,
+    labelXml: label === null ? null : new XMLSerializer().serializeToString(label),
+    content: content === undefined ? null : contentOf(content),
+  };
 }
 
 // Unencrypted portions store their text base64-encoded, since the editor's

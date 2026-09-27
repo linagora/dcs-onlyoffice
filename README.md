@@ -34,7 +34,7 @@ Iteration 3 is in progress: next, its demo is replayed on a hosted stack.
 
 - **Single sign-on** with OpenID Connect (authorization code with PKCE); tokens stay on the server, the browser only holds a session cookie.
 - **Document portal**: document list, new documents from templates, editing and read-only sessions, saving through the Document Server callbacks.
-- **Labelling panel** in the editor: shows the signed-in user, offers new portions only the labels the signed-in person's clearance allows, inserts protected portions and highlights the portion under the cursor. Entry points are also in the editor's context menu and **Insert** tab. The panel speaks English or French, following the editor's language.
+- **Labelling panel** in the editor: shows the signed-in user, offers new portions only the labels the signed-in person's clearance allows, inserts protected portions and highlights the portion under the cursor. For every portion it opens, it checks the label in clear against the label bound to the envelope, and shows the bound one, with a warning, when they differ. Entry points are also in the editor's context menu and **Insert** tab. The panel speaks English or French, following the editor's language.
 - **Document label** computed from a base label and the portions' labels, with two rules: `clear-parts` (the base label plus an indicator when a portion is more restrictive) or `high-water-mark` (the ADatP-4774.1 dominant label).
 - **Co-editing**: portions and the document label reach co-authors in real time; concurrent insertions converge to the right label.
 - **Policy service**: Open XML SPIF 2.1 reader, valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part.

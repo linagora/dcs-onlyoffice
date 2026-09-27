@@ -4,9 +4,10 @@ import { envelopeManifest } from './support/envelopes.ts';
 import { expect, test } from './support/fixtures.ts';
 import { canaryText, markedText, PORTION_MARKER } from './support/marker.ts';
 import { PLATFORM, platformBaseKey } from './support/opentdf.ts';
-import { insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
-import { fillPortionForm, forceSavedDocx, insertPortion, leaveAndWaitForSave } from './support/portions.ts';
+import { insertMovedEnvelope, insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
+import { fillPortionForm, forceSavedDocx, insertPortion, leaveAndWaitForSave, shownPortions } from './support/portions.ts';
 
+const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -128,6 +129,34 @@ test('a portion from before encryption is shown with a warning that it is not en
   const panel = pluginPanel(page);
   await expect(panel.getByTestId('portion-notice')).toHaveText(['Not encrypted: this portion dates from before encryption.']);
   await expect(panel.getByTestId('portion-text')).toHaveText([text]);
+});
+
+// A co-author able to edit the file could move an envelope under a lower
+// label: whoever opens the envelope sees the label bound to it instead, with a
+// warning.
+test('an envelope moved under a lower label shows the label bound to it, with a warning', async ({ page }) => {
+  const source = await openNewDocument(page, 'exercise-northwind.docx');
+  const secret = markedText('Fictional moved paragraph');
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
+  const [part] = (await forceSavedDocx(page, source, (saved) => saved.portionParts.length === 1)).portionParts;
+  if (part === undefined) {
+    throw new Error('The saved DOCX holds no portion part');
+  }
+
+  await openNewDocument(page, 'exercise-northwind.docx');
+  const frame = await pluginFrame(page);
+  const placeholder = `${DIFFUSION_RESTREINTE} – protected portion`;
+  await insertMovedEnvelope(frame, { labelCode: 'DEMO-FR:2', labelXml: await labelXmlOf(frame, 'DEMO-FR', 'DEMO-FR:2'), placeholder, envelope: part.content });
+
+  await expect
+    .poll(() => shownPortions(page))
+    .toEqual([
+      {
+        marking: SPECIAL_FRANCE,
+        text: secret,
+        notice: "The label in clear does not match the label bound to this portion's envelope, shown above.",
+      },
+    ]);
 });
 
 test('a portion that cannot be decrypted says why, and is read once it can be', async ({ page }) => {

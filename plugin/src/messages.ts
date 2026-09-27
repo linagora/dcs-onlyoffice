@@ -32,6 +32,8 @@ const ENGLISH = {
   accessDenied: 'Access denied',
   couldNotDecrypt: (reason: string): string => `Could not decrypt (${reason}).`,
   notEncrypted: 'Not encrypted: this portion dates from before encryption.',
+  labelMismatch: "The label in clear does not match the label bound to this portion's envelope, shown above.",
+  boundLabelUnreadable: "The label bound to this portion's envelope cannot be read.",
   envelopeDamaged: 'the stored envelope is damaged',
   noOpentdfPlatform: 'the editor configuration names no OpenTDF platform',
   // Editor menus
@@ -72,6 +74,8 @@ const FRENCH: Messages = {
   accessDenied: 'Accès refusé',
   couldNotDecrypt: (reason: string): string => `Déchiffrement impossible (${reason}).`,
   notEncrypted: 'Non chiffrée. Cette portion date d’avant le chiffrement.',
+  labelMismatch: 'L’étiquette en clair ne correspond pas à celle liée à l’enveloppe de cette portion, affichée ci-dessus.',
+  boundLabelUnreadable: 'L’étiquette liée à l’enveloppe de cette portion est illisible.',
   envelopeDamaged: 'l’enveloppe enregistrée est abîmée',
   noOpentdfPlatform: 'la configuration de l’éditeur ne désigne aucune plateforme OpenTDF',
   contextMenuEntry: 'Insérer une portion protégée',

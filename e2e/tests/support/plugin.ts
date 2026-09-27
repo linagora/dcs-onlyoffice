@@ -114,18 +114,42 @@ export async function restoreEditorCommands(frame: Frame): Promise<void> {
   });
 }
 
-export interface UnencryptedPortion {
+// How a portion's part stores its content: its text in clear, base64-encoded,
+// or an envelope.
+type StoredEncoding = 'base64' | 'ztdf';
+
+// A portion the test writes itself, bypassing the panel.
+interface WrittenPortion {
   labelCode: string;
   labelXml: string;
   placeholder: string;
+}
+
+export interface UnencryptedPortion extends WrittenPortion {
   text: string;
 }
 
+// An envelope taken from another portion, under the label given here.
+export interface MovedEnvelope extends WrittenPortion {
+  envelope: string;
+}
+
 // Writes a portion as iteration 2 did, before encryption: its text in clear,
-// base64-encoded, in its part. The plugin SDK keeps a single callback slot, so
-// the panel's commands are held off, and the test waits for the one the
-// editor may still be answering before it sends its own.
+// base64-encoded, in its part.
 export async function insertUnencryptedPortion(frame: Frame, portion: UnencryptedPortion): Promise<void> {
+  await writePortion(frame, portion, 'base64', Buffer.from(portion.text).toString('base64'));
+}
+
+// Writes a portion as a co-author able to edit the file could: an existing
+// envelope, under a label that is not the one bound to it.
+export async function insertMovedEnvelope(frame: Frame, portion: MovedEnvelope): Promise<void> {
+  await writePortion(frame, portion, 'ztdf', portion.envelope);
+}
+
+// The plugin SDK keeps a single callback slot, so the panel's commands are
+// held off, and the test waits for the one the editor may still be answering
+// before it sends its own.
+async function writePortion(frame: Frame, portion: WrittenPortion, encoding: StoredEncoding, content: string): Promise<void> {
   await breakEditorCommands(frame, 'Held off while the test writes a portion');
   try {
     await expect
@@ -162,14 +186,14 @@ export async function insertUnencryptedPortion(frame: Frame, portion: Unencrypte
             },
           );
         }),
-      unencryptedScope(portion),
+      portionScope(portion, encoding, content),
     );
   } finally {
     await restoreEditorCommands(frame);
   }
 }
 
-function unencryptedScope(portion: UnencryptedPortion): { tag: string; placeholder: string; xml: string } {
+function portionScope(portion: WrittenPortion, encoding: StoredEncoding, content: string): { tag: string; placeholder: string; xml: string } {
   const id = crypto.randomUUID();
   return {
     tag: JSON.stringify({ v: 1, id, label: portion.labelCode }),
@@ -177,7 +201,7 @@ function unencryptedScope(portion: UnencryptedPortion): { tag: string; placehold
     xml:
       `<dcs:portion xmlns:dcs="${PORTION_NAMESPACE}" id="${id}" version="1" label="${portion.labelCode}">` +
       `<dcs:label>${portion.labelXml}</dcs:label>` +
-      `<dcs:content encoding="base64">${Buffer.from(portion.text).toString('base64')}</dcs:content>` +
+      `<dcs:content encoding="${encoding}">${content}</dcs:content>` +
       '</dcs:portion>',
   };
 }

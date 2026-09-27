@@ -1,6 +1,6 @@
 import { fastify, type FastifyInstance } from 'fastify';
 import { accessDecision } from './access.ts';
-import { reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
+import { readOriginatorLabel, reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
 import { callerEmail } from './caller.ts';
 import { registerDirectoryAdministration } from './directory/administration.ts';
@@ -161,6 +161,26 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     },
   );
 
+  // The label that an originator label designates, under the policy it names,
+  // such as the label bound to an envelope, which the panel compares with the
+  // label in clear.
+  app.post<{ Querystring: LanguageQuery }>('/labels/parse', async (request, reply) => {
+    const xml = readTextField(request.body, 'xml');
+    const designated = xml === null ? null : readOriginatorLabel(xml);
+    if (designated === null) {
+      return reply.code(400).send({ error: 'Expected { xml } holding an ADatP-4774 originator label' });
+    }
+    const policy = findPolicy(designated.policy);
+    if (policy === null || (designated.policyUri !== null && designated.policyUri !== `urn:oid:${policy.oid}`)) {
+      return reply.code(422).send({ error: `No policy ${designated.policy} with that identifier` });
+    }
+    const validation = validateLabel(policy, designated.request);
+    if (!validation.valid) {
+      return reply.code(422).send({ error: validation.errors.join('; ') });
+    }
+    return { label: toView(policy, validation.label, request.query.lang ?? defaultLanguage) };
+  });
+
   // The attribute values an envelope carries for a label.
   app.post<{ Params: PolicyParams }>('/policies/:policy/labels/attributes', async (request, reply) => {
     const policy = findPolicy(request.params.policy);
@@ -309,7 +329,12 @@ function readDocumentLabelRequest(body: unknown): DocumentLabelRequest | null {
 }
 
 function readCode(body: unknown): string | null {
-  return typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string' ? body.code : null;
+  return readTextField(body, 'code');
+}
+
+function readTextField(body: unknown, name: string): string | null {
+  const value: unknown = typeof body === 'object' && body !== null && name in body ? (body as Record<string, unknown>)[name] : null; // SAFETY: object checked just before
+  return typeof value === 'string' ? value : null;
 }
 
 function toView(policy: SecurityPolicy, label: Label, language: string): LabelView {

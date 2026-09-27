@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { DOMParser, type Element } from '@xmldom/xmldom';
+import type { Element } from '@xmldom/xmldom';
+import { childrenNamed, parseXml } from '../xml.ts';
 import { classificationNamed, sameName, tagSetNamed } from './lookup.ts';
 import type {
   CategoryGroup,
@@ -20,7 +21,6 @@ export const SPIF_NAMESPACE = 'http://www.xmlspif.org/spif';
 export const EXTENSION_NAMESPACE = 'urn:linagora:dcs:spif:1';
 
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
-const ELEMENT_NODE = 1;
 const SUPPORTED_SCHEMA_VERSIONS: readonly string[] = ['2.0', '2.1'];
 const RULE_OPERATIONS: readonly string[] = ['onlyOne', 'oneOrMore', 'all'] satisfies RuleOperation[];
 
@@ -65,30 +65,19 @@ export async function loadPolicies(directory: string): Promise<SecurityPolicy[]>
 
 export function parseSpif(xml: string, sourceFile: string): SecurityPolicy {
   try {
-    return readPolicy(parseXml(xml), sourceFile);
+    return readPolicy(parseSpifXml(xml), sourceFile);
   } catch (error: unknown) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new SpifError(`${sourceFile}: ${reason}`, { cause: error });
   }
 }
 
-function parseXml(xml: string): Element {
-  // SPIF files never need a DTD; refusing them rules out entity expansion attacks.
-  if (/<!DOCTYPE/i.test(xml)) {
-    throw new SpifError('DTDs are not allowed');
+function parseSpifXml(xml: string): Element {
+  const parsed = parseXml(xml);
+  if (!parsed.ok) {
+    throw new SpifError(parsed.error);
   }
-  const problems: string[] = [];
-  const document = new DOMParser({
-    onError: (level, message) => {
-      if (level !== 'warning') {
-        problems.push(message);
-      }
-    },
-  }).parseFromString(xml, 'text/xml');
-  if (problems.length > 0 || document.documentElement === null) {
-    throw new SpifError(`not well-formed XML (${problems.join('; ')})`);
-  }
-  return document.documentElement;
+  return parsed.root;
 }
 
 function readPolicy(root: Element, sourceFile: string): SecurityPolicy {
@@ -324,16 +313,7 @@ function normalizeColor(color: string): string {
 }
 
 function children(parent: Element, localName: string): Element[] {
-  const result: Element[] = [];
-  for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
-    if (node.nodeType === ELEMENT_NODE) {
-      const element = node as Element; // SAFETY: nodeType identifies an element
-      if (element.namespaceURI === SPIF_NAMESPACE && element.localName === localName) {
-        result.push(element);
-      }
-    }
-  }
-  return result;
+  return childrenNamed(parent, SPIF_NAMESPACE, localName);
 }
 
 function optionalChild(parent: Element, localName: string): Element | null {
