@@ -25,6 +25,28 @@ export async function insertPortion(page: Page, portion: NewPortion): Promise<vo
   await expect(panel.getByTestId('portion-item')).toHaveCount(before + 1);
 }
 
+export interface ShownPortion {
+  marking: string;
+  text: string | null;
+  notice: string | null;
+}
+
+// What a reader's panel shows of each portion, by marking: the text, or the
+// notice that stands in for it. Portions inserted at the same place keep no
+// predictable order.
+export async function shownPortions(reader: Page): Promise<ShownPortion[]> {
+  // One snapshot of the list: it re-renders while envelopes are opened.
+  const shown = await pluginPanel(reader)
+    .getByTestId('portion-item')
+    .evaluateAll((items) =>
+      items.map((item) => {
+        const textOf = (testId: string): string | null => item.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.innerText ?? null;
+        return { marking: textOf('portion-marking') ?? '', text: textOf('portion-text'), notice: textOf('portion-notice') };
+      }),
+    );
+  return shown.sort((left, right) => left.marking.localeCompare(right.marking));
+}
+
 export async function storedDocx(page: Page, documentId: string): Promise<DocxInspection> {
   const response = await browserFetch(page, `/documents/${documentId}/download`);
   expect(response.status).toBe(200);
