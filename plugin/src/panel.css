@@ -156,3 +156,8 @@ legend,
   margin: 8px 0 0;
   font-weight: 700;
 }
+
+.portion-notice {
+  display: block;
+  margin: 4px 0 0;
+}

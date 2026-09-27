@@ -65,7 +65,9 @@ test('portions inserted at the same moment by two authors are both kept, with th
       saved.portionParts.length === 2 &&
       saved.bindings[0]?.label?.categories.some((category) => category.tagName === 'Composition') === true,
   );
-  expect(docx.portionParts.map((part) => part.content).sort()).toEqual([aliceText, bobText].sort());
+  expect(docx.portionParts.map((part) => part.encoding)).toEqual(['ztdf', 'ztdf']);
+  expect(docx.allText).not.toContain(aliceText);
+  expect(docx.allText).not.toContain(bobText);
   expect(docx.contentControls).toHaveLength(2);
   expect(docx.bindings).toHaveLength(1);
   await bob.context().close();

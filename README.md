@@ -21,10 +21,11 @@ DCS ONLYOFFICE lets authors insert **protected portions** into a document edited
 
 - each portion carries its own **ADatP-4774 confidentiality label**, chosen from the labels the security policy allows;
 - the protected text is typed in a side panel and **never reaches the document body**, which only shows a locked, coloured placeholder;
+- that text is **encrypted in the author's browser** with [OpenTDF](https://opentdf.io) into an envelope stored in the file, next to the portion's label;
 - the document carries a **label computed from its content**, stored as the standard **ADatP-4778.2 OOXML binding**, so that other labelling tools can read it;
 - the security policy is never hard-coded: it is read from an **Open XML SPIF** file.
 
-A later iteration encrypts each portion with [OpenTDF](https://opentdf.io), using hybrid post-quantum key encapsulation, so that only readers with the need to know can read it.
+Iteration 3 is in progress: next, OpenTDF will grant each portion's key from the reader's clearance, so that only readers with the need to know can read it, and portion keys will be wrapped with hybrid post-quantum key encapsulation.
 
 > [!IMPORTANT]
 > This is a **demonstrator**, not a product. It uses fictional data and a fictional policy only, and is not hardened for production or for real classified information.
@@ -92,7 +93,7 @@ flowchart LR
 
 ### What the document holds
 
-- **Each portion** is a locked content control whose tag names the portion and its label, and whose content is a placeholder with the portion's marking. Its text and its ADatP-4774 label sit in **one Custom XML part per portion** (`urn:linagora:dcs:portion:1`).
+- **Each portion** is a locked content control whose tag names the portion and its label, and whose content is a placeholder with the portion's marking. Its envelope, a ZTDF archive holding the encrypted text and the label as a bound assertion, and its ADatP-4774 label in clear sit in **one Custom XML part per portion** (`urn:linagora:dcs:portion:1`). Portions written before encryption keep their text in clear there; the panel still shows them, with a warning.
 - **The document label** is stored as an ADatP-4778.2 `BindingInformation` part that references the package parts it covers, alongside a small part (`urn:linagora:dcs:document:1`) that keeps the base label.
 - Custom XML parts survive saving to DOCX and reopening, and propagate to co-authors; the end-to-end tests prove both.
 
@@ -145,7 +146,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions, commit rules and the
 | --- | --- | --- |
 | 1 | Stack, single sign-on, portal, labelling panel, policy service | Done |
 | 2 | Protected portions without encryption, document label and ADatP-4778.2 binding, co-editing | Done |
-| 3 | Encryption of portions with OpenTDF and hybrid post-quantum key encapsulation, clearance directory, access decisions | Planned |
+| 3 | Encryption of portions with OpenTDF and hybrid post-quantum key encapsulation, clearance directory, access decisions | In progress |
 | 4 | Editing existing portions, portion versions, header and footer markings, signed ADatP-4778 binding | Planned |
 | 5 | Microsoft Purview label mapping, standalone packaging, demo script | Planned |
 | 6 | Spreadsheet editor | Planned |

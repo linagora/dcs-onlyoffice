@@ -3,7 +3,8 @@ import { describeError, logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import { addInsertTabButton, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
 import { type DocumentLabelRequest, fetchDocumentLabel, type LabelView } from './policy.ts';
-import { type DocumentState, parsePortionTag, readDocumentState, writeDocumentLabel } from './portions.ts';
+import { type DocumentState, parsePortionTag, readDocumentState, type StoredPortion, writeDocumentLabel } from './portions.ts';
+import type { PortionReader, PortionReading } from './readings.ts';
 
 export type Loadable<T> = { status: 'loading' } | { status: 'failed'; reason: string } | { status: 'loaded'; value: T };
 
@@ -139,6 +140,50 @@ export function useDocumentLabel(request: DocumentLabelRequest | null, storedLab
     };
   }, [request, storedLabelCode, canWrite]);
   return label;
+}
+
+const RETRY_INTERVAL_MS = 3_000;
+
+// What the panel can show of each portion, by portion id, each portion shown
+// as soon as it is read. A document that does not change re-renders nothing,
+// so failures worth retrying get their own timer.
+export function usePortionReadings(portions: StoredPortion[], reader: PortionReader | null): ReadonlyMap<string, PortionReading> {
+  const [readings, setReadings] = useState<ReadonlyMap<string, PortionReading>>(new Map());
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (reader === null) {
+      return;
+    }
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    reader.retain(portions);
+    const ids = new Set(portions.map((portion) => portion.id));
+    setReadings((previous) => new Map([...previous].filter(([id]) => ids.has(id))));
+    const readOne = async (portion: StoredPortion): Promise<void> => {
+      const reading = await reader.read(portion);
+      if (cancelled) {
+        return;
+      }
+      setReadings((previous) => new Map(previous).set(portion.id, reading));
+      if (reading.status === 'failed' && reading.retry && retry === null) {
+        retry = setTimeout(() => {
+          setAttempt((count) => count + 1);
+        }, RETRY_INTERVAL_MS);
+      }
+    };
+    for (const portion of portions) {
+      readOne(portion).catch((error: unknown) => {
+        logProblem('Reading a portion', error);
+      });
+    }
+    return () => {
+      cancelled = true;
+      if (retry !== null) {
+        clearTimeout(retry);
+      }
+    };
+  }, [portions, reader, attempt]);
+  return readings;
 }
 
 const INSERT_ENTRY_ID = 'dcs-insert-portion';

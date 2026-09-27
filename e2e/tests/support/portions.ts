@@ -8,12 +8,19 @@ export interface NewPortion {
   text: string;
 }
 
-export async function insertPortion(page: Page, portion: NewPortion): Promise<void> {
+// Places the cursor in the document and fills the panel's form, ready to
+// insert.
+export async function fillPortionForm(page: Page, portion: NewPortion): Promise<void> {
   const panel = pluginPanel(page);
-  const before = await panel.getByTestId('portion-item').count();
   await page.frameLocator('iframe[name="frameEditor"]').locator('#editor_sdk').click({ position: { x: 400, y: 300 } });
   await panel.getByRole('radio', { name: portion.marking, exact: true }).check();
   await panel.getByRole('textbox', { name: 'Portion text' }).fill(portion.text);
+}
+
+export async function insertPortion(page: Page, portion: NewPortion): Promise<void> {
+  const panel = pluginPanel(page);
+  const before = await panel.getByTestId('portion-item').count();
+  await fillPortionForm(page, portion);
   await panel.getByRole('button', { name: 'Insert protected portion' }).click();
   await expect(panel.getByTestId('portion-item')).toHaveCount(before + 1);
 }
