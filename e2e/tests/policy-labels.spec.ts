@@ -1,16 +1,56 @@
+import { DEMO_ACCOUNTS, type DemoAccount } from './support/accounts.ts';
 import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
 
-test('the labelling panel lists the labels that the demo SPIF allows', async ({ page }) => {
+const EVERY_MARKING = [
+  'NON PROTÉGÉ',
+  'DIFFUSION RESTREINTE',
+  'DIFFUSION RESTREINTE – SPÉCIAL FRANCE',
+  'DIFFUSION RESTREINTE – DIFFUSION OTAN',
+];
+
+test('the labelling panel offers alice, cleared for every label, every label of the demo SPIF', async ({ page }) => {
   await openDocument(page, 'exercise-northwind');
 
-  await expect(pluginPanel(page).getByTestId('label-marking')).toHaveText([
-    'NON PROTÉGÉ',
-    'DIFFUSION RESTREINTE',
-    'DIFFUSION RESTREINTE – SPÉCIAL FRANCE',
-    'DIFFUSION RESTREINTE – DIFFUSION OTAN',
-  ]);
+  await expect(pluginPanel(page).getByTestId('label-marking')).toHaveText(EVERY_MARKING);
+});
+
+// An author never writes what they could not read; the base label describes
+// the document's unprotected content, so it keeps every choice.
+const OFFERED: [DemoAccount, string[]][] = [
+  [DEMO_ACCOUNTS.bob, ['NON PROTÉGÉ', 'DIFFUSION RESTREINTE', 'DIFFUSION RESTREINTE – DIFFUSION OTAN']],
+  [DEMO_ACCOUNTS.chloe, ['NON PROTÉGÉ']],
+];
+for (const [account, markings] of OFFERED) {
+  test.describe(`signed in as ${account.login}`, () => {
+    test.use({ account });
+
+    test('new portions offer only the labels the clearance allows, and the base label every label', async ({ page }) => {
+      await openDocument(page, 'exercise-northwind');
+
+      const panel = pluginPanel(page);
+      await expect(panel.getByTestId('label-marking')).toHaveText(markings);
+      await expect(panel.getByLabel('Base label').locator('option')).toHaveText(EVERY_MARKING);
+    });
+  });
+}
+
+test.describe('signed in as dan', () => {
+  test.use({ account: DEMO_ACCOUNTS.dan });
+
+  test('someone whose clearance allows no label is told so rather than offered an empty choice', async ({ page }) => {
+    await openDocument(page, 'exercise-northwind');
+
+    const panel = pluginPanel(page);
+    await expect(panel.getByTestId('no-allowed-label')).toHaveText('Your clearance allows no label, so you cannot write protected portions.');
+    await expect(panel.getByRole('radio')).toHaveCount(0);
+    await expect(panel.getByLabel('Base label').locator('option')).toHaveText(EVERY_MARKING);
+    // Nor does the editor's Insert tab offer to insert one.
+    const editor = page.frameLocator('iframe[name="frameEditor"]');
+    await editor.getByText('Insert', { exact: true }).first().click();
+    await expect(editor.getByRole('button', { name: /^Protected\s*portion$/ })).toHaveCount(0);
+  });
 });
 
 test('the portal relays policy requests only for signed-in users', async ({ page }) => {

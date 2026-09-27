@@ -64,6 +64,18 @@ export function categoryText(category: HeldCategory): string {
   return `${category.tagSet}${QUALIFIER_SEPARATOR}${category.name}`;
 }
 
+// Reads back how the directory writes a held category, with the names as
+// written. Tag set names hold no colon, which checkClearance makes sure of.
+export function heldCategoryOf(text: string): HeldCategory | null {
+  const separator = text.indexOf(QUALIFIER_SEPARATOR);
+  return separator <= 0 ? null : { tagSet: text.slice(0, separator), name: text.slice(separator + 1) };
+}
+
+// The directory keeps email addresses in lower case.
+export function normalizedEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 // The value of the classifications claim that stands for a classification.
 export function classificationClaim(policy: string, classification: string): string {
   return `${policy}${QUALIFIER_SEPARATOR}${classification}`;
@@ -75,7 +87,7 @@ export function categoryClaim(policy: string, category: HeldCategory): string {
 }
 
 export function checkClearance(request: ClearanceRequest, policies: SecurityPolicy[]): ClearanceCheck {
-  const email = request.email.trim().toLowerCase();
+  const email = normalizedEmail(request.email);
   if (!/^[^\s@]+@[^\s@]+$/.test(email)) {
     return { ok: false, error: `${request.email} is not an email address` };
   }
@@ -119,9 +131,9 @@ export function readClearanceTerms(policy: SecurityPolicy, request: ClearanceTer
   }
   const categories: HeldCategory[] = [];
   for (const text of request.categories) {
-    const separator = text.indexOf(QUALIFIER_SEPARATOR);
-    const tagSet = separator <= 0 ? null : tagSetNamed(policy, text.slice(0, separator));
-    const category = tagSet === null ? null : categoryNamed(tagSet, text.slice(separator + 1));
+    const written = heldCategoryOf(text);
+    const tagSet = written === null ? null : tagSetNamed(policy, written.tagSet);
+    const category = tagSet === null || written === null ? null : categoryNamed(tagSet, written.name);
     if (tagSet === null || category === null) {
       return { ok: false, error: `${policy.name} has no category ${text}` };
     }
