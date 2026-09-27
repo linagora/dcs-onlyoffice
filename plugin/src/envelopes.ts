@@ -49,15 +49,63 @@ const OPEN_TIMEOUT_MS = 30_000;
 const relayThroughPortal: Interceptor = (next) => async (request) =>
   next({ ...request, url: `${window.location.origin}/api/opentdf${new URL(request.url).pathname}` });
 
+// The KAS refuses a key with "forbidden", and answers "forbidden: pdp-denied"
+// when it could not make the decision, for instance when entity resolution
+// cannot read the clearance directory. OpenTDF 0.27 also gives that answer to
+// evaluation errors it does not classify, which the panel then keeps
+// retrying. The web SDK turns both answers into one PermissionDeniedError, so
+// each reading records the KAS's own answers.
+const KAS_UNDECIDED = 'pdp-denied';
+
+interface RewrapRecord {
+  undecided: boolean;
+}
+
+function recordRewrapAnswers(record: RewrapRecord): Interceptor {
+  return (next) => async (request) => {
+    const response = await next(request);
+    if (request.method.name === 'Rewrap' && !response.stream && rewrapErrors(response.message).some((error) => error.includes(KAS_UNDECIDED))) {
+      record.undecided = true;
+    }
+    return response;
+  };
+}
+
+// The errors of a RewrapResponse's results, each held in the result oneof.
+function rewrapErrors(message: unknown): string[] {
+  return listField(message, 'responses').flatMap((response) =>
+    listField(response, 'results').flatMap((result) => {
+      const error = errorOf(field(result, 'result'));
+      return error === null ? [] : [error];
+    }),
+  );
+}
+
+function errorOf(outcome: unknown): string | null {
+  const value = field(outcome, 'value');
+  return field(outcome, 'case') === 'error' && typeof value === 'string' ? value : null;
+}
+
+function field(value: unknown, name: string): unknown {
+  return typeof value === 'object' && value !== null && name in value ? (value as Record<string, unknown>)[name] : null; // SAFETY: object checked just before
+}
+
+function listField(value: unknown, name: string): unknown[] {
+  const found = field(value, name);
+  return Array.isArray(found) ? found : [];
+}
+
 // Seals portion texts into envelopes and opens them, with the OpenTDF platform
 // the host named in the editor configuration.
 export class EnvelopeClient implements EnvelopeOpener {
   #client: OpenTDF;
+  #platformUrl: string;
   #kasUrl: string;
 
   constructor(platformUrl: string) {
+    this.#platformUrl = platformUrl;
     this.#kasUrl = `${platformUrl}/kas`;
-    this.#client = new OpenTDF({ platformUrl, interceptors: [relayThroughPortal], disableDPoP: true });
+    this.#client = this.#newClient([relayThroughPortal]);
   }
 
   // The envelope names the stack's KAS, carries the label's attribute values
@@ -88,11 +136,12 @@ export class EnvelopeClient implements EnvelopeOpener {
   }
 
   async open(envelope: Uint8Array): Promise<OpenedEnvelope> {
+    const record: RewrapRecord = { undecided: false };
     try {
-      return await withTimeout(this.#read(envelope), OPEN_TIMEOUT_MS, 'The key service did not answer');
+      return await withTimeout(this.#read(envelope, record), OPEN_TIMEOUT_MS, 'The key service did not answer');
     } catch (error: unknown) {
       if (error instanceof PermissionDeniedError) {
-        return { status: 'denied' };
+        return record.undecided ? { status: 'failed', reason: messages.accessUndecided, retry: true } : { status: 'denied' };
       }
       const damaged = error instanceof IntegrityError || error instanceof InvalidFileError || error instanceof DecryptError;
       return { status: 'failed', reason: describeError(error), retry: !damaged };
@@ -100,13 +149,20 @@ export class EnvelopeClient implements EnvelopeOpener {
   }
 
   // The SDK checks every assertion's binding while it decrypts, so the bound
-  // label cannot have been changed without the envelope's key.
-  async #read(envelope: Uint8Array): Promise<OpenedEnvelope> {
-    const stream = await this.#client.read({ source: { type: 'buffer', location: envelope }, allowedKASEndpoints: [this.#kasUrl] });
+  // label cannot have been changed without the envelope's key. Each reading
+  // has a client of its own, whose interceptor records only its KAS answers;
+  // with DPoP off, the SDK then generates a request-signing key per reading.
+  async #read(envelope: Uint8Array, record: RewrapRecord): Promise<OpenedEnvelope> {
+    const client = this.#newClient([relayThroughPortal, recordRewrapAnswers(record)]);
+    const stream = await client.read({ source: { type: 'buffer', location: envelope }, allowedKASEndpoints: [this.#kasUrl] });
     const text = await new Response(stream).text();
     const assertions = (await stream.manifest)?.assertions ?? [];
     const label = assertions.find((assertion) => assertion.id === LABEL_ASSERTION_ID && assertion.statement.schema === LABEL_NAMESPACE);
     return { status: 'opened', text, boundLabelXml: label?.statement.value ?? null };
+  }
+
+  #newClient(interceptors: Interceptor[]): OpenTDF {
+    return new OpenTDF({ platformUrl: this.#platformUrl, interceptors, disableDPoP: true });
   }
 }
 

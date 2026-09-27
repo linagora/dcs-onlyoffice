@@ -35,6 +35,7 @@ const ENGLISH = {
   labelMismatch: "The label in clear does not match the label bound to this portion's envelope, shown above.",
   boundLabelUnreadable: "The label bound to this portion's envelope cannot be read.",
   envelopeDamaged: 'the stored envelope is damaged',
+  accessUndecided: 'the key service could not decide whether you may read it',
   noOpentdfPlatform: 'the editor configuration names no OpenTDF platform',
   // Editor menus
   contextMenuEntry: 'Insert protected portion',
@@ -77,6 +78,7 @@ const FRENCH: Messages = {
   labelMismatch: 'L’étiquette en clair ne correspond pas à celle liée à l’enveloppe de cette portion, affichée ci-dessus.',
   boundLabelUnreadable: 'L’étiquette liée à l’enveloppe de cette portion est illisible.',
   envelopeDamaged: 'l’enveloppe enregistrée est abîmée',
+  accessUndecided: 'le service de clés n’a pas pu décider si vous pouvez la lire',
   noOpentdfPlatform: 'la configuration de l’éditeur ne désigne aucune plateforme OpenTDF',
   contextMenuEntry: 'Insérer une portion protégée',
   toolbarButton: 'Portion protégée',
