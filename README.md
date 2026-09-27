@@ -21,11 +21,11 @@ DCS ONLYOFFICE lets authors insert **protected portions** into a document edited
 
 - each portion carries its own **ADatP-4774 confidentiality label**, chosen from the labels that the security policy and the author's clearance allow;
 - the protected text is typed in a side panel and **never reaches the document body**, which only shows a locked, coloured placeholder;
-- that text is **encrypted in the author's browser** with [OpenTDF](https://opentdf.io) into an envelope stored in the file, next to the portion's label, and OpenTDF only hands its key to **readers whose clearance allows the label**;
+- that text is **encrypted in the author's browser** with [OpenTDF](https://opentdf.io) into an envelope stored in the file, next to the portion's label; its key is wrapped with **hybrid post-quantum key encapsulation**, and OpenTDF only hands it to **readers whose clearance allows the label**;
 - the document carries a **label computed from its content**, stored as the standard **ADatP-4778.2 OOXML binding**, so that other labelling tools can read it;
 - the security policy is never hard-coded: it is read from an **Open XML SPIF** file.
 
-Iteration 3 is in progress: next, portion keys will be wrapped with hybrid post-quantum key encapsulation.
+Iteration 3 is in progress: next, its demo is replayed on a hosted stack.
 
 > [!IMPORTANT]
 > This is a **demonstrator**, not a product. It uses fictional data and a fictional policy only, and is not hardened for production or for real classified information.
@@ -40,6 +40,7 @@ Iteration 3 is in progress: next, portion keys will be wrapped with hybrid post-
 - **Policy service**: Open XML SPIF 2.1 reader, valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part.
 - **OpenTDF platform** running and trusting the identity provider, behind a relay on the portal that adds the access token the portal keeps and refreshes, so that the plugin's calls never need a token in the browser.
 - **Access by clearance**: each person's clearance is kept in a clearance directory, and OpenTDF refuses a portion's key to a reader whose clearance does not allow its label; the panel then shows "Access denied" next to the portion's marking.
+- **Post-quantum key wrapping**: the browser wraps each portion's key for OpenTDF's hybrid key, ECDH P-384 combined with ML-KEM-1024 (`hpqt:secp384r1-mlkem1024`), with a build of the OpenTDF web SDK that adds hybrid key wrapping, proposed upstream in [opentdf/web-sdk#1049](https://github.com/opentdf/web-sdk/pull/1049). The key lives in OpenTDF's key registry, where the provisioning job creates it when the stack first starts; a test checks, on Chromium and Firefox, that a new portion's key is wrapped for it and read back.
 - **Clearance administration**: members of the `dcs-maquette-admin` group see and edit every clearance on a portal page, among the choices the security policy offers; OpenTDF applies a change, a revocation for instance, at the next key request.
 - **OpenTDF provisioned from the security policy**: the policy service derives OpenTDF's attributes, and the subject mappings that grant them to clearances, from the SPIF; a one-shot job applies them when the stack starts. A test checks that OpenTDF's decision is the policy's access decision for every demo account and label.
 - **End-to-end tests** against the whole stack in CI, which keeps a trace, a screenshot and the saved DOCX files of every test.
@@ -84,15 +85,15 @@ flowchart LR
   tdf -->|token keys| idp
   tdf --> db[(PostgreSQL)]
   policy -->|clearance directory| db
-  policy -.->|attributes, applied at startup| tdf
+  policy -.->|KAS key and attributes, applied at startup| tdf
 ```
 
 | Component | Role | Technology |
 | --- | --- | --- |
 | `portal` | Sign-in, document list and storage, editor configuration, relays to the policy service and to OpenTDF, serves the plugin | Node.js, Fastify, `openid-client` |
-| `plugin` | Labelling panel inside the editor | Preact, Vite, ONLYOFFICE plugin API |
+| `plugin` | Labelling panel inside the editor | Preact, Vite, ONLYOFFICE plugin API, OpenTDF web SDK |
 | `policy` | Reads SPIF files, validates labels, renders markings, computes the document label and its ADatP-4778.2 part, keeps the clearance directory, makes access decisions and derives OpenTDF's attributes | Node.js, Fastify, PostgreSQL |
-| `opentdf-provisioning` | One-shot job: applies to OpenTDF the attributes and subject mappings that the policy service derives, with an IdP client that OpenTDF makes an administrator | Node.js |
+| `opentdf-provisioning` | One-shot job: creates the KAS's hybrid key in OpenTDF's key registry, then applies to OpenTDF the attributes and subject mappings that the policy service derives, with an IdP client that OpenTDF makes an administrator | Node.js |
 | ONLYOFFICE Docs | Document editing and co-editing | ONLYOFFICE Docs 9.4 Community Edition |
 | OpenTDF | Key access and attribute-based access control; resolves each person's clearances from the clearance directory | OpenTDF platform 0.27 |
 | Reverse proxy and IdP | Local TLS and fictional accounts in the `standalone` profile | Caddy, LemonLDAP::NG |
@@ -120,6 +121,7 @@ The stack reads `deploy/.env`, created from [`deploy/.env.example`](deploy/.env.
 | `DIRECTORY_DB_PASSWORD`, `DIRECTORY_READER_PASSWORD` | Passwords of the clearance directory's database roles, generated by `init-env.sh` |
 | `DIRECTORY_ADMINISTRATION_SECRET` | Secret the portal shares with the policy service, which lets the portal alone change the clearance directory, generated by `init-env.sh` |
 | `OPENTDF_PROVISIONER_CLIENT_SECRET` | Secret of `dcs-provisioner`, the IdP client of the provisioning job (client credentials grant only), generated by `init-env.sh` and shared with the local IdP |
+| `OPENTDF_KAS_ROOT_KEY` | Root key of OpenTDF's key registry, which wraps the KAS's private keys in OpenTDF's database, generated by `init-env.sh`; without it, no envelope can be read |
 
 The clearance directory starts from the JSON files of [`deploy/directory/seeds`](deploy/directory/seeds), which give the local IdP's fictional accounts their clearances; an entry that already exists is kept as it is. Files named `local-*.json` there are ignored by Git, for accounts with real addresses.
 
