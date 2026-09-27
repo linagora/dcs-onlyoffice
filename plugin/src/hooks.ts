@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import { describeError, logProblem } from './log.ts';
+import { messages } from './messages.ts';
 import { addInsertTabButton, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
 import { type DocumentLabelRequest, fetchDocumentLabel, type LabelView } from './policy.ts';
 import { type DocumentState, parsePortionTag, readDocumentState, writeDocumentLabel } from './portions.ts';
@@ -153,9 +154,9 @@ export function useInsertionEntryPoints(pluginReady: Promise<PluginInfo>, enable
     }
     const wire = async (): Promise<void> => {
       await pluginReady;
-      const menuOffered = offerContextMenu(() => [{ id: INSERT_ENTRY_ID, text: 'Insert protected portion' }], onRequest);
+      const menuOffered = offerContextMenu(() => [{ id: INSERT_ENTRY_ID, text: messages.contextMenuEntry }], onRequest);
       const buttonAdded = await addInsertTabButton(
-        { id: INSERT_BUTTON_ID, text: 'Protected portion', hint: 'Insert a protected portion', icon: 'resources/icon.svg' },
+        { id: INSERT_BUTTON_ID, text: messages.toolbarButton, hint: messages.toolbarButtonHint, icon: 'resources/icon.svg' },
         onRequest,
       );
       if (!menuOffered || !buttonAdded) {

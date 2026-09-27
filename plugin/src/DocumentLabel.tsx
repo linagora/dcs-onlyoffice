@@ -1,5 +1,6 @@
 import type { JSX } from 'preact';
 import { logProblem } from './log.ts';
+import { messages } from './messages.ts';
 import type { LabelView } from './policy.ts';
 
 export interface DocumentLabelProps {
@@ -15,10 +16,10 @@ export interface DocumentLabelProps {
 export function DocumentLabel({ labels, baseLabelCode, documentLabel, readOnly, onBaseLabelChange }: DocumentLabelProps): JSX.Element {
   return (
     <section class="document-label" aria-labelledby="document-label-title">
-      <h2 id="document-label-title">Document label</h2>
+      <h2 id="document-label-title">{messages.documentLabelTitle}</h2>
       {!readOnly && (
       <label class="field">
-        <span>Base label</span>
+        <span>{messages.baseLabel}</span>
         <select
           value={baseLabelCode ?? ''}
           onChange={(event) => {

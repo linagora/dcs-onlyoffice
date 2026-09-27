@@ -1,11 +1,17 @@
 {
   "name": "Confidentiality labels",
+  "nameLocale": {
+    "fr": "Étiquettes de confidentialité"
+  },
   "guid": "asc.{A48B4807-1FF4-4518-A708-D28D90EFFB58}",
   "version": "0.1.0",
   "baseUrl": "",
   "variations": [
     {
       "description": "Confidentiality labels of the document and of its protected portions",
+      "descriptionLocale": {
+        "fr": "Étiquettes de confidentialité du document et de ses portions protégées"
+      },
       "url": "index.html",
       "icons": [
         "resources/icon.svg",

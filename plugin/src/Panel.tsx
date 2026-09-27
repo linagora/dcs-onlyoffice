@@ -4,6 +4,7 @@ import { DocumentLabel } from './DocumentLabel.tsx';
 import { useDocumentLabel, useDocumentState, useInsertionEntryPoints, useLoadable } from './hooks.ts';
 import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
+import { messages } from './messages.ts';
 import { callEditorMethod, type PluginInfo } from './onlyoffice.ts';
 import { type DocumentLabelRequest, fetchDefaultPolicyLabels, type LabelView } from './policy.ts';
 import { PortionForm } from './PortionForm.tsx';
@@ -84,9 +85,9 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   return (
     <main class="panel">
       <section class="identity" data-testid="identity" data-source={identity.status === 'loaded' ? identity.value?.source : undefined}>
-        {identity.status === 'loading' && <p class="muted">Connecting…</p>}
+        {identity.status === 'loading' && <p class="muted">{messages.connecting}</p>}
         {(identity.status === 'failed' || (identity.status === 'loaded' && identity.value === null)) && (
-          <p class="muted">Signed-in user unknown</p>
+          <p class="muted">{messages.unknownUser}</p>
         )}
         {identity.status === 'loaded' && identity.value !== null && (
           <>
@@ -101,11 +102,11 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       </section>
       {rereadProblem !== null && (
         <p class="warning" role="status" data-testid="reread-warning">
-          The document could not be reread, so this panel may be out of date ({rereadProblem}).
+          {messages.rereadWarning(rereadProblem)}
         </p>
       )}
-      {labels.status === 'loading' && <p class="muted">Loading the policy…</p>}
-      {labels.status === 'failed' && <p class="error">The policy could not be loaded ({labels.reason}).</p>}
+      {labels.status === 'loading' && <p class="muted">{messages.loadingPolicy}</p>}
+      {labels.status === 'failed' && <p class="error">{messages.policyFailed(labels.reason)}</p>}
       {labels.status === 'loaded' && (
         <>
           <DocumentLabel
@@ -117,7 +118,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
           />
           {!readOnly && (
             <section aria-labelledby="new-portion-title">
-              <h2 id="new-portion-title">New protected portion</h2>
+              <h2 id="new-portion-title">{messages.newPortionTitle}</h2>
               <PortionForm labels={labelList} insertionRequested={insertionRequested} onInsert={insert} />
             </section>
           )}
