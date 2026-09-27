@@ -18,7 +18,7 @@ test('an inserted portion keeps its text out of the document body', async ({ pag
 
   const docx = await forceSavedDocx(page, documentId, (saved) => saved.portionParts.length === 1);
   expect(docx.contentControls).toEqual([
-    { tag: expect.any(String), lock: 'sdtContentLocked', text: `${SPECIAL_FRANCE} – protected portion` },
+    { alias: 'Protected portion', tag: expect.any(String), lock: 'sdtContentLocked', text: `${SPECIAL_FRANCE} – protected portion` },
   ]);
   const tag: unknown = JSON.parse(docx.contentControls[0]?.tag ?? 'null');
   expect(tag).toEqual({ v: 1, id: expect.stringMatching(UUID), label: 'DEMO-FR:2/1.1' });
