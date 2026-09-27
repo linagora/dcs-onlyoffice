@@ -34,6 +34,14 @@ export async function fetchDefaultPolicyLabels(): Promise<LabelView[]> {
   return labelListOf(await getJson(`${RELAY}/policies/${encodeURIComponent(first.name)}/labels`));
 }
 
+// The base labels the signed-in person may give a document whose base label
+// is `current`: anyone may raise it, only an administrator cleared for it may
+// lower it.
+export async function fetchBaseLabelChoices(policy: string, current: string | null): Promise<LabelView[]> {
+  const query = current === null ? '' : `?current=${encodeURIComponent(current)}`;
+  return labelListOf(await getJson(`${RELAY}/policies/${encodeURIComponent(policy)}/labels/base-choices${query}`));
+}
+
 // The labels of a policy that the signed-in person's clearance allows, which
 // the policy service reads from the clearance directory.
 export async function fetchAllowedLabels(policy: string): Promise<LabelView[]> {
