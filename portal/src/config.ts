@@ -6,6 +6,7 @@ export interface PortalConfig {
   domain: string;
   portalPublicUrl: string;
   docsPublicUrl: string;
+  opentdfPublicUrl: string;
   portalInternalUrl: string;
   onlyofficeInternalUrl: string;
   policyInternalUrl: string;
@@ -29,6 +30,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     domain,
     portalPublicUrl,
     docsPublicUrl: `https://docs.${domain}`,
+    opentdfPublicUrl: `https://tdf.${domain}`,
     portalInternalUrl: env.PORTAL_INTERNAL_URL ?? 'http://portal:3000',
     onlyofficeInternalUrl: env.ONLYOFFICE_INTERNAL_URL ?? 'http://onlyoffice',
     policyInternalUrl: env.POLICY_INTERNAL_URL ?? 'http://policy:3001',

@@ -13,6 +13,9 @@ export interface PortionPart {
   version: string | null;
   label: string | null;
   labelXml: string;
+  encoding: string | null;
+  // The content element's text as stored: an envelope or, in unencrypted
+  // portions, the text itself, both base64.
   content: string;
 }
 
@@ -35,8 +38,8 @@ export interface DocumentBinding {
 
 export interface DocxInspection {
   bodyText: string;
-  // Text of every part except customXml, to prove protected text stays out.
-  packageText: string;
+  // Text of every part, customXml included, to prove protected text stays out.
+  allText: string;
   contentControls: ContentControl[];
   portionParts: PortionPart[];
   bindings: DocumentBinding[];
@@ -46,7 +49,7 @@ export interface DocxInspection {
 }
 
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
+export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
 const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments|commentsExtended)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
@@ -55,7 +58,7 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   const zip = await JSZip.loadAsync(docx);
   const documentXml = await readPart(zip, 'word/document.xml');
   const document = parse(documentXml);
-  const packageTexts: string[] = [];
+  const allTexts: string[] = [];
   const portionParts: PortionPart[] = [];
   const bindings: DocumentBinding[] = [];
   for (const name of Object.keys(zip.files).sort()) {
@@ -64,9 +67,8 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
       continue;
     }
     const content = await file.async('string');
-    if (!name.startsWith('customXml/')) {
-      packageTexts.push(content);
-    } else if (/^customXml\/item\d+\.xml$/.test(name)) {
+    allTexts.push(content);
+    if (/^customXml\/item\d+\.xml$/.test(name)) {
       const part = readPortionPart(content);
       if (part !== null) {
         portionParts.push(part);
@@ -79,7 +81,7 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   }
   return {
     bodyText: textOf(document),
-    packageText: packageTexts.join('\n'),
+    allText: allTexts.join('\n'),
     contentControls: elements(document, WORD_NAMESPACE, 'sdt').map((sdt) => {
       const properties = elements(sdt, WORD_NAMESPACE, 'sdtPr')[0];
       return {
@@ -135,8 +137,16 @@ function readPortionPart(xml: string): PortionPart | null {
     version: root.getAttribute('version'),
     label: root.getAttribute('label'),
     labelXml: labelElement === null ? '' : new XMLSerializer().serializeToString(labelElement),
-    content: content === undefined ? '' : Buffer.from((content.textContent ?? '').trim(), 'base64').toString('utf8'),
+    encoding: content === undefined ? null : content.getAttribute('encoding'),
+    content: content === undefined ? '' : (content.textContent ?? '').trim(),
   };
+}
+
+// The label an ADatP-4774 XML document holds, or null when it holds none.
+export function labelOfXml(xml: string): ConfidentialityLabel | null {
+  const root = parse(xml);
+  const label = root.namespaceURI === LABEL_NAMESPACE && root.localName === 'originatorConfidentialityLabel' ? root : elements(root, LABEL_NAMESPACE, 'originatorConfidentialityLabel')[0];
+  return label === undefined ? null : readLabel(label);
 }
 
 async function readPart(zip: JSZip, name: string): Promise<string> {

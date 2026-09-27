@@ -22,8 +22,14 @@ export interface EditorConfig {
     mode: 'edit' | 'view';
     user: EditorUser;
     coEditing: { mode: 'fast'; change: boolean };
-    plugins: { autostart: string[]; pluginsData: string[] };
+    plugins: { autostart: string[]; pluginsData: string[]; options: Record<string, PluginOptions> };
   };
+}
+
+// What the labelling plugin reads from the editor: the OpenTDF platform whose
+// KAS address goes into every envelope.
+export interface PluginOptions {
+  opentdfUrl: string;
 }
 
 export interface EditorPlugin {
@@ -75,7 +81,11 @@ export function buildEditorConfig(
       mode,
       user,
       coEditing: { mode: 'fast', change: false },
-      plugins: { autostart: [plugin.guid], pluginsData: [mode === 'view' ? plugin.viewConfigUrl : plugin.configUrl] },
+      plugins: {
+        autostart: [plugin.guid],
+        pluginsData: [mode === 'view' ? plugin.viewConfigUrl : plugin.configUrl],
+        options: { [plugin.guid]: { opentdfUrl: config.opentdfPublicUrl } },
+      },
     },
   };
 }

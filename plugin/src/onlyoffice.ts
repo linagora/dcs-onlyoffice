@@ -1,4 +1,5 @@
 import { logProblem } from './log.ts';
+import { withTimeout } from './time.ts';
 
 // Typed access to the ONLYOFFICE plugin runtime that plugins.js installs on
 // window.Asc. The editor fills `info` and calls `init` once the plugin is loaded.
@@ -7,6 +8,8 @@ export interface PluginInfo {
   userId?: unknown;
   userName?: unknown;
   isViewMode?: unknown;
+  // The options the host gave this plugin in the editor configuration.
+  options?: unknown;
   [field: string]: unknown;
 }
 
@@ -127,23 +130,6 @@ function sendCommand(command: () => unknown, scope: Record<string, unknown>, rec
       resolve(result);
     });
   });
-}
-
-async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
-  const done = new AbortController();
-  const timeout = new Promise<never>((_resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(message));
-    }, milliseconds);
-    done.signal.addEventListener('abort', () => {
-      clearTimeout(timer);
-    });
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    done.abort();
-  }
 }
 
 export function callEditorMethod(name: string, parameters: unknown[]): Promise<unknown> {

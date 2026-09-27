@@ -1,7 +1,8 @@
 import type { JSX } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
 import { DocumentLabel } from './DocumentLabel.tsx';
-import { useDocumentLabel, useDocumentState, useInsertionEntryPoints, useLoadable } from './hooks.ts';
+import { type EnvelopeClient, envelopeClientFor, unavailableOpener } from './envelopes.ts';
+import { useDocumentLabel, useDocumentState, useInsertionEntryPoints, useLoadable, usePortionReadings } from './hooks.ts';
 import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
@@ -9,7 +10,11 @@ import { callEditorMethod, type PluginInfo } from './onlyoffice.ts';
 import { type DocumentLabelRequest, fetchDefaultPolicyLabels, type LabelView } from './policy.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList } from './PortionList.tsx';
-import { insertPortion, type StoredPortion, writeDocumentLabel } from './portions.ts';
+import { type InsertionResult, insertPortion, type StoredPortion, writeDocumentLabel } from './portions.ts';
+import { PortionReader } from './readings.ts';
+
+// One empty list, so that the portions' readings do not restart on every render.
+const NO_PORTIONS: StoredPortion[] = [];
 
 export interface PanelProps {
   pluginReady: Promise<PluginInfo>;
@@ -21,6 +26,14 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // Until the editor says otherwise, nothing that writes is offered.
   const readOnly = viewMode.status !== 'loaded' || viewMode.value;
   const labels = useLoadable<LabelView[]>(fetchDefaultPolicyLabels, []);
+  const envelopes = useLoadable<EnvelopeClient>(async () => envelopeClientFor(await pluginReady), [pluginReady]);
+  const reader = useMemo(
+    () =>
+      envelopes.status === 'loading'
+        ? null
+        : new PortionReader(envelopes.status === 'loaded' ? envelopes.value : unavailableOpener(envelopes.reason)),
+    [envelopes],
+  );
   const { state: documentState, activePortionId, rereadProblem, refresh } = useDocumentState(pluginReady);
   const [insertionRequested, setInsertionRequested] = useState(false);
 
@@ -28,7 +41,8 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const policy = labelList[0]?.policy ?? null;
   // Until the author picks one, the base label is the least restrictive.
   const baseLabelCode = documentState?.baseLabelCode ?? labelList[0]?.code ?? null;
-  const portions = documentState?.portions ?? [];
+  const portions = documentState?.portions ?? NO_PORTIONS;
+  const readings = usePortionReadings(portions, reader);
 
   const labelRequest = useMemo(
     (): DocumentLabelRequest | null =>
@@ -50,22 +64,23 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     });
   };
 
-  const insert = async (label: LabelView, text: string): Promise<boolean> => {
-    if (baseLabelCode === null) {
-      return false;
+  const insert = async (label: LabelView, text: string): Promise<InsertionResult> => {
+    if (envelopes.status === 'failed') {
+      return { status: 'not-encrypted', reason: envelopes.reason };
+    }
+    if (baseLabelCode === null || envelopes.status === 'loading') {
+      return { status: 'not-inserted' };
     }
     const current = await refresh();
-    const inserted = await insertPortion({
-      label,
-      text,
-      baseLabelCode,
-      existingLabelCodes: current.portions.map((portion) => portion.labelCode),
-    });
+    const result = await insertPortion(
+      { label, text, baseLabelCode, existingLabelCodes: current.portions.map((portion) => portion.labelCode) },
+      envelopes.value,
+    );
     await refresh();
-    if (inserted) {
+    if (result.status === 'inserted') {
       setInsertionRequested(false);
     }
-    return inserted;
+    return result;
   };
 
   const changeBaseLabel = async (code: string): Promise<boolean> => {
@@ -124,7 +139,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
           )}
         </>
       )}
-      <PortionList portions={portions} labels={labelList} activePortionId={activePortionId} onSelect={selectPortion} />
+      <PortionList portions={portions} readings={readings} labels={labelList} activePortionId={activePortionId} onSelect={selectPortion} />
     </main>
   );
 }

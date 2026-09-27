@@ -1,3 +1,4 @@
+import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
 import type { OfficeApi } from './office-api.ts';
 import { runCommand } from './onlyoffice.ts';
@@ -13,11 +14,16 @@ export interface PortionTag {
   label: string;
 }
 
+// What a portion's part holds: an envelope, base64 as stored, or the text of
+// an unencrypted portion, written before encryption existed.
+export type PortionContent = { encoding: 'ztdf'; envelope: string } | { encoding: 'base64'; text: string | null };
+
 export interface StoredPortion {
   id: string;
   labelCode: string;
   version: number | null;
-  text: string | null;
+  // null when the part is missing or unreadable.
+  content: PortionContent | null;
   internalId: string;
 }
 
@@ -65,8 +71,10 @@ interface PortionPartContent {
   id: string;
   version: number;
   labelCode: string;
-  text: string | null;
+  content: PortionContent | null;
 }
+
+export type InsertionResult = { status: 'inserted' } | { status: 'not-encrypted'; reason: string } | { status: 'not-inserted' };
 
 declare const Api: OfficeApi;
 declare const Asc: { scope: CommandScope };
@@ -132,7 +140,9 @@ function readDocumentCommand(): DocumentSnapshot {
   };
 }
 
-export async function insertPortion(portion: NewPortion): Promise<boolean> {
+// The text is sealed before anything reaches the document: a text that cannot
+// be encrypted is not inserted.
+export async function insertPortion(portion: NewPortion, envelopes: EnvelopeClient): Promise<InsertionResult> {
   const { label } = portion;
   const [labelXml, documentLabel] = await Promise.all([
     fetchAdatp4774(label.policy, label.code),
@@ -142,6 +152,10 @@ export async function insertPortion(portion: NewPortion): Promise<boolean> {
       portionLabelCodes: [...portion.existingLabelCodes, label.code],
     }),
   ]);
+  const sealed = await envelopes.seal(portion.text, labelXml);
+  if (sealed.status === 'failed') {
+    return { status: 'not-encrypted', reason: sealed.reason };
+  }
   const id = crypto.randomUUID();
   const tag: PortionTag = { v: 1, id, label: label.code };
   const internalId = await runCommand(
@@ -152,14 +166,14 @@ export async function insertPortion(portion: NewPortion): Promise<boolean> {
         alias: messages.portionAlias,
         color: label.marking.color,
         placeholder: messages.portionPlaceholder(label.marking.text),
-        xml: buildPortionPart({ id, version: 1, labelCode: label.code, labelXml, text: portion.text }),
+        xml: buildPortionPart({ id, version: 1, labelCode: label.code, labelXml, envelope: sealed.envelope }),
       },
       replacements: documentLabelReplacements(documentLabel.xml, portion.baseLabelCode, documentLabel.label.code),
     },
     true,
     (result) => (typeof result === 'string' ? result : null),
   );
-  return internalId !== null;
+  return internalId === null ? { status: 'not-inserted' } : { status: 'inserted' };
 }
 
 // Rewrites the document label from the base label and the portions' labels.
@@ -203,7 +217,7 @@ export async function readDocumentState(): Promise<DocumentState> {
         id: tag.id,
         labelCode: tag.label,
         version: content?.version ?? null,
-        text: content?.text ?? null,
+        content: content?.content ?? null,
         internalId: control.internalId,
       },
     ];
@@ -225,19 +239,19 @@ function documentLabelReplacements(bindingXml: string, baseLabelCode: string, do
   ];
 }
 
-// The portion text is stored base64-encoded: the editor's XML serialiser does
-// not escape `&`, `<` or quotes in text reliably.
+// The envelope, a ZTDF archive, is stored base64-encoded. The portion label
+// stays readable next to it.
 export function buildPortionPart(portion: {
   id: string;
   version: number;
   labelCode: string;
   labelXml: string;
-  text: string;
+  envelope: Uint8Array;
 }): string {
   return (
     `<dcs:portion xmlns:dcs="${PORTION_NAMESPACE}" id="${portion.id}" version="${portion.version}" label="${escapeAttribute(portion.labelCode)}">` +
     `<dcs:label>${portion.labelXml}</dcs:label>` +
-    `<dcs:content encoding="base64">${encodeBase64(portion.text)}</dcs:content>` +
+    `<dcs:content encoding="ztdf">${base64OfBytes(portion.envelope)}</dcs:content>` +
     '</dcs:portion>'
   );
 }
@@ -282,7 +296,21 @@ function parsePortionPart(xml: string): PortionPartContent | null {
     return null;
   }
   const content = root.getElementsByTagNameNS(PORTION_NAMESPACE, 'content')[0];
-  return { id, version, labelCode, text: content === undefined ? null : decodeBase64((content.textContent ?? '').trim()) };
+  return { id, version, labelCode, content: content === undefined ? null : contentOf(content) };
+}
+
+// Unencrypted portions store their text base64-encoded, since the editor's
+// XML serialiser does not escape `&`, `<` or quotes in text reliably.
+function contentOf(element: Element): PortionContent | null {
+  const stored = (element.textContent ?? '').trim();
+  switch (element.getAttribute('encoding')) {
+    case 'ztdf':
+      return { encoding: 'ztdf', envelope: stored };
+    case 'base64':
+      return { encoding: 'base64', text: decodeBase64(stored) };
+    default:
+      return null;
+  }
 }
 
 function parseDocumentPart(xml: string): { base: string | null; label: string | null } | null {
@@ -322,8 +350,7 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
   };
 }
 
-function encodeBase64(text: string): string {
-  const bytes = new TextEncoder().encode(text);
+function base64OfBytes(bytes: Uint8Array): string {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
@@ -331,10 +358,26 @@ function encodeBase64(text: string): string {
   return btoa(binary);
 }
 
+// An envelope as stored, or null when it is not valid base64.
+export function envelopeBytes(stored: string): Uint8Array | null {
+  try {
+    return bytesOfBase64(stored);
+  } catch (error: unknown) {
+    if (error instanceof DOMException) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function bytesOfBase64(encoded: string): Uint8Array {
+  const binary = atob(encoded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
 function decodeBase64(encoded: string): string | null {
   try {
-    const binary = atob(encoded);
-    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytesOfBase64(encoded));
   } catch (error: unknown) {
     if (error instanceof DOMException || error instanceof TypeError) {
       return null;
