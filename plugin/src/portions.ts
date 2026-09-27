@@ -84,7 +84,18 @@ function insertPortionCommand(): string {
   }
   block.GetContent().GetElement(0)?.AddText(scope.portion.placeholder);
   block.SetLock('sdtContentLocked');
-  document.InsertContent([block]);
+  // Inserting at the cursor would split the paragraph that holds it. When
+  // that paragraph has text and sits in the document body, the block goes
+  // right after it; elsewhere (an empty paragraph, a table, a header) it goes
+  // at the cursor, as the editor does.
+  const paragraph = document.GetCurrentParagraph();
+  const position = paragraph === null ? -1 : paragraph.GetPosInParent();
+  const inBody = paragraph !== null && document.GetElement(position)?.GetInternalId?.() === paragraph.GetInternalId();
+  if (inBody && paragraph.GetText().trim() !== '') {
+    document.AddElement(position + 1, block);
+  } else {
+    document.InsertContent([block]);
+  }
   const parts = document.GetCustomXmlParts();
   parts.Add(scope.portion.xml);
   for (const replacement of scope.replacements) {

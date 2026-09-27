@@ -7,6 +7,14 @@ export interface ApiColor {
 
 export interface ApiParagraph {
   AddText(text: string): unknown;
+  GetText(): string;
+  GetPosInParent(): number;
+  GetInternalId(): string;
+}
+
+// Tables and block content controls also have an internal id.
+export interface ApiDocumentElement {
+  GetInternalId?(): string;
 }
 
 export interface ApiDocumentContent {
@@ -39,6 +47,9 @@ export interface ApiCustomXmlParts {
 
 export interface ApiDocument {
   InsertContent(content: ApiBlockLvlSdt[]): boolean;
+  AddElement(position: number, element: ApiBlockLvlSdt): boolean;
+  GetElement(index: number): ApiDocumentElement | null;
+  GetCurrentParagraph(): ApiParagraph | null;
   GetAllContentControls(): ApiContentControl[];
   GetCustomXmlParts(): ApiCustomXmlParts;
 }

@@ -64,3 +64,27 @@ test('a single undo removes an inserted portion and its part', async ({ page }) 
   const docx = await forceSavedDocx(page, documentId, (saved) => saved.contentControls.length === 0);
   expect(docx.portionParts).toEqual([]);
 });
+
+test('a portion inserted in the middle of a paragraph goes after it and leaves it whole', async ({ page }) => {
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  const paragraph = `Fictional paragraph ${Date.now()} ends here`;
+  await page.frameLocator('iframe[name="frameEditor"]').locator('#editor_sdk').click({ position: { x: 400, y: 300 } });
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(paragraph);
+  for (const _character of ' ends here') {
+    await page.keyboard.press('ArrowLeft');
+  }
+
+  const panel = pluginPanel(page);
+  await panel.getByRole('radio', { name: SPECIAL_FRANCE, exact: true }).check();
+  await panel.getByRole('textbox', { name: 'Portion text' }).fill(`Fictional protected text ${Date.now()}`);
+  await panel.getByRole('button', { name: 'Insert protected portion' }).click();
+  await expect(panel.getByTestId('portion-item')).toHaveCount(1);
+
+  const docx = await forceSavedDocx(page, documentId, (saved) => saved.contentControls.length === 1 && saved.bodyText.includes('Fictional paragraph'));
+  const lines = docx.bodyText.split('\n');
+  const index = lines.indexOf(paragraph);
+  expect(index, 'the paragraph stays whole').toBeGreaterThanOrEqual(0);
+  expect(lines[index + 1]).toBe(`${SPECIAL_FRANCE} – protected portion`);
+});
