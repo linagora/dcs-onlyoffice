@@ -30,6 +30,19 @@ class RecordingStore implements ClearanceStore {
     return this.#added.find((clearance) => clearance.email === email && clearance.policy === policy) ?? null;
   }
 
+  async list(): Promise<Clearance[]> {
+    return [...this.#added];
+  }
+
+  async update(clearance: Clearance): Promise<boolean> {
+    const index = this.#added.findIndex((entry) => entry.email === clearance.email && entry.policy === clearance.policy);
+    if (index === -1) {
+      return false;
+    }
+    this.#added[index] = clearance;
+    return true;
+  }
+
   async close(): Promise<void> {}
 }
 
@@ -151,5 +164,118 @@ describe('labels a clearance allows', () => {
     assert.deepEqual(await allowedCodes('dan.moreau@dcs.test'), []);
     assert.deepEqual(await allowedCodes('erin.petit@dcs.test'), []);
     assert.deepEqual(await allowedCodes(null), []);
+  });
+});
+
+describe('clearance directory administration', () => {
+  let server: FastifyInstance;
+  const SECRET = 'fictional-administration-secret';
+  const admin = { authorization: `Bearer ${SECRET}` };
+  before(async () => {
+    server = await buildPolicyServer({
+      spifDirectory: DEMO_SPIFS,
+      clearanceDirectory: { store: new RecordingStore(), seedFolder: DEMO_SEEDS },
+      directoryAdministrationSecret: SECRET,
+    });
+  });
+  after(async () => {
+    await server.close();
+  });
+
+  const bobUrl = `/directory/policies/DEMO-FR/clearances/${encodeURIComponent('bob.walker@dcs.test')}`;
+
+  it('lists every entry, as the directory writes it', async () => {
+    const response = await server.inject({ method: 'GET', url: '/directory/clearances', headers: admin });
+
+    assert.equal(response.statusCode, 200);
+    const body: unknown = response.json();
+    const clearances: unknown[] = typeof body === 'object' && body !== null && 'clearances' in body && Array.isArray(body.clearances) ? body.clearances : [];
+    assert.deepEqual(
+      clearances.map((clearance) => (typeof clearance === 'object' && clearance !== null && 'email' in clearance ? clearance.email : null)),
+      ['alice.martin@dcs.test', 'bob.walker@dcs.test', 'chloe.bernard@dcs.test', 'erin.petit@dcs.test'],
+    );
+    assert.deepEqual(clearances[1], {
+      email: 'bob.walker@dcs.test',
+      name: 'Bob Walker',
+      nationality: 'GBR',
+      policy: 'DEMO-FR',
+      classification: 'DIFFUSION RESTREINTE',
+      categories: ['Releasable To:NATO'],
+      validFrom: '2026-01-01T00:00:00.000Z',
+      validUntil: '2036-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('offers what a clearance under a policy can hold', async () => {
+    const response = await server.inject({ method: 'GET', url: '/policies/DEMO-FR/clearance-choices' });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      classifications: ['NON PROTEGE', 'DIFFUSION RESTREINTE'],
+      categories: ['Special Handling:SPECIAL FRANCE', 'Releasable To:NATO'],
+    });
+  });
+
+  it('changes the terms of an entry, and keeps who it belongs to', async () => {
+    const terms = {
+      classification: 'diffusion restreinte',
+      categories: ['Releasable To:NATO', 'Special Handling:SPECIAL FRANCE'],
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2030-01-01T00:00:00Z',
+    };
+
+    const response = await server.inject({ method: 'PUT', url: bobUrl, headers: admin, payload: terms });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      email: 'bob.walker@dcs.test',
+      name: 'Bob Walker',
+      nationality: 'GBR',
+      policy: 'DEMO-FR',
+      classification: 'DIFFUSION RESTREINTE',
+      categories: ['Releasable To:NATO', 'Special Handling:SPECIAL FRANCE'],
+      validFrom: '2026-01-01T00:00:00.000Z',
+      validUntil: '2030-01-01T00:00:00.000Z',
+    });
+  });
+
+  const period = { validFrom: '2026-01-01T00:00:00Z', validUntil: '2030-01-01T00:00:00Z' };
+  const refusals: [string, Record<string, unknown>, number, string | null][] = [
+    ['an informative category', { classification: 'DIFFUSION RESTREINTE', categories: ['Composition:MORE RESTRICTIVE PORTIONS'], ...period }, 422,
+      'bob.walker@dcs.test: the informative category Composition:MORE RESTRICTIVE PORTIONS grants no access'],
+    ['an unknown classification', { classification: 'TRES SECRET', categories: [], ...period }, 422, 'bob.walker@dcs.test: DEMO-FR has no classification TRES SECRET'],
+    ['an unknown category', { classification: 'NON PROTEGE', categories: ['Releasable To:MARS'], ...period }, 422, 'bob.walker@dcs.test: DEMO-FR has no category Releasable To:MARS'],
+    ['a period that ends before it starts', { classification: 'NON PROTEGE', categories: [], validFrom: '2030-01-01T00:00:00Z', validUntil: '2026-01-01T00:00:00Z' }, 422,
+      'bob.walker@dcs.test: the validity period ends before it starts'],
+    ['a malformed request', { classification: 'NON PROTEGE', categories: 'Releasable To:NATO', ...period }, 400, null],
+  ];
+  for (const [what, terms, statusCode, error] of refusals) {
+    it(`refuses ${what}, and leaves the entry as it was`, async () => {
+      const response = await server.inject({ method: 'PUT', url: bobUrl, headers: admin, payload: terms });
+
+      assert.equal(response.statusCode, statusCode);
+      if (error !== null) {
+        assert.deepEqual(response.json(), { error });
+      }
+    });
+  }
+
+  it('refuses to change an entry the directory does not hold', async () => {
+    const terms = { classification: 'NON PROTEGE', categories: [], validFrom: '2026-01-01T00:00:00Z', validUntil: '2030-01-01T00:00:00Z' };
+    const url = `/directory/policies/DEMO-FR/clearances/${encodeURIComponent('dan.moreau@dcs.test')}`;
+
+    const response = await server.inject({ method: 'PUT', url, headers: admin, payload: terms });
+
+    assert.equal(response.statusCode, 404);
+  });
+
+  it('keeps the directory to the portal, which holds the secret', async () => {
+    const terms = { classification: 'NON PROTEGE', categories: [], ...period };
+    // Identity headers alone, as any container of the stack could send them.
+    const forged = { 'x-user-email': 'alice.martin%40dcs.test', 'x-user-groups': 'dcs-maquette,dcs-maquette-admin' };
+
+    assert.equal((await server.inject({ method: 'GET', url: '/directory/clearances', headers: forged })).statusCode, 403);
+    assert.equal((await server.inject({ method: 'PUT', url: bobUrl, headers: forged, payload: terms })).statusCode, 403);
+    assert.equal((await server.inject({ method: 'PUT', url: bobUrl, headers: { authorization: 'Bearer another-secret' }, payload: terms })).statusCode, 403);
   });
 });

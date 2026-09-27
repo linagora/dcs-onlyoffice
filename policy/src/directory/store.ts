@@ -12,6 +12,10 @@ export interface ClearanceStore {
   // The entry of one person, by lower-case email address, under one policy,
   // whatever its validity period.
   clearanceOf(email: string, policy: string): Promise<Clearance | null>;
+  list(): Promise<Clearance[]>;
+  // Replaces the terms and the validity period of an entry; false when the
+  // directory holds no entry for its person and policy.
+  update(clearance: Clearance): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -46,9 +50,15 @@ const GRANT_READER = `
 REVOKE ALL ON directory.clearances FROM ${READER_ROLE};
 GRANT SELECT (email, policy, classification, categories, valid_from, valid_until) ON directory.clearances TO ${READER_ROLE}`;
 
-const SELECT_ONE = `
-SELECT email, policy, name, nationality, classification, categories, valid_from, valid_until
-FROM directory.clearances
+const COLUMNS = 'email, policy, name, nationality, classification, categories, valid_from, valid_until';
+
+const SELECT_ONE = `SELECT ${COLUMNS} FROM directory.clearances WHERE email = $1 AND policy = $2`;
+
+const SELECT_ALL = `SELECT ${COLUMNS} FROM directory.clearances ORDER BY email, policy`;
+
+const UPDATE_TERMS = `
+UPDATE directory.clearances
+SET classification = $3, categories = $4, valid_from = $5, valid_until = $6
 WHERE email = $1 AND policy = $2`;
 
 const INSERT_MISSING = `
@@ -90,6 +100,24 @@ export class PostgresClearanceStore implements ClearanceStore {
     const result = await this.#pool.query(SELECT_ONE, [email, policy]);
     const row: unknown = result.rows[0];
     return row === undefined ? null : clearanceOfRow(row);
+  }
+
+  async list(): Promise<Clearance[]> {
+    const result = await this.#pool.query(SELECT_ALL);
+    const rows: unknown[] = result.rows;
+    return rows.map(clearanceOfRow);
+  }
+
+  async update(clearance: Clearance): Promise<boolean> {
+    const result = await this.#pool.query(UPDATE_TERMS, [
+      clearance.email,
+      clearance.policy,
+      clearance.classification,
+      clearance.categories.map(categoryText),
+      clearance.validFrom,
+      clearance.validUntil,
+    ]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   async close(): Promise<void> {

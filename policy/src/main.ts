@@ -26,6 +26,11 @@ if (directoryHost !== '') {
     }),
     seedFolder: process.env.DIRECTORY_SEED_DIR ?? null,
   };
+  // Without the secret it shares with the portal, nobody administers the directory.
+  const administrationSecret = process.env.DIRECTORY_ADMINISTRATION_SECRET ?? '';
+  if (administrationSecret !== '') {
+    options.directoryAdministrationSecret = administrationSecret;
+  }
 }
 
 const server = await buildPolicyServer(options);

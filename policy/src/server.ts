@@ -1,8 +1,10 @@
-import { fastify, type FastifyInstance, type FastifyRequest } from 'fastify';
+import { fastify, type FastifyInstance } from 'fastify';
 import { accessDecision } from './access.ts';
 import { reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
-import { type ClearanceTerms, type ClearanceTermsRequest, readClearanceTerms } from './directory/clearance.ts';
+import { callerEmail } from './caller.ts';
+import { registerDirectoryAdministration } from './directory/administration.ts';
+import { type ClearanceTerms, type ClearanceTermsRequest, clearanceChoicesOf, readClearanceTerms } from './directory/clearance.ts';
 import { currentClearanceOf } from './directory/lookup.ts';
 import { type ClearanceDirectoryOptions, prepareClearanceDirectory } from './directory/seed.ts';
 import {
@@ -15,6 +17,7 @@ import {
   validateLabel,
 } from './labels.ts';
 import { type Marking, renderMarking } from './marking.ts';
+import { isStringList, unknownArray } from './guards.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
 import { computeDocumentLabel, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
@@ -24,6 +27,8 @@ import { loadPolicies } from './spif/reader.ts';
 export interface PolicyServerOptions {
   spifDirectory: string;
   clearanceDirectory?: ClearanceDirectoryOptions;
+  // Shared with the portal, which alone administers the clearance directory.
+  directoryAdministrationSecret?: string;
   markingLanguage?: string;
   reviewPeriodYears?: number;
   rollupRule?: RollupRule;
@@ -199,6 +204,19 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     return { granted: accessDecision(policy, terms, label) };
   });
 
+  // What a clearance under the policy can hold, for the administration page.
+  app.get<{ Params: PolicyParams }>('/policies/:policy/clearance-choices', async (request, reply) => {
+    const policy = findPolicy(request.params.policy);
+    return policy === null ? reply.code(404).send({ error: `Unknown policy ${request.params.policy}` }) : clearanceChoicesOf(policy);
+  });
+
+  const { directoryAdministrationSecret } = options;
+  registerDirectoryAdministration(
+    app,
+    clearanceDirectory === undefined || directoryAdministrationSecret === undefined ? null : { store: clearanceDirectory.store, secret: directoryAdministrationSecret },
+    policies,
+  );
+
   app.post<{ Params: PolicyParams; Querystring: LanguageQuery }>(
     '/policies/:policy/document-label',
     async (request, reply) => {
@@ -284,19 +302,10 @@ function readDocumentLabelRequest(body: unknown): DocumentLabelRequest | null {
   }
   const portions: unknown = 'portions' in body ? body.portions : [];
   const parts: unknown = 'parts' in body ? body.parts : null;
-  const isStringList = (value: unknown): value is string[] =>
-    Array.isArray(value) && value.every((item: unknown) => typeof item === 'string');
   if (!isStringList(portions) || (parts !== null && !isStringList(parts))) {
     return null;
   }
   return { base: body.base, portions, parts };
-}
-
-// The portal relay sends the caller's identity URI-encoded.
-function callerEmail(request: FastifyRequest): string | null {
-  const header = request.headers['x-user-email'];
-  const value = typeof header === 'string' ? decodeURIComponent(header) : '';
-  return value === '' ? null : value;
 }
 
 function readCode(body: unknown): string | null {
@@ -333,9 +342,4 @@ function parseLabelRequest(body: unknown): LabelRequest | null {
     categories.push({ tagSet: raw.tagSet, values });
   }
   return { classification: body.classification, categories };
-}
-
-// Array.isArray narrows to any[]; its items are unknown until checked.
-function unknownArray(value: unknown): unknown[] | null {
-  return Array.isArray(value) ? value : null;
 }
