@@ -41,8 +41,8 @@ importers:
   plugin:
     dependencies:
       '@opentdf/sdk':
-        specifier: 0.21.0
-        version: 0.21.0(@bufbuild/protobuf@2.15.0)
+        specifier: file:vendor/opentdf-sdk-0.21.0-hybrid.1.tgz
+        version: file:plugin/vendor/opentdf-sdk-0.21.0-hybrid.1.tgz(@bufbuild/protobuf@2.15.0)
       preact:
         specifier: 10.29.8
         version: 10.29.8
@@ -173,8 +173,9 @@ packages:
     resolution: {integrity: sha512-+pormrDZwjRw05U8ADK4JpHejo87+gBd+muRBB/ozztH5yhDLMDF4jHQWN3NQQAsu1zBNPWTG0ZwVI0CR29H0A==}
     engines: {node: '>= 20.19.0'}
 
-  '@opentdf/sdk@0.21.0':
-    resolution: {integrity: sha512-Xx2uAyVhCA7D6XnKYOA5CNOjZ989vfxNRFQWw9pjuxjl1X3HP4VAeyzt1h6dX//SjnydXv+GcE8nQzMrp3KwTA==}
+  '@opentdf/sdk@file:plugin/vendor/opentdf-sdk-0.21.0-hybrid.1.tgz':
+    resolution: {integrity: sha512-3yrds4x6eZ/NU4fLqKuy0/xGld3IihE10DJm4cKV2g+WsEUmIdzMShgtZRPmCse3elnv4o3htcCWKc7IXlrDVg==, tarball: file:plugin/vendor/opentdf-sdk-0.21.0-hybrid.1.tgz}
+    version: 0.21.0-hybrid.1
 
   '@oxc-project/types@0.151.0':
     resolution: {integrity: sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA==}
@@ -1036,10 +1037,11 @@ snapshots:
       '@noble/curves': 2.2.0
       '@noble/hashes': 2.2.0
 
-  '@opentdf/sdk@0.21.0(@bufbuild/protobuf@2.15.0)':
+  '@opentdf/sdk@file:plugin/vendor/opentdf-sdk-0.21.0-hybrid.1.tgz(@bufbuild/protobuf@2.15.0)':
     dependencies:
       '@connectrpc/connect': 2.2.0(@bufbuild/protobuf@2.15.0)
       '@connectrpc/connect-web': 2.2.0(@bufbuild/protobuf@2.15.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.15.0))
+      '@noble/hashes': 2.2.0
       '@noble/post-quantum': 0.6.1
       buffer-crc32: 1.0.0
       jose: 6.0.8
