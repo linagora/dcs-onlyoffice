@@ -2,6 +2,7 @@ import { openDocument, openNewDocument } from './support/documents.ts';
 import { labelOfXml } from './support/docx.ts';
 import { envelopeManifest } from './support/envelopes.ts';
 import { expect, test } from './support/fixtures.ts';
+import { canaryText, markedText, PORTION_MARKER } from './support/marker.ts';
 import { PLATFORM } from './support/opentdf.ts';
 import { insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
 import { fillPortionForm, forceSavedDocx, insertPortion, leaveAndWaitForSave } from './support/portions.ts';
@@ -11,7 +12,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 test('an inserted portion is stored as an envelope and read back in the panel', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  const secret = `Fictional protected paragraph ${Date.now()}`;
+  const secret = markedText('Fictional protected paragraph');
 
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
 
@@ -59,7 +60,7 @@ test('an inserted portion is stored as an envelope and read back in the panel', 
 // the Document Server's DOCX save and a later reopening.
 test('portions survive saving to DOCX and reopening', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  const secret = `Fictional reopened paragraph ${Date.now()}`;
+  const secret = markedText('Fictional reopened paragraph');
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
 
   await leaveAndWaitForSave([page], documentId, 1);
@@ -73,7 +74,7 @@ test('portions survive saving to DOCX and reopening', async ({ page }) => {
 // rereading of the document must not add undo steps of its own.
 test('a single undo removes an inserted portion and its part', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  await insertPortion(page, { marking: SPECIAL_FRANCE, text: `Fictional undone paragraph ${Date.now()}` });
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional undone paragraph') });
   // Let the panel reread the document a few times.
   await page.waitForTimeout(7_000);
 
@@ -98,7 +99,7 @@ test('a portion inserted in the middle of a paragraph goes after it and leaves i
 
   const panel = pluginPanel(page);
   await panel.getByRole('radio', { name: SPECIAL_FRANCE, exact: true }).check();
-  await panel.getByRole('textbox', { name: 'Portion text' }).fill(`Fictional protected text ${Date.now()}`);
+  await panel.getByRole('textbox', { name: 'Portion text' }).fill(markedText('Fictional protected text'));
   await panel.getByRole('button', { name: 'Insert protected portion' }).click();
   await expect(panel.getByTestId('portion-item')).toHaveCount(1);
 
@@ -113,7 +114,9 @@ test('a portion from before encryption is shown with a warning that it is not en
   await openNewDocument(page, 'exercise-northwind.docx');
   const frame = await pluginFrame(page);
   const labelXml = await labelXmlOf(frame, 'DEMO-FR', 'DEMO-FR:2/1.1');
-  const text = `Fictional unencrypted paragraph ${Date.now()}`;
+  // Written as before encryption, its text goes through the Document Server
+  // by design: it carries the canary, which the searches of ONLYOFFICE must find.
+  const text = canaryText('Fictional unencrypted paragraph');
 
   await insertUnencryptedPortion(frame, { labelCode: 'DEMO-FR:2/1.1', labelXml, placeholder: `${SPECIAL_FRANCE} – protected portion`, text });
 
@@ -124,7 +127,7 @@ test('a portion from before encryption is shown with a warning that it is not en
 
 test('a portion that cannot be decrypted says why, and is read once it can be', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  const secret = `Fictional retried paragraph ${Date.now()}`;
+  const secret = markedText('Fictional retried paragraph');
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
   await leaveAndWaitForSave([page], documentId, 1);
 
@@ -145,7 +148,7 @@ test('a text that cannot be encrypted is not inserted', async ({ page }) => {
   const platform = `${PLATFORM}/**`;
   await page.route(platform, async (route) => route.abort());
   const panel = pluginPanel(page);
-  await fillPortionForm(page, { marking: SPECIAL_FRANCE, text: `Fictional unsealed paragraph ${Date.now()}` });
+  await fillPortionForm(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional unsealed paragraph') });
 
   await panel.getByRole('button', { name: 'Insert protected portion' }).click();
 
@@ -163,7 +166,7 @@ test('a label that gives no attribute value is not used to encrypt', async ({ pa
   const attributes = '**/api/policy/policies/*/labels/attributes';
   await page.route(attributes, async (route) => route.fulfill({ json: { attributes: [] } }));
   const panel = pluginPanel(page);
-  await fillPortionForm(page, { marking: SPECIAL_FRANCE, text: `Fictional unrestricted paragraph ${Date.now()}` });
+  await fillPortionForm(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional unrestricted paragraph') });
 
   await panel.getByRole('button', { name: 'Insert protected portion' }).click();
 
@@ -181,11 +184,12 @@ test('the panel refuses a text longer than 20,000 characters', async ({ page }) 
   await panel.getByRole('radio', { name: SPECIAL_FRANCE, exact: true }).check();
   const textbox = panel.getByRole('textbox', { name: 'Portion text' });
 
-  await textbox.fill('x'.repeat(20_001));
+  const text = (length: number): string => `${PORTION_MARKER} ${'x'.repeat(length - PORTION_MARKER.length - 1)}`;
+  await textbox.fill(text(20_001));
   await expect(panel.getByTestId('text-too-long')).toHaveText('A portion holds at most 20,000 characters.');
   await expect(insert).toBeDisabled();
 
-  await textbox.fill('x'.repeat(20_000));
+  await textbox.fill(text(20_000));
   await expect(panel.getByTestId('text-too-long')).toHaveCount(0);
   await expect(insert).toBeEnabled();
 });

@@ -43,6 +43,7 @@ Iteration 3 is in progress: next, portion keys will be wrapped with hybrid post-
 - **Clearance administration**: members of the `dcs-maquette-admin` group see and edit every clearance on a portal page, among the choices the security policy offers; OpenTDF applies a change, a revocation for instance, at the next key request.
 - **OpenTDF provisioned from the security policy**: the policy service derives OpenTDF's attributes, and the subject mappings that grant them to clearances, from the SPIF; a one-shot job applies them when the stack starts. A test checks that OpenTDF's decision is the policy's access decision for every demo account and label.
 - **End-to-end tests** against the whole stack in CI, which keeps a trace, a screenshot and the saved DOCX files of every test.
+- **Proof that no portion text reaches ONLYOFFICE**: every portion text the tests write carries a marker, which a test looks for in the editor's co-editing exchanges and the saved file, and the CI in the Document Server's working files, in clear, URL-encoded or in base64, as UTF-8 or UTF-16, archives included. Unencrypted portions, whose text goes through ONLYOFFICE by design, carry a canary instead, which the same searches must find.
 
 ## Quick start
 
@@ -132,6 +133,7 @@ pnpm typecheck                                            # every package
 pnpm test                                                 # policy service API tests, no stack needed
 pnpm --filter @dcs/e2e exec playwright install chromium firefox
 pnpm e2e                                                  # end-to-end tests, against the running stack
+pnpm --filter @dcs/e2e search-document-server             # then: no portion text among ONLYOFFICE's working files
 ```
 
 The end-to-end suite runs on Chromium, and the browser-specific checks also run on Firefox. It needs the `standalone` stack running on `dcs.test`; the browsers resolve its host names on their own, no hosts file needed.

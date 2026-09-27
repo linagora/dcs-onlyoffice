@@ -1,11 +1,12 @@
 import { expect, type Page } from '@playwright/test';
 import { browserFetch, requestForceSave } from './documents.ts';
 import { type DocxInspection, inspectDocx } from './docx.ts';
+import type { MarkedText } from './marker.ts';
 import { pluginPanel } from './plugin.ts';
 
 export interface NewPortion {
   marking: string;
-  text: string;
+  text: MarkedText;
 }
 
 // Places the cursor in the document and fills the panel's form, ready to

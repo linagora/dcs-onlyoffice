@@ -1,5 +1,6 @@
 import { openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { markedText } from './support/marker.ts';
 import { executeEditorMethod, pluginFrame, pluginPanel } from './support/plugin.ts';
 import { insertPortion } from './support/portions.ts';
 
@@ -37,8 +38,8 @@ function portionIdOf(control: ContentControlInfo | null): string | null {
 
 test('a click on a portion in the panel selects its block in the document', async ({ page }) => {
   await openNewDocument(page, 'exercise-northwind.docx');
-  await insertPortion(page, { marking: SPECIAL_FRANCE, text: `Fictional first portion ${Date.now()}` });
-  await insertPortion(page, { marking: RELEASABLE_TO_NATO, text: `Fictional second portion ${Date.now()}` });
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional first portion') });
+  await insertPortion(page, { marking: RELEASABLE_TO_NATO, text: markedText('Fictional second portion') });
   const panel = pluginPanel(page);
   const frame = await pluginFrame(page);
 
@@ -58,8 +59,8 @@ test('a click on a portion in the panel selects its block in the document', asyn
 
 test('the panel highlights the portion whose block holds the cursor', async ({ page }) => {
   await openNewDocument(page, 'exercise-northwind.docx');
-  await insertPortion(page, { marking: SPECIAL_FRANCE, text: `Fictional first portion ${Date.now()}` });
-  await insertPortion(page, { marking: RELEASABLE_TO_NATO, text: `Fictional second portion ${Date.now()}` });
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional first portion') });
+  await insertPortion(page, { marking: RELEASABLE_TO_NATO, text: markedText('Fictional second portion') });
   const panel = pluginPanel(page);
   const frame = await pluginFrame(page);
   const blocks = contentControlsOf(await executeEditorMethod(frame, 'GetAllContentControls', []));

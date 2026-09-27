@@ -3,6 +3,7 @@ import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { DOMAIN } from './support/deployment.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { insertPortion, leaveAndWaitForSave, shownPortions } from './support/portions.ts';
 
@@ -145,7 +146,7 @@ test.describe('signed in as bob', () => {
 // read until the document is reopened.
 test('a revocation applies once the document is reopened, and so does its restoration', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  const secret = `Fictional French-eyes-only paragraph ${Date.now()}`;
+  const secret = markedText('Fictional French-eyes-only paragraph');
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
   await leaveAndWaitForSave([page], documentId, 1);
 
@@ -162,7 +163,7 @@ test('a revocation applies once the document is reopened, and so does its restor
 
 test('an entry outside its validity period grants nothing', async ({ page, browser }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  const unprotected = `Fictional public paragraph ${Date.now()}`;
+  const unprotected = markedText('Fictional public paragraph');
   await insertPortion(page, { marking: NON_PROTEGE, text: unprotected });
   await leaveAndWaitForSave([page], documentId, 1);
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
