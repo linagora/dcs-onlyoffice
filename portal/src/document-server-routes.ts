@@ -44,7 +44,7 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
       request.log.warn({ documentId: request.params.id }, 'Rejected an unsigned or invalid callback');
       return reply.code(401).send(CALLBACK_FAILED);
     }
-    const saved = await storeCallbackFile(config, request.params.id, callback);
+    const saved = await inArrivalOrder(request.params.id, async () => storeCallbackFile(config, request.params.id, callback));
     if (saved === 'failed') {
       request.log.error({ documentId: request.params.id, status: callback.status }, 'Saving the document failed');
       return reply.send(CALLBACK_FAILED);
@@ -56,6 +56,32 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
 }
 
 type CallbackOutcome = 'saved' | 'ignored' | 'failed';
+
+// The Document Server may call back for a document while an earlier callback
+// is still downloading or writing it. Each document's callbacks run one at a
+// time, in arrival order, so that an older snapshot never replaces a newer one
+// and a callback from an ended session meets the new key.
+const callbackQueues = new Map<string, Promise<unknown>>();
+
+async function inArrivalOrder<T>(documentId: string, task: () => Promise<T>): Promise<T> {
+  const previous = callbackQueues.get(documentId) ?? Promise.resolve();
+  const run = runAfter(previous, task);
+  // The caller receives the task's failure; the queue only waits for it.
+  const settled = run.catch(() => null);
+  callbackQueues.set(documentId, settled);
+  try {
+    return await run;
+  } finally {
+    if (callbackQueues.get(documentId) === settled) {
+      callbackQueues.delete(documentId);
+    }
+  }
+}
+
+async function runAfter<T>(previous: Promise<unknown>, task: () => Promise<T>): Promise<T> {
+  await previous;
+  return task();
+}
 
 // With JWT enabled, the Document Server signs its requests to the document URL.
 async function isSignedByDocumentServer(authorization: string | undefined, secret: string): Promise<boolean> {
