@@ -25,11 +25,14 @@ export async function openDocument(page: Page, documentId: string): Promise<void
   await waitForEditorReady(page);
 }
 
-// ONLYOFFICE's editor sometimes fails to load one of its own modules, which
-// then extends an undefined base class, and never becomes ready. The error
-// comes from the Document Server's web apps; loading the page again gets past
-// it, as it would for a user.
-const MODULE_LOADING_ERROR = "Cannot read properties of undefined (reading 'extend')";
+// ONLYOFFICE's editor sometimes runs one of its own modules before the base
+// class that module extends is ready, and then never becomes ready. The error
+// comes from the Document Server's web apps, for instance "Cannot read
+// properties of undefined (reading 'extend')" or "Common.UI.Window.extend is
+// not a function"; loading the page again gets past it, as it would for a user.
+function isModuleLoadingError(error: Error): boolean {
+  return /\bextend\b/.test(error.message) && (error.stack ?? '').includes('/web-apps/');
+}
 
 // Pages whose editor failed to load since their last navigation.
 const failedEditorLoads = new WeakSet<Page>();
@@ -37,7 +40,7 @@ const failedEditorLoads = new WeakSet<Page>();
 // Records the editor's loading failures on a page, before it opens a document.
 export function watchEditorLoads(page: Page): void {
   page.on('pageerror', (error) => {
-    if (error.message === MODULE_LOADING_ERROR) {
+    if (isModuleLoadingError(error)) {
       failedEditorLoads.add(page);
     }
   });
