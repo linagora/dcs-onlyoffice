@@ -1,0 +1,44 @@
+{
+  "clearances": [
+    {
+      "email": "alice.martin@dcs.test",
+      "name": "Alice Martin",
+      "nationality": "FRA",
+      "policy": "DEMO-FR",
+      "classification": "DIFFUSION RESTREINTE",
+      "categories": ["Special Handling:SPECIAL FRANCE", "Releasable To:NATO"],
+      "validFrom": "2026-01-01T00:00:00Z",
+      "validUntil": "2036-01-01T00:00:00Z"
+    },
+    {
+      "email": "bob.walker@dcs.test",
+      "name": "Bob Walker",
+      "nationality": "GBR",
+      "policy": "DEMO-FR",
+      "classification": "DIFFUSION RESTREINTE",
+      "categories": ["Releasable To:NATO"],
+      "validFrom": "2026-01-01T00:00:00Z",
+      "validUntil": "2036-01-01T00:00:00Z"
+    },
+    {
+      "email": "chloe.bernard@dcs.test",
+      "name": "Chloe Bernard",
+      "nationality": "FRA",
+      "policy": "DEMO-FR",
+      "classification": "NON PROTEGE",
+      "categories": [],
+      "validFrom": "2026-01-01T00:00:00Z",
+      "validUntil": "2036-01-01T00:00:00Z"
+    },
+    {
+      "email": "erin.petit@dcs.test",
+      "name": "Erin Petit",
+      "nationality": "FRA",
+      "policy": "DEMO-FR",
+      "classification": "DIFFUSION RESTREINTE",
+      "categories": ["Special Handling:SPECIAL FRANCE", "Releasable To:NATO"],
+      "validFrom": "2025-01-01T00:00:00Z",
+      "validUntil": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

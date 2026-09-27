@@ -2,10 +2,12 @@
   "users": {
     "alice": { "password": "alice", "uid": "alice", "cn": "Alice Martin", "givenName": "Alice", "sn": "Martin", "mail": "alice.martin@dcs.test" },
     "bob": { "password": "bob", "uid": "bob", "cn": "Bob Walker", "givenName": "Bob", "sn": "Walker", "mail": "bob.walker@dcs.test" },
-    "chloe": { "password": "chloe", "uid": "chloe", "cn": "Chloe Bernard", "givenName": "Chloe", "sn": "Bernard", "mail": "chloe.bernard@dcs.test" }
+    "chloe": { "password": "chloe", "uid": "chloe", "cn": "Chloe Bernard", "givenName": "Chloe", "sn": "Bernard", "mail": "chloe.bernard@dcs.test" },
+    "dan": { "password": "dan", "uid": "dan", "cn": "Dan Moreau", "givenName": "Dan", "sn": "Moreau", "mail": "dan.moreau@dcs.test" },
+    "erin": { "password": "erin", "uid": "erin", "cn": "Erin Petit", "givenName": "Erin", "sn": "Petit", "mail": "erin.petit@dcs.test" }
   },
   "groups": {
-    "dcs-maquette": ["alice", "bob", "chloe"],
+    "dcs-maquette": ["alice", "bob", "chloe", "dan", "erin"],
     "dcs-maquette-admin": ["alice"]
   }
 }

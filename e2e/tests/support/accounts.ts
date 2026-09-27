@@ -11,6 +11,10 @@ export const DEMO_ACCOUNTS = {
   alice: { login: 'alice', password: 'alice', name: 'Alice Martin' },
   bob: { login: 'bob', password: 'bob', name: 'Bob Walker' },
   chloe: { login: 'chloe', password: 'chloe', name: 'Chloe Bernard' },
+  // No clearance in the directory.
+  dan: { login: 'dan', password: 'dan', name: 'Dan Moreau' },
+  // A clearance whose validity period has ended.
+  erin: { login: 'erin', password: 'erin', name: 'Erin Petit' },
 } as const satisfies Record<string, DemoAccount>;
 
 export async function fillIdpLoginForm(page: Page, account: DemoAccount): Promise<void> {

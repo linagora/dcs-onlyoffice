@@ -81,8 +81,17 @@ services:
       SPIF_DIR: /spif
       MARKING_LANGUAGE: ${MARKING_LANGUAGE:-fr}
       ROLLUP_RULE: ${ROLLUP_RULE:-clear-parts}
+      DIRECTORY_DB_HOST: postgres
+      DIRECTORY_DB_NAME: opentdf
+      DIRECTORY_DB_USER: dcs_directory
+      DIRECTORY_DB_PASSWORD: ${DIRECTORY_DB_PASSWORD:?set DIRECTORY_DB_PASSWORD in .env}
+      DIRECTORY_SEED_DIR: /directory/seeds
     volumes:
       - ./spif:/spif:ro
+      - ./directory/seeds:/directory/seeds:ro
+    depends_on:
+      directory-setup:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
       interval: 10s
@@ -100,6 +109,24 @@ services:
       - pki-public:/pki/public
       - pki-private:/pki/private
       - opentdf-keys:/opentdf/keys
+
+  # Roles and schema of the clearance directory, which the policy service owns
+  # and OpenTDF's entity resolution reads.
+  directory-setup:
+    image: postgres:17.11-alpine
+    command: ["/bin/sh", "/setup/setup.sh"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: opentdf
+      PGUSER: opentdf
+      PGPASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
+      DIRECTORY_DB_PASSWORD: ${DIRECTORY_DB_PASSWORD:?set DIRECTORY_DB_PASSWORD in .env}
+      DIRECTORY_READER_PASSWORD: ${DIRECTORY_READER_PASSWORD:?set DIRECTORY_READER_PASSWORD in .env}
+    volumes:
+      - ./directory/setup.sh:/setup/setup.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:17.11-alpine
@@ -122,6 +149,7 @@ services:
     command: ["start", "--config-file", "/etc/opentdf/opentdf.yaml"]
     environment:
       OPENTDF_DB_PASSWORD: ${OPENTDF_DB_PASSWORD:?set OPENTDF_DB_PASSWORD in .env}
+      OPENTDF_SERVICES_ENTITYRESOLUTION_PROVIDERS_DIRECTORY_CONNECTION_PASSWORD: ${DIRECTORY_READER_PASSWORD:?set DIRECTORY_READER_PASSWORD in .env}
       OPENTDF_SERVER_AUTH_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
       OPENTDF_SERVER_AUTH_AUDIENCE: ${OIDC_AUDIENCE:-https://tdf.${DOMAIN}}
       OPENTDF_SERVER_CORS_ALLOWEDORIGINS: https://portail.${DOMAIN}
@@ -136,6 +164,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      directory-setup:
+        condition: service_completed_successfully
       # Startup fails at once if the IdP cannot be reached; in the standalone
       # profile the IdP sits behind the local proxy.
       proxy:

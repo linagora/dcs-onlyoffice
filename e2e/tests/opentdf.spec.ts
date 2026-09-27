@@ -1,50 +1,9 @@
 import type { Frame, Page } from '@playwright/test';
-import { DEMO_ACCOUNTS, type DemoAccount, signedInPage } from './support/accounts.ts';
-import { deploymentSetting } from './support/deployment.ts';
+import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
+import { callPlatform, type ConnectAnswer, IDP, PLATFORM, requestAccessToken } from './support/opentdf.ts';
 import { pluginFrame } from './support/plugin.ts';
-
-const DOMAIN = process.env.DOMAIN ?? 'dcs.test';
-const PLATFORM = `https://tdf.${DOMAIN}`;
-const IDP = `https://idp.${DOMAIN}`;
-
-// The portal never hands a token to the browser, so the test asks the local IdP
-// for one with the password grant, which only the local IdP allows. The request
-// comes from a page of the IdP's origin, which needs no CORS.
-async function requestAccessToken(page: Page, account: DemoAccount): Promise<string | null> {
-  const idpPage = await page.context().newPage();
-  await idpPage.goto(`${IDP}/.well-known/openid-configuration`);
-  const accessToken = await idpPage.evaluate(
-    async (request) => {
-      const response = await fetch('/oauth2/token', {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${btoa(`${request.clientId}:${request.clientSecret}`)}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          grant_type: 'password',
-          username: request.username,
-          password: request.password,
-          scope: 'openid profile email groups',
-        }),
-      });
-      const body: unknown = await response.json();
-      return typeof body === 'object' && body !== null && 'access_token' in body && typeof body.access_token === 'string'
-        ? body.access_token
-        : null;
-    },
-    {
-      clientId: deploymentSetting('OIDC_CLIENT_ID'),
-      clientSecret: deploymentSetting('OIDC_CLIENT_SECRET'),
-      username: account.login,
-      password: account.password,
-    },
-  );
-  await idpPage.close();
-  return accessToken;
-}
 
 test('the OpenTDF platform answers on its own host name', async ({ page }) => {
   const health = await page.evaluate(async (platform) => {
@@ -89,11 +48,6 @@ test('the portal hands no access token to the browser', async ({ page }) => {
   expect(status).toBe(404);
 });
 
-interface ConnectAnswer {
-  status: number;
-  body: unknown;
-}
-
 interface RelayRequest {
   method: string;
   // Whether the call carries the Connect protocol header the web SDK sends.
@@ -135,21 +89,6 @@ async function callRelay(target: Page | Frame, request: RelayRequest): Promise<C
     }
     return { status: response.status, body };
   }, request);
-}
-
-// Calls OpenTDF directly with a token, as the relay should.
-async function callPlatform(page: Page, method: string, token: string | null): Promise<ConnectAnswer> {
-  return page.evaluate(
-    async ({ platform, method, token }) => {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1' };
-      if (token !== null) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      const response = await fetch(`${platform}/${method}`, { method: 'POST', headers, body: '{}' });
-      return { status: response.status, body: await response.json() };
-    },
-    { platform: PLATFORM, method, token },
-  );
 }
 
 test("the portal relays the plugin's OpenTDF calls with the signed-in person's token", async ({ page, account }) => {
