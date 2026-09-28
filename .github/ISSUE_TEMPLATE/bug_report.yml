@@ -1,0 +1,68 @@
+name: Bug report
+description: Something does not work as expected in the portal, the labelling panel, the policy service or the deployment.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug. Please write in English.
+
+        This repository and its issues are public. **Security vulnerabilities must not be reported here**: see [SECURITY.md](https://github.com/linagora/dcs-onlyoffice/blob/main/SECURITY.md).
+        Never include secrets, credentials or tokens, real personal data, real protected content or internal information such as host names and addresses: use the fictional accounts and data of the standalone stack, and redact the rest.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Portal
+        - Labelling panel (plugin)
+        - Policy service
+        - Encryption and OpenTDF provisioning
+        - Deployment (Docker Compose, proxies, identity provider, scripts)
+        - End-to-end tests or CI
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in to the standalone stack as `alice`
+        2. Create a document from `exercise-northwind.docx`
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Standalone stack
+        - Hosted mode
+        - CI
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit
+      description: The commit of `main` you run, if you know it.
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: The browser and its version, for a problem in the portal, the editor or the labelling panel.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Error messages or `docker compose logs` output, with secrets, addresses and personal data redacted.
+      render: shell

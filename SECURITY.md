@@ -8,19 +8,41 @@ Only the `main` branch receives fixes. There are no releases yet.
 
 ## Reporting a vulnerability
 
-Please do not open a public issue, pull request or discussion about a vulnerability.
+**Please do not report security vulnerabilities through public issues, pull requests or comments.**
 
-Report it privately through GitHub instead: in the repository's **Security** tab, choose **Report a vulnerability**, or go straight to <https://github.com/linagora/dcs-onlyoffice/security/advisories/new>.
+Report them privately with GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability**, or go directly to [the reporting form](https://github.com/linagora/dcs-onlyoffice/security/advisories/new).
 
-Please include:
+Please include as much of the following as you can:
 
-- the affected component (portal, plugin, policy service or deployment) and the commit;
-- the steps to reproduce, and what an attacker gains;
-- a suggested fix, if you have one.
+- the component concerned: portal, labelling plugin, policy service, OpenTDF provisioning job, or deployment files and scripts (`deploy/`);
+- the commit where you found it;
+- a description of the vulnerability and of what an attacker gains;
+- the steps to reproduce it, or a proof of concept;
+- a suggested fix or mitigation, if you have one.
 
-We aim to acknowledge reports within five working days and keep you informed until the issue is fixed. With your agreement, the advisory credits you.
+Never include real credentials, tokens, personal data or protected content in a report: use the fictional accounts and data of the `standalone` stack, and redact the rest.
 
-Vulnerabilities of ONLYOFFICE Docs, OpenTDF, LemonLDAP::NG or other dependencies belong to their own projects. Tell us as well when they affect this stack.
+## What to expect
+
+- We acknowledge your report and keep you informed until the issue is fixed.
+- We may ask you for details, and we agree with you on the date of any public disclosure.
+- Once the fix is on `main`, we publish a security advisory which, with your agreement, credits you.
+
+## Guidelines for security research
+
+- Use the local `standalone` stack described in the [README](README.md#run-the-stack-locally): it runs the whole stack on your machine, with fictional accounts, a fictional security policy and fictional documents.
+- Only test instances that you run yourself, or that you are explicitly allowed to test. Never access or change other people's data, and do not degrade a service: no load or denial-of-service testing.
+- Never put real personal data or real protected content into the stack.
+- Stop and report as soon as you have shown that a vulnerability exists.
+
+## Scope
+
+In scope: the code and configuration of this repository: the portal, the labelling plugin, the policy service and its OpenTDF provisioning job, and the deployment files and scripts of `deploy/`.
+
+Out of scope:
+
+- vulnerabilities of ONLYOFFICE Docs, OpenTDF, LemonLDAP::NG, Caddy or other dependencies, which belong to their own projects: report them to their maintainers, and tell us as well when they affect this stack;
+- the known limitations below, which are properties of the demonstrator, not vulnerabilities.
 
 ## Known limitations
 

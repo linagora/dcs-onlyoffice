@@ -1,14 +1,19 @@
 # Contributing to DCS ONLYOFFICE
 
-Thank you for your interest in the project. This guide covers the setup, the conventions and the way changes get merged.
+Thank you for your interest in DCS ONLYOFFICE. Bug reports, ideas, documentation and code are all welcome. This guide explains how to set up the project, the checks to run and the conventions we follow.
 
-## Before you start
+Issues and pull requests are public, and written in English. Never include internal information, credentials, personal data or real protected content: use fictional data only.
 
-- For anything beyond a small fix, open an issue first so that we agree on the change.
-- Issues and pull requests are public. Never include internal information, credentials, personal data or real protected content: use fictional data only.
-- Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) explains, never in a public issue.
+## Ways to contribute
 
-## Setup
+- **Report a bug or suggest a feature** by opening an [issue](https://github.com/linagora/dcs-onlyoffice/issues/new/choose). Please search the existing issues first.
+- **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md).
+- **Improve the documentation**, or the labelling panel's texts, in English and French.
+- **Submit a pull request.** For anything beyond a small fix, open an issue first so that we agree on the change before you invest time in it.
+
+## Development environment
+
+The `standalone` stack runs entirely on your machine, with fictional accounts, a fictional security policy and fictional documents.
 
 Requirements: Docker with Compose v2, Node.js 22.18 or later, and pnpm 10 (`corepack enable` provides it).
 
@@ -19,9 +24,13 @@ deploy/scripts/init-env.sh                                # writes deploy/.env
 pnpm --filter @dcs/e2e exec playwright install chromium firefox
 ```
 
-A `deploy/.env` created before portion locks existed lacks `PORTION_LOCK_LEASE_SECONDS=20`, which the test of an abandoned lock needs: add it, then restart the stack.
+- **Sign in.** Point the stack's host names to your machine, as the [README](README.md#run-the-stack-locally) shows, then open https://portail.dcs.test and sign in with a fictional account: `alice`, `bob`, `chloe`, `dan` or `erin`, whose password is the login. `alice` is an administrator. The end-to-end tests need no hosts file: their browsers resolve the host names on their own.
+- **Rebuild after a change.** The portal and the policy service run their TypeScript sources directly with Node.js type stripping, and the portal's image also builds the plugin: after a change to any of the three, rebuild their images with `docker compose up -d --build`.
+- **Configuration upgrades.** Running `deploy/scripts/init-env.sh` again on an existing `deploy/.env` adds the secrets a new version introduces and changes nothing else; other new settings have defaults in the Compose file. A `deploy/.env` created before portion locks existed lacks `PORTION_LOCK_LEASE_SECONDS=20`, which the test of an abandoned lock needs: add it, then restart the stack.
 
-Check your work with:
+## Checks
+
+Run them before asking for a review. The end-to-end tests and the two scripts after them need the running `standalone` stack.
 
 ```sh
 pnpm typecheck    # every package
@@ -31,11 +40,21 @@ pnpm --filter @dcs/e2e search-document-server   # then: no portion text among ON
 pnpm --filter @dcs/e2e check-internal-route     # the Document Server's route serves a document to its own token only
 ```
 
-The portal and the policy service run their TypeScript sources directly with Node.js type stripping, so after a change to them, rebuild their images: `docker compose up -d --build`.
+The CI runs the type checks, the API tests and the end-to-end tests on Chromium and Firefox, then searches the Document Server's working files for portion texts; it must pass.
+
+- **Browsers.** The end-to-end suite runs on Chromium. Tests of browser-specific behaviour carry the `@cross-browser` tag, and also run on Firefox.
+- **Screenshots.** When a page shown in the README changes, refresh the screenshots with `pnpm --filter @dcs/e2e captures`; the header of [`e2e/captures/captures.spec.ts`](e2e/captures/captures.spec.ts) says which stack it expects.
 
 ## Conventions
 
-Everything in the repository is written in English: code, comments, documentation, commit messages, issues and pull requests. Markings shown to users come from the SPIF, in the language it provides. The plugin's own texts are the exception: they exist in English and French, in `plugin/src/messages.ts` and in the `nameLocale` and `descriptionLocale` of `plugin/public/config.json`, and the tests quote them in the language they check. A new text needs both languages; technical error details stay in English.
+### Language
+
+- **English everywhere.** Everything in the repository is written in English: code, comments, documentation, commit messages, issues and pull requests.
+- **Markings** shown to users come from the SPIF, in the language it provides.
+- **The plugin's own texts are the one exception.** They exist in English and French, in `plugin/src/messages.ts` and in the `nameLocale` and `descriptionLocale` of `plugin/public/config.json`, and the tests quote them in the language they check. A new text needs both languages; technical error details stay in English.
+- **Domain vocabulary.** Name domain concepts with the terms of the glossary, [CONTEXT.md](CONTEXT.md), and avoid the words it lists as ones to avoid. [docs/adr](docs/adr) records the architecture decisions.
+
+### Code
 
 TypeScript is strict. Node.js strips types without transforming code, so only erasable syntax is allowed: no `enum`, `namespace` or constructor parameter properties. On top of that:
 
@@ -49,13 +68,26 @@ TypeScript is strict. Node.js strips types without transforming code, so only er
 - `async`/`await` rather than promise chains, and a fire-and-forget promise gets a `.catch()` that reports the failure;
 - comments explain why, not what.
 
-Tests check behaviour through two public seams: the policy service's HTTP API, in process with `node:test`, and the whole stack through the browser with Playwright. Internals are not tested directly. One check looks further, because keeping portion texts out of ONLYOFFICE is what the project guarantees first: every portion text a test writes carries a marker (`e2e/tests/support/marker.ts`), and after the end-to-end suite a script searches the Document Server's working files for it. End-to-end tests also reach the stack itself through `docker compose` in `deploy`, in two ways only: one makes the clearance directory unreadable to OpenTDF, as an outage would, then restarts the policy service, which restores its grants; others read the portal's log, which is the journal of label changes. Expected values come from the standards, the SPIF or a reference implementation, never recomputed the way the code computes them.
+### Tests
 
-## Commits
+- **Two public seams.** Tests check behaviour through the policy service's HTTP API, in process with `node:test`, and through the whole stack in the browser, with Playwright. Internals are not tested directly.
+- **The stack itself.** Besides these seams, end-to-end tests may act on the stack through `docker compose` in `deploy`: to make the clearance directory unreadable to OpenTDF, as an outage would, then restart the policy service, which restores its grants; and to read the portal's log, which is the journal of label changes.
+- **Portion texts.** One check looks further, because keeping portion texts out of ONLYOFFICE is what the project guarantees first: every portion text a test writes carries a marker (`e2e/tests/support/marker.ts`), and after the end-to-end suite a script searches the Document Server's working files for it.
+- **Independent expected values.** Expected values come from the standards, the SPIF or a reference implementation, never recomputed the way the code computes them.
 
-- Follow [Conventional Commits](https://www.conventionalcommits.org) with a capitalised subject in the imperative mood, for example `feat(plugin): Insert portions from the context menu`. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test` and `chore`.
+### Commits
+
+We follow [Conventional Commits](https://www.conventionalcommits.org), with a capitalised subject in the imperative mood:
+
+```text
+feat(plugin): Insert portions from the context menu
+test(e2e): Write to a document bypassing the panel
+fix(deploy): Load ONLYOFFICE's analytics module under a name ad blockers allow
+```
+
+- Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test` and `chore`. Scopes in use: `plugin`, `portal`, `policy`, `deploy`, `e2e`, `ci`, `demo` and `research`.
 - One subject per commit. When the reason for a change is not obvious from the diff, the body explains it, wrapped at 72 columns. Reference issues with `Refs #12` or `Closes #12`.
-- Commits carry no attribution trailer for tools.
+- Files, commits, pull requests and issues carry no attribution to tools: no co-author trailer for a tool, no "generated with" line.
 - **Commits must be signed with SSH.** The `main` branch only accepts commits whose signature GitHub verifies:
 
   ```sh
@@ -66,13 +98,13 @@ Tests check behaviour through two public seams: the policy service's HTTP API, i
 
   Then add the same key to your GitHub account as a **signing key** (Settings, SSH and GPG keys, New SSH key, key type "Signing Key"), with the email address of your commits verified on the account.
 
-## Pull requests
+### Pull requests
 
 - Branch from `main`: `feat/…`, `fix/…` or `chore/…`.
 - Keep one concern per pull request. Its title is lowercase and under 70 characters, for example `feat: insert portions from the context menu`.
-- The description has a single `## Summary` section with short bullets about what the diff changes.
-- Run the checks above before asking for a review. The CI runs the type checks, the API tests and the end-to-end tests on Chromium and Firefox, then searches the Document Server's working files for portion texts; it must pass.
-- GitHub Copilot reviews every pull request automatically. Address its comments or answer them.
+- The description has a single `## Summary` section with short bullets about what the diff changes, as the pull request template sets out.
+- Run the checks above before asking for a review: the CI must pass.
+- An automated review comments on every pull request: address its comments or answer them.
 - A maintainer reviews the pull request and merges it with a merge commit, which keeps the history of its commits.
 
 ## License

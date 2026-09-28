@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest a new feature or an improvement.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your suggestion. Please write in English.
+
+        This repository and its issues are public: never include secrets, real personal data, real protected content or internal information. Report security vulnerabilities privately, as [SECURITY.md](https://github.com/linagora/dcs-onlyoffice/blob/main/SECURITY.md) explains.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Portal
+        - Labelling panel (plugin)
+        - Policy service
+        - Encryption and OpenTDF provisioning
+        - Deployment (Docker Compose, proxies, identity provider, scripts)
+        - End-to-end tests or CI
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way? Who is concerned (authors, readers, administrators, people who run the stack)?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How you would like it to work, and the standard it relies on, if any (ADatP-4774, ADatP-4778.2, Open XML SPIF, OpenTDF).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other solutions or workarounds you have thought of.
