@@ -99,7 +99,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
         : { policy, baseLabelCode, portionLabelCodes: documentState.portions.map((portion) => portion.labelCode) },
     [policy, baseLabelCode, documentState],
   );
-  const documentLabel = useDocumentLabel(labelRequest, documentState?.documentLabelCode ?? null, !readOnly);
+  const documentLabel = useDocumentLabel(labelRequest, documentState, !readOnly);
 
   const requestInsertion = useCallback((): void => {
     setInsertionRequested(true);

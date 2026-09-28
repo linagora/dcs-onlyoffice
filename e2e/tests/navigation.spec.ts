@@ -63,7 +63,8 @@ test('the panel highlights the portion whose block holds the cursor', async ({ p
   await insertPortion(page, { marking: RELEASABLE_TO_NATO, text: markedText('Fictional second portion') });
   const panel = pluginPanel(page);
   const frame = await pluginFrame(page);
-  const blocks = contentControlsOf(await executeEditorMethod(frame, 'GetAllContentControls', []));
+  // The page marking has content controls of its own, in headers and footers.
+  const blocks = contentControlsOf(await executeEditorMethod(frame, 'GetAllContentControls', [])).filter((control) => portionIdOf(control) !== null);
   expect(blocks).toHaveLength(2);
 
   for (const block of blocks) {
