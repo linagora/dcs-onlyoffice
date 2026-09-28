@@ -20,8 +20,8 @@ export function deploymentSetting(name: string): string {
 }
 
 // Makes the clearance directory unreadable to OpenTDF's entity resolution, as
-// an outage would, while `during` runs: the one place where a test reaches
-// past the browser and the APIs. The policy service grants the reader role
+// an outage would, while `during` runs: with the portal's log, the one place
+// where a test reaches past the browser and the APIs. The policy service grants the reader role
 // its columns again when it restarts; a run interrupted meanwhile leaves the
 // directory unreadable until it does.
 export async function withUnreadableDirectory(during: () => Promise<void>): Promise<void> {
@@ -34,7 +34,29 @@ export async function withUnreadableDirectory(during: () => Promise<void>): Prom
   }
 }
 
+// The portal's log since `since`, as it writes it: one JSON object a line.
+export function portalLog(since: Date): string {
+  return compose('logs', '--no-log-prefix', '--since', since.toISOString(), 'portal');
+}
+
+// The entries of the portal's log since `since`.
+export function portalLogEntries(since: Date): unknown[] {
+  return portalLog(since)
+    .split('\n')
+    .flatMap((line) => {
+      try {
+        const entry: unknown = JSON.parse(line);
+        return [entry];
+      } catch (error: unknown) {
+        if (error instanceof SyntaxError) {
+          return [];
+        }
+        throw error;
+      }
+    });
+}
+
 // Fails with docker's own message.
-function compose(...args: string[]): void {
-  execFileSync('docker', ['compose', ...args], { cwd: COMPOSE_DIRECTORY, stdio: 'pipe' });
+function compose(...args: string[]): string {
+  return execFileSync('docker', ['compose', ...args], { cwd: COMPOSE_DIRECTORY, stdio: 'pipe', encoding: 'utf8' });
 }
