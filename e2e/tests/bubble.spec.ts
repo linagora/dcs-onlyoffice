@@ -3,7 +3,7 @@ import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
-import { bubble, pluginPanel } from './support/plugin.ts';
+import { bubble, pluginPanel, watchBubbleOpenings } from './support/plugin.ts';
 import { insertPortion } from './support/portions.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -60,4 +60,47 @@ test('the portion that holds the cursor is shown next to it, to its readers only
   await bob.waitForTimeout(3_000);
   await expect(bubble(bob).owner()).toHaveCount(0);
   await bob.context().close();
+});
+
+// The panel rereads the document every 3 seconds through an editor command,
+// after which the editor reports a cursor move even when the cursor stays.
+test('the bubble stays open while the cursor stays in the portion', async ({ page }) => {
+  await openNewDocument(page, 'exercise-northwind.docx');
+  const secret = markedText('Fictional paragraph shown without a blink');
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
+  const openings = watchBubbleOpenings(page);
+  await moveCursorIntoPortion(page);
+  await expect(bubble(page).getByTestId('bubble-text')).toHaveText(secret);
+  const opened = openings.length;
+  expect(opened).toBeGreaterThan(0);
+
+  // Two rereads of the document.
+  await page.waitForTimeout(7_000);
+
+  expect(openings).toHaveLength(opened);
+  await expect(bubble(page).getByTestId('bubble-text')).toHaveText(secret);
+});
+
+// A window stays where it opened: the bubble follows the cursor by opening
+// again where the cursor stops.
+test('the bubble follows the cursor as the document scrolls', async ({ page }) => {
+  await openNewDocument(page, 'exercise-northwind.docx');
+  const secret = markedText('Fictional paragraph followed as the page scrolls');
+  await insertPortion(page, { marking: SPECIAL_FRANCE, text: secret });
+  await moveCursorIntoPortion(page);
+  await expect(bubble(page).getByTestId('bubble-text')).toHaveText(secret);
+  const before = await bubble(page).owner().boundingBox();
+  if (before === null) {
+    throw new Error('The bubble has no position');
+  }
+
+  // The editor scrolls about 45 pixels for each notch of the wheel.
+  await page.mouse.move(500, 400);
+  for (let notches = 0; notches < 3; notches += 1) {
+    await page.mouse.wheel(0, 100);
+    await page.waitForTimeout(100);
+  }
+
+  await expect.poll(async () => (await bubble(page).owner().boundingBox())?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(before.y - 60);
+  await expect(bubble(page).getByTestId('bubble-text')).toHaveText(secret);
 });

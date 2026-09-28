@@ -57,6 +57,18 @@ export function bubble(page: Page): FrameLocator {
   return page.frameLocator('iframe[name="frameEditor"]').frameLocator(`iframe[src*="${BUBBLE_PAGE}"]`);
 }
 
+// The bubble pages the editor loads from now on, one for each window the
+// panel opens.
+export function watchBubbleOpenings(page: Page): string[] {
+  const openings: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes(BUBBLE_PAGE)) {
+      openings.push(request.url());
+    }
+  });
+  return openings;
+}
+
 export async function pluginFrame(page: Page): Promise<Frame> {
   let found: Frame | null = null;
   await expect

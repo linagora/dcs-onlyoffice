@@ -1,7 +1,15 @@
 import { type BubbleContent, type BubbleMessage, bubbleChannel, isBubbleMessage } from './bubble-channel.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
-import { callEditorMethod, newPluginWindow, offEditorEvent, onEditorEvent, onPluginButton, type PluginWindow } from './onlyoffice.ts';
+import {
+  callEditorMethod,
+  lastCommandAnswerAt,
+  newPluginWindow,
+  offEditorEvent,
+  onEditorEvent,
+  onPluginButton,
+  type PluginWindow,
+} from './onlyoffice.ts';
 
 const ESCAPE_KEY_CODE = 27;
 const WINDOW_WIDTH = 380;
@@ -19,6 +27,12 @@ const REOPEN_DELAY_MS = 250;
 // are ignored.
 const SETTLE_MS = 300;
 const OPENING_MOVES_MS = 600;
+// As it ends each of the panel's commands, as when the panel rereads the
+// document every few seconds, the editor places its cursor again and reports
+// a move, a few tens of milliseconds after its answer, even when the cursor
+// stays where it was. That report is ignored, unless the cursor is already
+// moving.
+const COMMAND_MOVE_MS = 300;
 const EDITOR_EVENTS = ['onKeyDown', 'onClick', 'onTargetPositionChanged'] as const;
 
 // The window that shows, next to the cursor, the text of the portion that
@@ -33,6 +47,8 @@ export class PortionBubble {
   #dismissed = false;
   #openedAt = 0;
   #settling: ReturnType<typeof setTimeout> | null = null;
+  // The command answer whose reported move was ignored.
+  #ignoredAnswerAt: number | null = null;
 
   // Listens to the editor; false when its runtime offers no events. The
   // editor tells the plugin of keys pressed in the document, and the window's
@@ -92,6 +108,13 @@ export class PortionBubble {
   #followCursor(): void {
     if (this.#content === null || this.#dismissed || Date.now() - this.#openedAt < OPENING_MOVES_MS) {
       return;
+    }
+    const answeredAt = lastCommandAnswerAt();
+    if (answeredAt !== null && answeredAt !== this.#ignoredAnswerAt && Date.now() - answeredAt < COMMAND_MOVE_MS) {
+      this.#ignoredAnswerAt = answeredAt;
+      if (this.#settling === null) {
+        return;
+      }
     }
     this.#close();
     if (this.#settling !== null) {

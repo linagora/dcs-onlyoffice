@@ -130,6 +130,13 @@ let commandQueue: Promise<unknown> = Promise.resolve();
 
 const COMMAND_TIMEOUT_MS = 30_000;
 
+// When the editor last answered a command, null before the first answer.
+let lastAnswerAt: number | null = null;
+
+export function lastCommandAnswerAt(): number | null {
+  return lastAnswerAt;
+}
+
 // The command is serialised with toString() and runs in the editor's sandbox:
 // it may only use `Api` and the JSON data passed as `Asc.scope`. No network
 // call may happen inside it.
@@ -177,6 +184,7 @@ function sendCommand(command: () => unknown, scope: Record<string, unknown>, rec
     }
     runtime.scope = scope;
     callCommand.call(runtime.plugin, command, false, recalculate, (result) => {
+      lastAnswerAt = Date.now();
       resolve(result);
     });
   });
