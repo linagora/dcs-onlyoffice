@@ -1,7 +1,8 @@
 import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
-import { refreshBindingReferences } from './binding.ts';
+import type { BindingSignatures } from './binding-signature.ts';
+import { refreshBinding } from './binding.ts';
 import type { PortalConfig } from './config.ts';
 import { type FileLabels, fileLabelsOf } from './document-labels.ts';
 import { DOCX_CONTENT_TYPE, findDocument, moveDocumentToNewKey, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
@@ -22,9 +23,11 @@ interface DocumentParams {
   id: string;
 }
 
-// What a save needs besides the file: the journal that logs the labels it
-// lowers, and the editing sessions that follow it.
+// What a save needs besides the file: the policy service's signature of its
+// binding, the journal that logs the labels it lowers, and the editing
+// sessions that follow it.
 export interface SaveServices {
+  signatures: BindingSignatures;
   journal: LabelJournal;
   editingSessions: EditingSessions;
 }
@@ -151,7 +154,7 @@ async function storeCallbackFile(
   if (!response.ok) {
     return 'failed';
   }
-  const content = await refreshBindingReferences(new Uint8Array(await response.arrayBuffer()));
+  const content = await services.signatures.signed(await refreshBinding(new Uint8Array(await response.arrayBuffer())), documentId);
   // Reading the labels must not cost the save: unreadable ones skip the log.
   const [before, after] = await Promise.all([
     readLabels(log, documentId, async () => fileLabelsOf(await readFile(document.filePath))),

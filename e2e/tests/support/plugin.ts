@@ -217,6 +217,44 @@ async function writePortion(frame: Frame, portion: WrittenPortion, encoding: Sto
   );
 }
 
+// Puts `xml` in place of the document's Custom XML parts of a namespace,
+// bypassing the panel, as any editor could.
+export async function replaceCustomXmlParts(frame: Frame, namespace: string, xml: string): Promise<void> {
+  await whilePanelCommandsHeld(frame, async () =>
+    frame.evaluate(
+      async (scope) =>
+        new Promise<void>((resolve, reject) => {
+          const runtime = window.Asc;
+          const callCommand = window.dcsWorkingCallCommand;
+          if (runtime === undefined || callCommand === undefined) {
+            reject(new Error('The plugin runtime has no callCommand'));
+            return;
+          }
+          runtime.scope = scope;
+          callCommand.call(
+            runtime.plugin,
+            () => {
+              // Runs in the editor's sandbox, with Api and Asc.scope only.
+              const replacement = Asc.scope as { namespace: string; xml: string }; // SAFETY: the scope set just above
+              const parts = Api.GetDocument().GetCustomXmlParts();
+              for (const part of parts.GetByNamespace(replacement.namespace)) {
+                part.Delete();
+              }
+              parts.Add(replacement.xml);
+              return true;
+            },
+            false,
+            true,
+            () => {
+              resolve();
+            },
+          );
+        }),
+      { namespace, xml },
+    ),
+  );
+}
+
 // Adds Custom XML parts to the document, bypassing the panel.
 export async function addCustomXmlParts(frame: Frame, xmls: string[]): Promise<void> {
   await whilePanelCommandsHeld(frame, async () =>

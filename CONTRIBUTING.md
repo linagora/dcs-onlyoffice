@@ -15,7 +15,7 @@ Issues and pull requests are public, and written in English. Never include inter
 
 The `standalone` stack runs entirely on your machine, with fictional accounts, a fictional security policy and fictional documents.
 
-Requirements: Docker with Compose v2, Node.js 22.18 or later, and pnpm 10 (`corepack enable` provides it).
+Requirements: Docker with Compose v2, Node.js 22.18 or later, pnpm 10 (`corepack enable` provides it), OpenSSL, and xmlsec1, the independent verifier of the document label binding's signature that the tests run (`brew install libxmlsec1` on macOS, `apt-get install xmlsec1` on Debian and Ubuntu).
 
 ```sh
 pnpm install
@@ -26,7 +26,7 @@ pnpm --filter @dcs/e2e exec playwright install chromium firefox
 
 - **Sign in.** Point the stack's host names to your machine, as the [README](README.md#run-the-stack-locally) shows, then open https://portail.dcs.test and sign in with a fictional account: `alice`, `bob`, `chloe`, `dan` or `erin`, whose password is the login. `alice` is an administrator. The end-to-end tests need no hosts file: their browsers resolve the host names on their own.
 - **Rebuild after a change.** The portal and the policy service run their TypeScript sources directly with Node.js type stripping, and the portal's image also builds the plugin: after a change to any of the three, rebuild their images with `docker compose up -d --build`.
-- **Configuration upgrades.** Running `deploy/scripts/init-env.sh` again on an existing `deploy/.env` adds the secrets a new version introduces and changes nothing else; other new settings have defaults in the Compose file. A `deploy/.env` created before portion locks existed lacks `PORTION_LOCK_LEASE_SECONDS=20`, which the test of an abandoned lock needs: add it, then restart the stack.
+- **Configuration upgrades.** Running `deploy/scripts/init-env.sh` again on an existing `deploy/.env` sets the secrets that are missing or empty, such as those a new version introduces, and changes nothing else; other new settings have defaults in the Compose file. The signed binding brought three: the demo key that signs bindings, its certificate and the secret the portal and the policy service share. A `deploy/.env` created before portion locks existed lacks `PORTION_LOCK_LEASE_SECONDS=20`, which the test of an abandoned lock needs: add it, then restart the stack.
 
 ## Checks
 

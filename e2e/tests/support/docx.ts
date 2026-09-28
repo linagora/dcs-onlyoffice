@@ -34,6 +34,8 @@ export interface ConfidentialityLabel {
 export interface DocumentBinding {
   label: ConfidentialityLabel | null;
   references: string[];
+  // Whether an XML signature opens the binding.
+  signed: boolean;
 }
 
 // A block content control with the colour of its text.
@@ -71,7 +73,8 @@ const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/
 const RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const PACKAGE_RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/relationships';
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
-const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
+export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
+export const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
 const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
 const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments|commentsExtended)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
 
@@ -167,9 +170,11 @@ function readBinding(xml: string): DocumentBinding | null {
     return null;
   }
   const label = elements(root, LABEL_NAMESPACE, 'originatorConfidentialityLabel')[0];
+  const first = childElements(root)[0];
   return {
     label: label === undefined ? null : readLabel(label),
     references: elements(root, BINDING_NAMESPACE, 'DataReference').map((reference) => reference.getAttribute('URI') ?? ''),
+    signed: first?.namespaceURI === SIGNATURE_NAMESPACE && first.localName === 'Signature',
   };
 }
 

@@ -1,7 +1,8 @@
 import { fastify, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { accessDecision } from './access.ts';
-import { readOriginatorLabel, reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
+import { type DesignatedLabel, readOriginatorLabel, reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
+import type { BindingSigner } from './binding-signature.ts';
 import { callerEmail, callerIsAdministrator } from './caller.ts';
 import { registerDirectoryAdministration } from './directory/administration.ts';
 import { type ClearanceTerms, type ClearanceTermsRequest, clearanceChoicesOf, readClearanceTerms } from './directory/clearance.ts';
@@ -19,7 +20,8 @@ import {
 import { type Marking, renderMarking } from './marking.ts';
 import { isStringList, readTextField, unknownArray } from './guards.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
-import { computeDocumentLabel, isMoreRestrictive, type RollupRule } from './rollup.ts';
+import { registerPackageSigning } from './package-signing.ts';
+import { computeDocumentLabel, type DocumentLabelResult, isMoreRestrictive, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
 import { PortionLocks, registerPortionLocks } from './portion-locks.ts';
@@ -32,6 +34,9 @@ export interface PolicyServerOptions {
   clearanceDirectory?: ClearanceDirectoryOptions;
   // Shared with the portal, which alone administers the clearance directory.
   directoryAdministrationSecret?: string;
+  // The key and certificate that sign document label bindings, with the
+  // secret the portal holds to ask for signatures.
+  bindingSignature?: { signer: BindingSigner; secret: string };
   markingLanguage?: string;
   reviewPeriodYears?: number;
   rollupRule?: RollupRule;
@@ -50,6 +55,8 @@ export interface LabelView {
 }
 
 type LabelViews = { ok: true; views: LabelView[] } | { ok: false; error: string };
+
+type PolicyLabel = { ok: true; policy: SecurityPolicy; label: Label } | { ok: false; error: string };
 
 interface PolicyParams {
   policy: string;
@@ -98,6 +105,38 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
   const labelViews = (policy: SecurityPolicy, language: string, keep: (label: Label) => boolean): LabelViews => {
     const enumeration = enumerateValidLabels(policy);
     return enumeration.ok ? { ok: true, views: enumeration.labels.filter(keep).map((label) => toView(policy, label, language)) } : enumeration;
+  };
+
+  // The ADatP-4774 originator label of a label, created now.
+  const originatorLabelXml = (policy: SecurityPolicy, label: Label, originatorEmail: string | null): string => {
+    const creationDateTime = now();
+    return serializeOriginatorLabel(policy, label, {
+      creationDateTime,
+      reviewDateTime: reviewDateFor(creationDateTime, reviewPeriodYears),
+      originatorEmail,
+    });
+  };
+
+  // The valid label an originator label designates, under the policy it names
+  // with that identifier.
+  const designatedLabel = (designated: DesignatedLabel): PolicyLabel => {
+    const policy = findPolicy(designated.policy);
+    if (policy === null || (designated.policyUri !== null && designated.policyUri !== `urn:oid:${policy.oid}`)) {
+      return { ok: false, error: `No policy ${designated.policy} with that identifier` };
+    }
+    const validation = validateLabel(policy, designated.request);
+    return validation.valid ? { ok: true, policy, label: validation.label } : { ok: false, error: validation.errors.join('; ') };
+  };
+
+  // The document label that a base label and portion labels give under a
+  // policy, as the panel computes it; the base label is null when its code
+  // designates no valid label.
+  const documentLabelUnder = (policy: SecurityPolicy, base: Label | null, portionCodes: readonly string[]): DocumentLabelResult => {
+    const portions = portionCodes.map((code) => labelFromCode(policy, code));
+    if (base === null || portions.some((portion) => portion === null)) {
+      return { ok: false, error: 'Every label code must designate a valid label' };
+    }
+    return computeDocumentLabel(policy, base, portions.filter((portion): portion is Label => portion !== null), rollupRule);
   };
 
   app.get('/healthz', async () => ({ status: 'ok' }));
@@ -302,12 +341,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       if (validation === null || !validation.valid) {
         return reply.code(422).send({ error: `${code} is not a valid label of ${policy.name}` });
       }
-      const creationDateTime = now();
-      const xml = serializeOriginatorLabel(policy, validation.label, {
-        creationDateTime,
-        reviewDateTime: reviewDateFor(creationDateTime, reviewPeriodYears),
-        originatorEmail: callerEmail(request),
-      });
+      const xml = originatorLabelXml(policy, validation.label, callerEmail(request));
       return { xml, label: toView(policy, validation.label, request.query.lang ?? defaultLanguage) };
     },
   );
@@ -321,15 +355,11 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     if (designated === null) {
       return reply.code(400).send({ error: 'Expected { xml } holding an ADatP-4774 originator label' });
     }
-    const policy = findPolicy(designated.policy);
-    if (policy === null || (designated.policyUri !== null && designated.policyUri !== `urn:oid:${policy.oid}`)) {
-      return reply.code(422).send({ error: `No policy ${designated.policy} with that identifier` });
+    const found = designatedLabel(designated);
+    if (!found.ok) {
+      return reply.code(422).send({ error: found.error });
     }
-    const validation = validateLabel(policy, designated.request);
-    if (!validation.valid) {
-      return reply.code(422).send({ error: validation.errors.join('; ') });
-    }
-    return { label: toView(policy, validation.label, request.query.lang ?? defaultLanguage) };
+    return { label: toView(found.policy, found.label, request.query.lang ?? defaultLanguage) };
   });
 
   // The attribute values an envelope carries for a label.
@@ -381,6 +411,32 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     return policy === null ? reply.code(404).send({ error: `Unknown policy ${request.params.policy}` }) : clearanceChoicesOf(policy);
   });
 
+  const { bindingSignature } = options;
+  if (bindingSignature !== undefined) {
+    registerPackageSigning(app, {
+      ...bindingSignature,
+      now,
+      codeOfLabelXml: (xml) => {
+        const designated = readOriginatorLabel(xml);
+        const found = designated === null ? null : designatedLabel(designated);
+        return found?.ok === true ? labelCode(found.policy, found.label) : null;
+      },
+      // A document without a base label counts as the least restrictive
+      // label of the first policy, as the panel shows it. The signed label
+      // names no originator: the policy service computed it.
+      documentLabelOf: (baseCode, portionCodes) => {
+        const base = baseCode === null ? leastRestrictiveLabel() : labelOfCode(baseCode);
+        if (base === null) {
+          return { ok: false, error: 'The base label designates no valid label' };
+        }
+        const result = documentLabelUnder(base.policy, base.label, portionCodes);
+        return result.ok
+          ? { ok: true, code: labelCode(base.policy, result.label), labelXml: originatorLabelXml(base.policy, result.label, null) }
+          : result;
+      },
+    });
+  }
+
   const { directoryAdministrationSecret } = options;
   registerDirectoryAdministration(
     app,
@@ -399,26 +455,11 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       if (body === null) {
         return reply.code(400).send({ error: 'Expected { base, portions: [codes], parts?: [part names] }' });
       }
-      const base = labelFromCode(policy, body.base);
-      const portions = body.portions.map((code) => labelFromCode(policy, code));
-      if (base === null || portions.some((portion) => portion === null)) {
-        return reply.code(422).send({ error: 'Every label code must designate a valid label' });
-      }
-      const result = computeDocumentLabel(
-        policy,
-        base,
-        portions.filter((portion): portion is Label => portion !== null),
-        rollupRule,
-      );
+      const result = documentLabelUnder(policy, labelFromCode(policy, body.base), body.portions);
       if (!result.ok) {
         return reply.code(422).send({ error: result.error });
       }
-      const creationDateTime = now();
-      const labelXml = serializeOriginatorLabel(policy, result.label, {
-        creationDateTime,
-        reviewDateTime: reviewDateFor(creationDateTime, reviewPeriodYears),
-        originatorEmail: callerEmail(request),
-      });
+      const labelXml = originatorLabelXml(policy, result.label, callerEmail(request));
       return {
         label: toView(policy, result.label, request.query.lang ?? defaultLanguage),
         moreRestrictivePortions: result.moreRestrictivePortions,

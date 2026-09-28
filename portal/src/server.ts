@@ -8,6 +8,7 @@ import { AccessTokens } from './auth/access-tokens.ts';
 import { OidcClient } from './auth/oidc.ts';
 import { registerAuth, requireSession } from './auth/routes.ts';
 import { SessionStore, type UserIdentity } from './auth/sessions.ts';
+import { BindingSignatures } from './binding-signature.ts';
 import { registerClearanceAdmin } from './clearance-admin.ts';
 import type { PortalConfig } from './config.ts';
 import { LabelJournal, type PortionState } from './label-journal.ts';
@@ -211,7 +212,11 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
-  registerDocumentServerRoutes(app, config, { journal: labelJournal, editingSessions });
+  registerDocumentServerRoutes(app, config, {
+    signatures: new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, app.log),
+    journal: labelJournal,
+    editingSessions,
+  });
 
   return app;
 }

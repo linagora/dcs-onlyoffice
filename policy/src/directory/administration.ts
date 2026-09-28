@@ -1,5 +1,5 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import { holdsSecret } from '../bearer.ts';
 import { callerEmail } from '../caller.ts';
 import { isStringList } from '../guards.ts';
 import { policyNamed } from '../spif/lookup.ts';
@@ -83,12 +83,6 @@ function requireAdministration(administration: DirectoryAdministration | null): 
     throw new Error('The clearance directory is not administered by this service');
   }
   return administration;
-}
-
-// Compared as digests, whose equal lengths let the comparison take constant time.
-function holdsSecret(request: FastifyRequest, secret: string): boolean {
-  const digest = (value: string): Buffer => createHash('sha256').update(value).digest();
-  return timingSafeEqual(digest(request.headers.authorization ?? ''), digest(`Bearer ${secret}`));
 }
 
 function readTermsUpdate(body: unknown): TermsUpdate | null {
