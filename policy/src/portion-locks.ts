@@ -10,16 +10,21 @@ export interface PortionLock {
 
 type LockAttempt = { status: 'held'; lock: PortionLock } | { status: 'taken'; holder: CallerIdentity | null };
 
+// How long the service remembers the version a change wrote: long enough for
+// co-authors' editors to receive the change, short enough that a change
+// undone in the editor does not keep the portion from changing for good.
+const VERSION_MEMORY_MS = 60_000;
+
 // Who is changing each protected portion: one author at a time, until they
 // release it or stop renewing it. Locks live in memory, so a restart of the
-// service frees them all. The service also remembers the last portion version
-// a released lock reported, so that an author whose editor has not received
-// that version yet does not change the version before it.
+// service frees them all. The service also remembers, for a while, the last
+// portion version a released lock reported, so that an author whose editor
+// has not received that version yet does not change the version before it.
 export class PortionLocks {
   #leaseMs: number;
   // By document, then by portion.
   #locks = new Map<string, Map<string, PortionLock>>();
-  #versions = new Map<string, Map<string, number>>();
+  #versions = new Map<string, Map<string, { version: number; at: Date }>>();
 
   constructor(leaseMs: number) {
     this.#leaseMs = leaseMs;
@@ -54,14 +59,15 @@ export class PortionLocks {
     }
     this.#locks.get(document)?.delete(portion);
     if (version !== null) {
-      entriesOf(this.#versions, document).set(portion, version);
+      entriesOf(this.#versions, document).set(portion, { version, at: now });
     }
     return true;
   }
 
-  // The last version a released lock reported, null when none has.
-  versionOf(document: string, portion: string): number | null {
-    return this.#versions.get(document)?.get(portion) ?? null;
+  // The last version a released lock reported, null when none has lately.
+  versionOf(document: string, portion: string, now: Date): number | null {
+    const known = this.#versions.get(document)?.get(portion) ?? null;
+    return known !== null && now.getTime() - known.at.getTime() < VERSION_MEMORY_MS ? known.version : null;
   }
 
   list(document: string, now: Date): PortionLock[] {
@@ -120,7 +126,7 @@ export function registerPortionLocks(app: FastifyInstance, locks: PortionLocks, 
     if (attempt.status === 'taken') {
       return reply.code(409).send({ holder: attempt.holder });
     }
-    return { ...lockView(attempt.lock), leaseMs: locks.leaseMs, version: locks.versionOf(document, portion) };
+    return { ...lockView(attempt.lock), leaseMs: locks.leaseMs, version: locks.versionOf(document, portion, now()) };
   });
 
   app.post<{ Params: PortionParams }>('/documents/:document/portions/:portion/lock/release', async (request, reply) => {
