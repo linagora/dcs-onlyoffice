@@ -26,6 +26,14 @@ _Avoid_: caveat, mention
 The human-readable rendering of a label, in the language the security policy provides.
 _Avoid_: label text, banner
 
+**Sensitivity label**:
+A Microsoft Purview label defined in one Microsoft 365 tenant, which Office shows and applies that tenant's rules to. It has no categories of its own and nothing for protected portions.
+_Avoid_: Purview label, MIP label, AIP label
+
+**Label mapping**:
+The correspondence between the labels of the security policy and the sensitivity labels of one Microsoft 365 tenant, which gives a document its sensitivity label and reads the one an uploaded file carries.
+_Avoid_: correspondence table, crosswalk
+
 ### Documents
 
 **Protected portion**:
@@ -50,6 +58,10 @@ _Avoid_: assertion label, inner label
 **Base label**:
 The label an author gives to the document's unprotected content. It decides who may open the document; anyone may raise it, but only an administrator whose clearance allows it may lower it. A document without one counts as the least restrictive label.
 
+**Upload**:
+A DOCX brought into the portal from outside. Its base label is the label the file carries, as a bound document label or as a sensitivity label that the label mapping knows, or else one the person uploading it chooses.
+_Avoid_: import, deposit
+
 **Restricted document**:
 A document whose base label the person's clearance does not allow: the portal lists it with that label's marking only, without its name, and does not open it.
 _Avoid_: hidden document, protected document
@@ -63,7 +75,7 @@ The marking of the document label, repeated at the top and the bottom of every p
 _Avoid_: banner, header label
 
 **Journal**:
-The record of label changes: each change of a base label or of a protected portion, and each deletion of a protected portion, made in the panel, with who made it; and each save that lowers a label or removes a protected portion, with who took part in the editing session. It never holds a portion's text.
+The record of label changes: each change of a base label or of a protected portion, and each deletion of a protected portion, made in the panel, with who made it; each upload, with the label read from the file and the base label it got; and each save that lowers a label or removes a protected portion, with who took part in the editing session. It never holds a portion's text.
 _Avoid_: audit trail, history
 
 **Envelope**:
