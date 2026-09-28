@@ -117,6 +117,17 @@ describe('portion locks', () => {
     assert.equal((response.json() as { version: number | null }).version, 2); // SAFETY: the answer asserted just above
   });
 
+  // Co-authors' editors receive a change within seconds; a change undone in
+  // the editor brings the earlier version back.
+  it('forgets that version after a minute, so that an undone change does not keep the portion from changing', async () => {
+    assert.equal((await lock(ALICE, 'p-1', DIFFUSION_RESTREINTE)).statusCode, 200);
+    assert.equal((await release(ALICE, 'p-1', 2)).statusCode, 204);
+    advance(60_001);
+    const response = await lock(BOB, 'p-1', DIFFUSION_RESTREINTE);
+    assert.equal(response.statusCode, 200);
+    assert.equal((response.json() as { version: number | null }).version, null); // SAFETY: the answer asserted just above
+  });
+
   it('lets a lock lapse once its lease ends', async () => {
     assert.equal((await lock(ALICE, 'p-1', DIFFUSION_RESTREINTE)).statusCode, 200);
     advance(20_001);

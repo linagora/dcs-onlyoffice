@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { browserFetch, requestForceSave } from './documents.ts';
+import { browserFetch, openNewDocument, requestForceSave } from './documents.ts';
 import { type DocxInspection, inspectDocx } from './docx.ts';
 import type { MarkedText } from './marker.ts';
 import { pluginPanel } from './plugin.ts';
@@ -93,4 +93,30 @@ export async function forceSavedDocx(
     throw new Error('No saved document');
   }
   return docx;
+}
+
+// A portion as its document's saved file holds it: the code of its label and
+// its envelope.
+export interface SavedPortion {
+  documentId: string;
+  portionId: string;
+  labelCode: string;
+  envelope: string;
+}
+
+// Force-saves a document that holds one portion until its file holds it too.
+export async function savedPortion(page: Page, documentId: string): Promise<SavedPortion> {
+  const docx = await forceSavedDocx(page, documentId, (saved) => saved.portionParts.length === 1);
+  const part = docx.portionParts[0];
+  if (part?.id === null || part?.id === undefined || part.label === null) {
+    throw new Error('The saved DOCX holds no labelled portion part');
+  }
+  return { documentId, portionId: part.id, labelCode: part.label, envelope: part.content };
+}
+
+// A new document with one portion, as stored.
+export async function documentWithPortion(page: Page, portion: NewPortion): Promise<SavedPortion> {
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  await insertPortion(page, portion);
+  return savedPortion(page, documentId);
 }

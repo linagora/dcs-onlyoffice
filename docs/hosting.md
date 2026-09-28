@@ -114,6 +114,6 @@ curl -s -o /dev/null -w '%{redirect_url}\n' -H 'Accept: text/html' https://porta
 
 `docker compose logs opentdf-provisioning` shows `KAS key provisioned`, then `Policy provisioned` for each policy.
 
-The portal logs every change of a base label made in the panel, with the person who made it, and every save that lowers one: `docker compose logs portal | grep 'Base label'`.
+The portal logs every change of a base label or a portion made in the panel, with the person who made it, and every save that lowers a label: `docker compose logs portal | grep -E 'Base label|Portion'`.
 
 Then sign in with an account of the provider, open a demo document and check that the labelling panel shows your name.

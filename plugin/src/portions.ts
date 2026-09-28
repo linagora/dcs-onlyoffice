@@ -2,6 +2,7 @@ import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
 import type {
   ApiBlockLvlSdt,
+  ApiContentControl,
   ApiDocumentContent,
   ApiDocumentElement,
   ApiParagraph,
@@ -64,8 +65,14 @@ export interface ShownPageMarking {
 export interface NewPortion {
   label: LabelView;
   text: string;
+}
+
+// The document's other labels: its base label and the labels of its other
+// portions, from which, with a written portion's label, the document label
+// is computed.
+export interface OtherLabels {
   baseLabelCode: string;
-  existingLabelCodes: string[];
+  portionLabelCodes: string[];
 }
 
 interface PartReplacement {
@@ -73,18 +80,18 @@ interface PartReplacement {
   xml: string;
 }
 
-interface InsertPortionScope {
+// What a portion's placeholder block shows of its label.
+interface PortionBlockScope {
   tag: string;
-  alias: string;
   color: string | null;
   placeholder: string;
-  xml: string;
 }
 
-interface ChangePortionScope {
-  id: string;
-  xml: string;
-}
+// A portion the command writes, with its part: a new one, or a new version
+// of one the document holds.
+type PortionWriteScope =
+  | { kind: 'insertion'; alias: string; block: PortionBlockScope; xml: string }
+  | { kind: 'change'; id: string; block: PortionBlockScope; xml: string };
 
 interface PageMarkingScope {
   tag: string;
@@ -100,8 +107,7 @@ interface DocumentLabelScope {
 }
 
 interface CommandScope extends DocumentLabelScope {
-  portion: InsertPortionScope | null;
-  change: ChangePortionScope;
+  portion: PortionWriteScope | null;
   portionNamespace: string;
   documentNamespace: string;
 }
@@ -139,31 +145,47 @@ interface PortionPartContent {
 }
 
 // What writing a portion's text gave: nothing reaches the document when its
-// text cannot be encrypted.
-export type WriteResult = { status: 'written' } | { status: 'not-encrypted'; reason: string } | { status: 'not-written' };
+// text cannot be encrypted, nor when the portion changed since its change
+// started.
+export type WriteResult =
+  | { status: 'written' }
+  | { status: 'not-encrypted'; reason: string }
+  | { status: 'changed-meanwhile' }
+  | { status: 'not-written' };
 
-// A new text for a portion the author holds the lock of, under the label the
-// portion keeps.
+// A new text for a portion the author holds the lock of, under the label it
+// keeps or a new one.
 export interface PortionChange {
   portion: StoredPortion;
   label: LabelView;
   text: string;
 }
 
-
-
 declare const Api: OfficeApi;
 declare const Asc: { scope: CommandScope };
 
-// One command writes a new portion, if there is one, with the document label
-// and its page marking, so that a single undo reverts all of them.
+// One command writes a new portion or a portion's change, if there is one,
+// with the document label and its page marking, so that a single undo
+// reverts all of them. False when the portion to change is gone.
 function writeLabellingCommand(): boolean {
   const scope = Asc.scope;
   const document = Api.GetDocument();
   const parts = document.GetCustomXmlParts();
 
   const isParagraph = (element: ApiDocumentElement | null): element is ApiParagraph => element?.GetClassType() === 'paragraph';
-  const isBlock = (element: ApiDocumentElement | null): element is ApiBlockLvlSdt => element?.GetClassType() === 'blockLvlSdt';
+  const isBlock = (element: ApiDocumentElement | ApiContentControl | null): element is ApiBlockLvlSdt => element?.GetClassType() === 'blockLvlSdt';
+  // The plugin's tags are JSON; other tools' tags may be anything.
+  const parsedTag = (tag: string): unknown => {
+    try {
+      const parsed: unknown = JSON.parse(tag);
+      return parsed;
+    } catch (error: unknown) {
+      if (error instanceof SyntaxError) {
+        return null;
+      }
+      throw error;
+    }
+  };
 
   // A block of the plugin's own, locked only once `fill` has set its content.
   const lockedBlock = (tag: string, alias: string, fill: (paragraph: ApiParagraph | null, block: ApiBlockLvlSdt) => void): ApiBlockLvlSdt => {
@@ -176,12 +198,17 @@ function writeLabellingCommand(): boolean {
     return block;
   };
 
-  const insertPortionBlock = (portion: InsertPortionScope): void => {
-    const block = lockedBlock(portion.tag, portion.alias, (paragraph, control) => {
-      if (portion.color !== null) {
-        control.SetBorderColor(Api.HexColor(portion.color));
-      }
-      paragraph?.AddText(portion.placeholder);
+  const showPortionLabel = (paragraph: ApiParagraph | null, control: ApiBlockLvlSdt, block: PortionBlockScope): void => {
+    if (block.color !== null) {
+      control.SetBorderColor(Api.HexColor(block.color));
+    }
+    paragraph?.RemoveAllElements();
+    paragraph?.AddText(block.placeholder);
+  };
+
+  const insertPortionBlock = (portion: Extract<PortionWriteScope, { kind: 'insertion' }>): void => {
+    const block = lockedBlock(portion.block.tag, portion.alias, (paragraph, control) => {
+      showPortionLabel(paragraph, control, portion.block);
     });
     // Inserting at the cursor would split the paragraph that holds it. When
     // that paragraph has text and sits in the document body, the block goes
@@ -198,24 +225,43 @@ function writeLabellingCommand(): boolean {
     parts.Add(portion.xml);
   };
 
+  // The portion's part, found by the portion id its root element names,
+  // however the editor serialises it, is replaced with its new version; its
+  // placeholder block, found by the portion id in its tag, shows its label.
+  // Nothing changes unless the document holds both.
+  const changePortionBlock = (change: Extract<PortionWriteScope, { kind: 'change' }>): boolean => {
+    const current = parts
+      .GetByNamespace(scope.portionNamespace)
+      .filter((part) => /<(?:[\w-]+:)?portion\b[^>]*?\sid=["']([^"']*)["']/.exec(part.GetXml())?.[1] === change.id);
+    const controls = document.GetAllContentControls().filter((control): control is ApiBlockLvlSdt => {
+      const tag = isBlock(control) ? parsedTag(control.GetTag()) : null;
+      return typeof tag === 'object' && tag !== null && 'id' in tag && tag.id === change.id;
+    });
+    if (current.length === 0 || controls.length === 0) {
+      return false;
+    }
+    for (const part of current) {
+      part.Delete();
+    }
+    parts.Add(change.xml);
+    for (const control of controls) {
+      control.SetLock('unlocked');
+      control.SetTag(change.block.tag);
+      const first = control.GetContent().GetElement(0);
+      showPortionLabel(isParagraph(first) ? first : null, control, change.block);
+      control.SetLock('sdtContentLocked');
+    }
+    return true;
+  };
+
   // The page marking is the first block of a header and the last of a
   // footer, where readDocumentCommand looks for it. The one this command
   // writes, already in place, locked and unchanged, stays, so that authors
   // writing the same one at once do not end up with two; any other goes.
   const marking = scope.pageMarking;
   const isPageMarking = (element: ApiDocumentElement | null): boolean => {
-    if (!isBlock(element)) {
-      return false;
-    }
-    try {
-      const tag: unknown = JSON.parse(element.GetTag());
-      return typeof tag === 'object' && tag !== null && 'kind' in tag && tag.kind === 'page-marking';
-    } catch (error: unknown) {
-      if (error instanceof SyntaxError) {
-        return false;
-      }
-      throw error;
-    }
+    const tag = isBlock(element) ? parsedTag(element.GetTag()) : null;
+    return typeof tag === 'object' && tag !== null && 'kind' in tag && tag.kind === 'page-marking';
   };
   const isWrittenMarking = (element: ApiDocumentElement | null): boolean => {
     if (!isBlock(element) || element.GetTag() !== marking.tag || element.GetLock() !== 'sdtContentLocked') {
@@ -257,8 +303,11 @@ function writeLabellingCommand(): boolean {
   const headerFooterOf = (section: ApiSection, type: HeaderFooterType, kind: HeaderFooterKind, create: boolean): ApiDocumentContent | null =>
     kind === 'header' ? section.GetHeader(type, create) : section.GetFooter(type, create);
 
-  if (scope.portion !== null) {
+  if (scope.portion?.kind === 'insertion') {
     insertPortionBlock(scope.portion);
+  }
+  if (scope.portion?.kind === 'change' && !changePortionBlock(scope.portion)) {
+    return false;
   }
   for (const replacement of scope.replacements) {
     for (const existing of parts.GetByNamespace(replacement.namespace)) {
@@ -280,25 +329,6 @@ function writeLabellingCommand(): boolean {
       }
     }
   }
-  return true;
-}
-
-// Replaces a portion's part with its new version, found by the portion id its
-// root element names, however the editor serialises it; false when the
-// document no longer holds it.
-function changePortionCommand(): boolean {
-  const scope = Asc.scope;
-  const parts = Api.GetDocument().GetCustomXmlParts();
-  const current = parts
-    .GetByNamespace(scope.portionNamespace)
-    .filter((part) => /<(?:[\w-]+:)?portion\b[^>]*?\sid=["']([^"']*)["']/.exec(part.GetXml())?.[1] === scope.change.id);
-  if (current.length === 0) {
-    return false;
-  }
-  for (const part of current) {
-    part.Delete();
-  }
-  parts.Add(scope.change.xml);
   return true;
 }
 
@@ -347,55 +377,63 @@ function readDocumentCommand(): DocumentSnapshot {
 
 // The text is sealed before anything reaches the document: a text that cannot
 // be encrypted is not inserted.
-export async function insertPortion(portion: NewPortion, envelopes: EnvelopeClient): Promise<WriteResult> {
-  const { label } = portion;
-  const [labelXml, attributes, documentLabel] = await Promise.all([
-    fetchAdatp4774(label.policy, label.code),
-    fetchLabelAttributes(label.policy, label.code),
-    fetchDocumentLabel({
-      policy: label.policy,
-      baseLabelCode: portion.baseLabelCode,
-      portionLabelCodes: [...portion.existingLabelCodes, label.code],
-    }),
-  ]);
-  const sealed = await envelopes.seal(portion.text, { xml: labelXml, attributes });
-  if (sealed.status === 'failed') {
-    return { status: 'not-encrypted', reason: sealed.reason };
+export async function insertPortion(portion: NewPortion, others: OtherLabels, envelopes: EnvelopeClient): Promise<WriteResult> {
+  const sealed = await sealPortion(portion.label, portion.text, others, envelopes);
+  if (sealed.status === 'not-encrypted') {
+    return sealed;
   }
   const id = crypto.randomUUID();
-  const tag: PortionTag = { v: 1, id, label: label.code };
-  const written = await runCommand(
-    writeLabellingCommand,
-    {
-      portion: {
-        tag: JSON.stringify(tag),
-        alias: messages.portionAlias,
-        color: label.marking.color,
-        placeholder: messages.portionPlaceholder(label.marking.text),
-        xml: buildPortionPart({ id, version: 1, labelCode: label.code, labelXml, envelope: sealed.envelope }),
-      },
-      ...documentLabelScope(documentLabel, portion.baseLabelCode),
-    },
-    true,
-    (result) => (result === true ? true : null),
-  );
-  return written === null ? { status: 'not-written' } : { status: 'written' };
+  const xml = buildPortionPart({ id, version: 1, labelCode: portion.label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
+  return writeLabelling({ kind: 'insertion', alias: messages.portionAlias, block: portionBlockScope(id, portion.label), xml }, sealed.documentLabel, others);
 }
 
 // The new text is sealed before anything reaches the document: a text that
-// cannot be encrypted changes nothing.
-export async function changePortion(change: PortionChange, envelopes: EnvelopeClient): Promise<WriteResult> {
+// cannot be encrypted changes nothing. Under a new label, the placeholder,
+// the document label and the page marking change with it.
+export async function changePortion(change: PortionChange, others: OtherLabels, envelopes: EnvelopeClient): Promise<WriteResult> {
   const { label, portion } = change;
-  const [labelXml, attributes] = await Promise.all([fetchAdatp4774(label.policy, label.code), fetchLabelAttributes(label.policy, label.code)]);
-  const sealed = await envelopes.seal(change.text, { xml: labelXml, attributes });
-  if (sealed.status === 'failed') {
-    return { status: 'not-encrypted', reason: sealed.reason };
+  const sealed = await sealPortion(label, change.text, others, envelopes);
+  if (sealed.status === 'not-encrypted') {
+    return sealed;
   }
-  const xml = buildPortionPart({ id: portion.id, version: (portion.version ?? 1) + 1, labelCode: label.code, labelXml, envelope: sealed.envelope });
-  const changed = await runCommand(changePortionCommand, { change: { id: portion.id, xml }, portionNamespace: PORTION_NAMESPACE }, false, (result) =>
-    typeof result === 'boolean' ? result : null,
+  const xml = buildPortionPart({ id: portion.id, version: nextVersion(portion), labelCode: label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
+  return writeLabelling({ kind: 'change', id: portion.id, block: portionBlockScope(portion.id, label), xml }, sealed.documentLabel, others);
+}
+
+// The version a change of the portion writes.
+export function nextVersion(portion: StoredPortion): number {
+  return (portion.version ?? 1) + 1;
+}
+
+type SealedPortion =
+  | { status: 'sealed'; labelXml: string; envelope: Uint8Array; documentLabel: DocumentLabel }
+  | { status: 'not-encrypted'; reason: string };
+
+// Seals a portion's text under its label, and computes the document label
+// that the portion's label gives the document.
+async function sealPortion(label: LabelView, text: string, others: OtherLabels, envelopes: EnvelopeClient): Promise<SealedPortion> {
+  const [labelXml, attributes, documentLabel] = await Promise.all([
+    fetchAdatp4774(label.policy, label.code),
+    fetchLabelAttributes(label.policy, label.code),
+    fetchDocumentLabel({ policy: label.policy, baseLabelCode: others.baseLabelCode, portionLabelCodes: [...others.portionLabelCodes, label.code] }),
+  ]);
+  const sealed = await envelopes.seal(text, { xml: labelXml, attributes });
+  return sealed.status === 'failed' ? { status: 'not-encrypted', reason: sealed.reason } : { status: 'sealed', labelXml, envelope: sealed.envelope, documentLabel };
+}
+
+function portionBlockScope(id: string, label: LabelView): PortionBlockScope {
+  const tag: PortionTag = { v: 1, id, label: label.code };
+  return { tag: JSON.stringify(tag), color: label.marking.color, placeholder: messages.portionPlaceholder(label.marking.text) };
+}
+
+async function writeLabelling(portion: PortionWriteScope, documentLabel: DocumentLabel, others: OtherLabels): Promise<WriteResult> {
+  const written = await runCommand(
+    writeLabellingCommand,
+    { portion, portionNamespace: PORTION_NAMESPACE, ...documentLabelScope(documentLabel, others.baseLabelCode) },
+    true,
+    (result) => (typeof result === 'boolean' ? result : null),
   );
-  return changed === true ? { status: 'written' } : { status: 'not-written' };
+  return written === true ? { status: 'written' } : { status: 'not-written' };
 }
 
 // Rewrites the document label, and its page marking, from the base label and

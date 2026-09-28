@@ -42,6 +42,13 @@ export async function fetchBaseLabelChoices(policy: string, current: string | nu
   return labelListOf(await getJson(`${RELAY}/policies/${encodeURIComponent(policy)}/labels/base-choices${query}`));
 }
 
+// The labels the signed-in person may give a portion whose label is
+// `current`: those their clearance allows, raising it only, unless they are
+// an administrator cleared for it.
+export async function fetchPortionLabelChoices(policy: string, current: string): Promise<LabelView[]> {
+  return labelListOf(await getJson(`${RELAY}/policies/${encodeURIComponent(policy)}/labels/portion-choices?current=${encodeURIComponent(current)}`));
+}
+
 // The labels of a policy that the signed-in person's clearance allows, which
 // the policy service reads from the clearance directory.
 export async function fetchAllowedLabels(policy: string): Promise<LabelView[]> {

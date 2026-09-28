@@ -155,9 +155,24 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     return views.ok ? views.views : reply.code(422).send({ error: views.error });
   });
 
-  // The base labels the caller may give a document. Anyone may raise it;
-  // lowering it shows the content in clear to more readers, so only an
-  // administrator whose clearance allows the current label may.
+  // The labels the caller may put instead of `current`: raising it only,
+  // since lowering it shows what it covers to more readers, unless the caller
+  // is an administrator whose clearance allows it.
+  // With `readableOnly`, only the labels the caller's clearance allows.
+  const replacingLabels = async (
+    request: FastifyRequest,
+    policy: SecurityPolicy,
+    language: string,
+    current: Label | null,
+    readableOnly: boolean,
+  ): Promise<LabelViews> => {
+    const clearance = await callerClearance(request, policy);
+    const mayLower = current === null || (callerIsAdministrator(request) && accessDecision(policy, clearance, current));
+    const lowers = (label: Label): boolean => current !== null && isMoreRestrictive(policy, current, label);
+    return labelViews(policy, language, (label) => (mayLower || !lowers(label)) && (!readableOnly || accessDecision(policy, clearance, label)));
+  };
+
+  // The base labels the caller may give a document: any label.
   app.get<{ Params: PolicyParams; Querystring: LanguageQuery & { current?: unknown } }>(
     '/policies/:policy/labels/base-choices',
     async (request, reply) => {
@@ -173,18 +188,36 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       if (currentCode !== null && current === null) {
         return reply.code(422).send({ error: `${currentCode} is not a valid label of ${policy.name}` });
       }
-      const clearance = await callerClearance(request, policy);
-      const keep =
-        current === null || (callerIsAdministrator(request) && accessDecision(policy, clearance, current))
-          ? (): boolean => true
-          : (label: Label): boolean => !isMoreRestrictive(policy, current, label);
-      const views = labelViews(policy, request.query.lang ?? defaultLanguage, keep);
+      const views = await replacingLabels(request, policy, request.query.lang ?? defaultLanguage, current, false);
       return views.ok ? views.views : reply.code(422).send({ error: views.error });
     },
   );
 
-  // Whether a new base label lowers the previous one: a reader it allows may
-  // be refused the previous one.
+  // The labels the caller may give a portion instead of its current one:
+  // those their clearance allows, as for a new portion, since an author never
+  // writes what they could not read.
+  app.get<{ Params: PolicyParams; Querystring: LanguageQuery & { current?: unknown } }>(
+    '/policies/:policy/labels/portion-choices',
+    async (request, reply) => {
+      const policy = findPolicy(request.params.policy);
+      if (policy === null) {
+        return reply.code(404).send({ error: `Unknown policy ${request.params.policy}` });
+      }
+      const currentCode: unknown = request.query.current ?? null;
+      if (typeof currentCode !== 'string') {
+        return reply.code(400).send({ error: 'Expected the current label' });
+      }
+      const current = labelFromCode(policy, currentCode);
+      if (current === null) {
+        return reply.code(422).send({ error: `${currentCode} is not a valid label of ${policy.name}` });
+      }
+      const views = await replacingLabels(request, policy, request.query.lang ?? defaultLanguage, current, true);
+      return views.ok ? views.views : reply.code(422).send({ error: views.error });
+    },
+  );
+
+  // Whether a new label, of a document's base label or of a portion, lowers
+  // the previous one: a reader it allows may be refused the previous one.
   app.post('/labels/lowering', async (request, reply) => {
     const fromCode = readTextField(request.body, 'from');
     const toCode = readTextField(request.body, 'to');

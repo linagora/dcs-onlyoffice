@@ -1,12 +1,13 @@
 import { createReadStream } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
-import type { BaseLabelAudit } from './base-label-audit.ts';
 import { refreshBindingReferences } from './binding.ts';
 import type { PortalConfig } from './config.ts';
-import { type BaseLabels, baseLabelCodeOf } from './document-labels.ts';
+import { type FileLabels, fileLabelsOf } from './document-labels.ts';
 import { DOCX_CONTENT_TYPE, findDocument, moveDocumentToNewKey, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
 import type { EditingSessions } from './editing-sessions.ts';
 import { INTERNAL_DOCUMENTS_PATH, internalDocumentUrl } from './editor-config.ts';
+import type { LabelJournal } from './label-journal.ts';
 import {
   CALLBACK_FAILED,
   CALLBACK_RECEIVED,
@@ -21,11 +22,10 @@ interface DocumentParams {
   id: string;
 }
 
-// What a save needs besides the file: the stored file's base label, the audit
-// that logs its lowering, and the editing sessions that follow it.
+// What a save needs besides the file: the journal that logs the labels it
+// lowers, and the editing sessions that follow it.
 export interface SaveServices {
-  baseLabels: BaseLabels;
-  audit: BaseLabelAudit;
+  journal: LabelJournal;
   editingSessions: EditingSessions;
 }
 
@@ -152,23 +152,28 @@ async function storeCallbackFile(
     return 'failed';
   }
   const content = await refreshBindingReferences(new Uint8Array(await response.arrayBuffer()));
-  // Reading the labels must not cost the save: an unreadable one skips the log.
+  // Reading the labels must not cost the save: unreadable ones skip the log.
   const [before, after] = await Promise.all([
-    readBaseLabel(log, documentId, async () => services.baseLabels.of(document)),
-    readBaseLabel(log, documentId, async () => baseLabelCodeOf(content)),
+    readLabels(log, documentId, async () => fileLabelsOf(await readFile(document.filePath))),
+    readLabels(log, documentId, async () => fileLabelsOf(content)),
   ]);
+  // The Document Server names only the last editor of a save: the people
+  // who held a configuration for the session may have made the change too.
+  const sessionUsers = [...new Set([...callback.users, ...editingSessions.holdersOf(callback.key)])];
   // The document already moved to a new key when its session was ended.
   const saved = await saveDocumentContent(config.documentsDirectory, documentId, content, lastOfEnded ? 'forced' : kind);
-  if (saved !== null && before !== undefined && after !== undefined) {
+  if (saved === null) {
+    return 'failed';
+  }
+  if (before !== null && after !== null) {
     // Logged in the background: the Document Server waits for this answer.
-    services.audit.recordSave({ documentId, before, after }, callback.users).catch((error: unknown) => {
-      log.error({ documentId, err: error }, 'The lowering of a base label could not be checked');
+    services.journal.recordSave(documentId, before, after, sessionUsers).catch((error: unknown) => {
+      log.error({ documentId, err: error }, 'The lowering of a label could not be checked');
     });
   }
-  if (saved !== null) {
-    followEditingSession(config, editingSessions, log, callback, { kind, lastOfEnded, labelChanged: before !== after, saved });
-  }
-  return saved === null ? 'failed' : 'saved';
+  const labelChanged = before === null || after === null ? before !== after : before.base !== after.base;
+  followEditingSession(config, editingSessions, log, callback, { kind, lastOfEnded, labelChanged, saved });
+  return 'saved';
 }
 
 interface StoredSave {
@@ -202,13 +207,13 @@ function followEditingSession(
   }
 }
 
-// Undefined when the label cannot be read.
-async function readBaseLabel(log: FastifyBaseLogger, documentId: string, read: () => Promise<string | null>): Promise<string | null | undefined> {
+// Null when the labels cannot be read.
+async function readLabels(log: FastifyBaseLogger, documentId: string, read: () => Promise<FileLabels>): Promise<FileLabels | null> {
   try {
     return await read();
   } catch (error: unknown) {
-    log.error({ documentId, err: error }, 'A base label could not be read');
-    return undefined;
+    log.error({ documentId, err: error }, 'The labels of a document could not be read');
+    return null;
   }
 }
 

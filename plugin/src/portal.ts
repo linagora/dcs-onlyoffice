@@ -13,11 +13,27 @@ export function documentIdOf(info: PluginInfo): string | null {
 // it with the signed-in person and saves the document at once, since it
 // checks who opens a document against the stored label.
 export async function reportBaseLabelChange(documentId: string, before: string | null, after: string): Promise<void> {
-  const response = await fetch(`/documents/${encodeURIComponent(documentId)}/base-label`, {
+  await postReport(documentId, 'base-label', { before, after });
+}
+
+// A portion's label and version, before or after a change.
+export interface PortionState {
+  label: string;
+  version: number | null;
+}
+
+// Tells the portal about a change of a portion the panel made, which the
+// portal logs with the signed-in person. The report never holds the text.
+export async function reportPortionChange(documentId: string, portionId: string, before: PortionState, after: PortionState): Promise<void> {
+  await postReport(documentId, 'portion-change', { portion: portionId, before, after });
+}
+
+async function postReport(documentId: string, report: string, body: object): Promise<void> {
+  const response = await fetch(`/documents/${encodeURIComponent(documentId)}/${report}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ before, after }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw new Error(`The portal answered ${response.status}`);

@@ -39,7 +39,7 @@ interface SandboxBlock {
 interface SandboxApi {
   GetDocument(): {
     InsertContent(content: SandboxBlock[]): unknown;
-    GetCustomXmlParts(): { Add(xml: string): unknown };
+    GetCustomXmlParts(): { Add(xml: string): unknown; GetByNamespace(namespace: string): { GetXml(): string; Delete(): unknown }[] };
     GetSections(): { GetHeader(type: 'default', create: false): { GetElement(index: number): SandboxBlock | null } | null }[];
   };
   CreateBlockLvlSdt(): SandboxBlock;
@@ -249,6 +249,47 @@ export async function addCustomXmlParts(frame: Frame, xmls: string[]): Promise<v
           );
         }),
       xmls,
+    ),
+  );
+}
+
+// Gives a portion's part another label in clear, bypassing the panel, as any
+// editor could; the envelope stays as it was.
+export async function relabelPortionPart(frame: Frame, portionId: string, labelCode: string): Promise<void> {
+  await whilePanelCommandsHeld(frame, async () =>
+    frame.evaluate(
+      async (scope) =>
+        new Promise<void>((resolve, reject) => {
+          const runtime = window.Asc;
+          const callCommand = window.dcsWorkingCallCommand;
+          if (runtime === undefined || callCommand === undefined) {
+            reject(new Error('The plugin runtime has no callCommand'));
+            return;
+          }
+          runtime.scope = scope;
+          callCommand.call(
+            runtime.plugin,
+            () => {
+              // Runs in the editor's sandbox, with Api and Asc.scope only.
+              const { id, label, namespace } = Asc.scope as { id: string; label: string; namespace: string }; // SAFETY: the scope set just above
+              const parts = Api.GetDocument().GetCustomXmlParts();
+              for (const part of parts.GetByNamespace(namespace)) {
+                const xml = part.GetXml();
+                if (/ id=["']([^"']*)["']/.exec(xml)?.[1] === id) {
+                  part.Delete();
+                  parts.Add(xml.replace(/ label=["'][^"']*["']/, ` label="${label}"`));
+                }
+              }
+              return true;
+            },
+            false,
+            true,
+            () => {
+              resolve();
+            },
+          );
+        }),
+      { id: portionId, label: labelCode, namespace: PORTION_NAMESPACE },
     ),
   );
 }

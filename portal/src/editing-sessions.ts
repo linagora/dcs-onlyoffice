@@ -45,6 +45,12 @@ export class EditingSessions {
     this.#holders.set(key, holders);
   }
 
+  // The editor user ids that received a configuration naming `key`, to edit
+  // or to view, as far as the portal knows since it started.
+  holdersOf(key: string): string[] {
+    return [...(this.#holders.get(key) ?? [])];
+  }
+
   // The session of `key` ended with a save: no configuration naming it can
   // join a session any more.
   forget(key: string): void {

@@ -1,48 +1,31 @@
 import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
-import { deploymentSetting } from './support/deployment.ts';
-import { browserFetch, openDocument, openNewDocument } from './support/documents.ts';
+import { deploymentSetting, portalLog, portalLogEntries } from './support/deployment.ts';
+import { browserFetch, openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
-import { type MarkedText, markedText } from './support/marker.ts';
+import { field } from './support/json.ts';
+import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
-import { forceSavedDocx, insertPortion } from './support/portions.ts';
+import { documentWithPortion, forceSavedDocx, type SavedPortion } from './support/portions.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 
-interface InsertedPortion {
-  documentId: string;
-  portionId: string;
-  labelCode: string;
-  envelope: string;
-}
-
-// A new document with one DIFFUSION RESTREINTE portion, as stored.
-async function documentWithPortion(page: Page, text: MarkedText): Promise<InsertedPortion> {
-  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  await insertPortion(page, { marking: DIFFUSION_RESTREINTE, text });
-  const docx = await forceSavedDocx(page, documentId, (saved) => saved.portionParts.length === 1);
-  const part = docx.portionParts[0];
-  if (part?.id === null || part?.id === undefined || part.label === null) {
-    throw new Error('The saved DOCX holds no labelled portion part');
-  }
-  return { documentId, portionId: part.id, labelCode: part.label, envelope: part.content };
-}
-
 // What the policy service answers someone asking for a portion's lock
 // through the portal's relay.
-async function lockAnswer(page: Page, portion: InsertedPortion): Promise<number> {
+async function lockAnswer(page: Page, portion: SavedPortion): Promise<number> {
   const url = `/api/policy/documents/${portion.documentId}/portions/${portion.portionId}/lock`;
   return (await browserFetch(page, url, 'POST', { code: portion.labelCode, renewal: false })).status;
 }
 
 // The portion locks of a document that the policy service lists.
-async function listedLocks(page: Page, portion: InsertedPortion): Promise<unknown> {
+async function listedLocks(page: Page, portion: SavedPortion): Promise<unknown> {
   return JSON.parse((await browserFetch(page, `/api/policy/documents/${portion.documentId}/locks`)).body.toString('utf8'));
 }
 
 test('a portion changed under its lock is shown being changed to a co-author, then in its new version', async ({ page, browser }) => {
+  const since = new Date();
   const before = markedText('Fictional paragraph before its change');
-  const portion = await documentWithPortion(page, before);
+  const portion = await documentWithPortion(page, { marking: DIFFUSION_RESTREINTE, text: before });
   const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
   await openDocument(bob, portion.documentId);
   const bobPortion = pluginPanel(bob).getByTestId('portion-item');
@@ -70,11 +53,28 @@ test('a portion changed under its lock is shown being changed to a co-author, th
     { id: portion.portionId, version: '2', label: portion.labelCode, labelXml: expect.any(String), encoding: 'ztdf', content: expect.any(String) },
   ]);
   expect(docx.portionParts[0]?.content).not.toBe(portion.envelope);
+  // The journal holds the change, without its text.
+  const journal = (): unknown[] =>
+    portalLogEntries(since).filter((entry) => field(entry, 'msg') === 'Portion changed in the panel' && field(entry, 'portion') === portion.portionId);
+  await expect
+    .poll(journal)
+    .toEqual([
+      expect.objectContaining({
+        documentId: portion.documentId,
+        user: 'alice',
+        lowering: false,
+        before: { label: portion.labelCode, version: 1 },
+        after: { label: portion.labelCode, version: 2 },
+      }),
+    ]);
+  const log = portalLog(since);
+  expect(log).not.toContain(before);
+  expect(log).not.toContain(after);
   await bob.context().close();
 });
 
 test('closing the editor releases its lock at once', async ({ page, browser }) => {
-  const portion = await documentWithPortion(page, markedText('Fictional paragraph left open'));
+  const portion = await documentWithPortion(page, { marking: DIFFUSION_RESTREINTE, text: markedText('Fictional paragraph left open') });
   const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
   await openDocument(bob, portion.documentId);
   await pluginPanel(page).getByTestId('portion-item').getByRole('button', { name: 'Change', exact: true }).click();
@@ -91,7 +91,7 @@ test('closing the editor releases its lock at once', async ({ page, browser }) =
 test('the lock of an author who lost their connection lapses, and a co-author takes it', async ({ page, browser }) => {
   const lease = Number(deploymentSetting('PORTION_LOCK_LEASE_SECONDS'));
   expect(lease, 'the stack runs with PORTION_LOCK_LEASE_SECONDS=20, as deploy/.env.example sets it').toBeLessThanOrEqual(60);
-  const portion = await documentWithPortion(page, markedText('Fictional paragraph left locked'));
+  const portion = await documentWithPortion(page, { marking: DIFFUSION_RESTREINTE, text: markedText('Fictional paragraph left locked') });
   const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
   await openDocument(bob, portion.documentId);
   const bobPortion = pluginPanel(bob).getByTestId('portion-item');
@@ -111,7 +111,7 @@ test('the lock of an author who lost their connection lapses, and a co-author ta
 // from a label that gives no attribute value, which the panel never uses.
 test('a change whose text cannot be encrypted leaves the portion as it was, and its lock free', async ({ page }) => {
   const before = markedText('Fictional paragraph that stays');
-  const portion = await documentWithPortion(page, before);
+  const portion = await documentWithPortion(page, { marking: DIFFUSION_RESTREINTE, text: before });
   const panel = pluginPanel(page);
   const item = panel.getByTestId('portion-item');
   await item.getByRole('button', { name: 'Change', exact: true }).click();
@@ -131,7 +131,7 @@ test('a change whose text cannot be encrypted leaves the portion as it was, and 
 });
 
 test('a changed text is limited to 20,000 characters, as a new one', async ({ page }) => {
-  await documentWithPortion(page, markedText('Fictional paragraph to lengthen'));
+  await documentWithPortion(page, { marking: DIFFUSION_RESTREINTE, text: markedText('Fictional paragraph to lengthen') });
   const item = pluginPanel(page).getByTestId('portion-item');
   await item.getByRole('button', { name: 'Change', exact: true }).click();
 

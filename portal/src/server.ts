@@ -10,7 +10,7 @@ import { registerAuth, requireSession } from './auth/routes.ts';
 import { SessionStore, type UserIdentity } from './auth/sessions.ts';
 import { registerClearanceAdmin } from './clearance-admin.ts';
 import type { PortalConfig } from './config.ts';
-import { BaseLabelAudit } from './base-label-audit.ts';
+import { LabelJournal, type PortionState } from './label-journal.ts';
 import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts';
 import { BaseLabels } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
@@ -63,7 +63,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   const baseLabels = new BaseLabels();
   const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, baseLabels, app.log);
-  const baseLabelAudit = new BaseLabelAudit(config.policyInternalUrl, app.log);
+  const labelJournal = new LabelJournal(config.policyInternalUrl, app.log);
   const commands: CommandService = { internalUrl: config.onlyofficeInternalUrl, secret: config.onlyofficeJwtSecret };
   const editingSessions = new EditingSessions(commands, documentAccess, app.log);
   // A document the person may not open answers every address the same way,
@@ -169,6 +169,23 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
+  // The panel reports each change of a portion it makes, of its text, its
+  // label or both, which the portal logs with the person who made it.
+  app.post<{ Params: DocumentParams }>('/documents/:id/portion-change', async (request, reply) => {
+    const document = await findDocument(config.documentsDirectory, request.params.id);
+    const change = readPortionChange(request.body);
+    if (document === null || change === null) {
+      return reply.code(document === null ? 404 : 400).send({ error: document === null ? 'Document not found' : 'Expected { portion, before, after }' });
+    }
+    const { user } = requireSession(request);
+    const decision = await documentAccess.decideOne(user, document);
+    if (!decision.open) {
+      return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
+    }
+    await labelJournal.recordPortionReport({ documentId: document.id, ...change }, user.id);
+    return reply.code(204).send();
+  });
+
   // The panel reports the base label changes it makes, which the portal logs
   // with the person who made them, and saves the document at once: until
   // then, whoever opens it would still be checked against the stored label.
@@ -183,7 +200,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (!decision.open) {
       return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
     }
-    await baseLabelAudit.recordReport({ documentId: document.id, ...change }, user.id);
+    await labelJournal.recordBaseLabelReport({ documentId: document.id, ...change }, user.id);
     // The change reaches the Document Server through the editor's websocket,
     // which may come after this request: until then, it has nothing to save.
     let outcome = await requestForceSave(commands, document.key);
@@ -194,9 +211,25 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
-  registerDocumentServerRoutes(app, config, { baseLabels, audit: baseLabelAudit, editingSessions });
+  registerDocumentServerRoutes(app, config, { journal: labelJournal, editingSessions });
 
   return app;
+}
+
+function readPortionChange(body: unknown): { portion: string; before: PortionState; after: PortionState } | null {
+  if (typeof body !== 'object' || body === null || !('portion' in body) || !('before' in body) || !('after' in body)) {
+    return null;
+  }
+  const { portion, before, after } = body;
+  const state = (value: unknown): PortionState | null => {
+    if (typeof value !== 'object' || value === null || !('label' in value) || typeof value.label !== 'string' || !('version' in value)) {
+      return null;
+    }
+    const { version } = value;
+    return version === null || Number.isInteger(version) ? { label: value.label, version: version === null ? null : Number(version) } : null;
+  };
+  const [stateBefore, stateAfter] = [state(before), state(after)];
+  return typeof portion === 'string' && stateBefore !== null && stateAfter !== null ? { portion, before: stateBefore, after: stateAfter } : null;
 }
 
 function readBaseLabelChange(body: unknown): { before: string | null; after: string | null } | null {

@@ -63,7 +63,6 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const documentId = editor.status === 'loaded' ? editor.value.documentId : null;
   const userId = editor.status === 'loaded' ? editor.value.userId : null;
   const othersLocks = usePortionLocks(documentId, userId);
-  const change = usePortionChange(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
   const policy = labelList[0]?.policy ?? null;
@@ -74,6 +73,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // Until the author picks one, the base label is the least restrictive.
   const storedBaseLabelCode = documentState?.baseLabelCode ?? null;
   const baseLabelCode = storedBaseLabelCode ?? labelList[0]?.code ?? null;
+  const change = usePortionChange(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh, baseLabelCode);
   // Lowering the base label is reserved to administrators cleared for it.
   // Until the choices for the current label are known, only it is offered.
   const documentLoaded = documentState !== null;
@@ -122,7 +122,8 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     }
     const current = await refresh();
     const result = await insertPortion(
-      { label, text, baseLabelCode, existingLabelCodes: current.portions.map((portion) => portion.labelCode) },
+      { label, text },
+      { baseLabelCode, portionLabelCodes: current.portions.map((portion) => portion.labelCode) },
       envelopes.value,
     );
     await refresh();
@@ -218,7 +219,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
                 portionId: change.changing.portion.id,
                 form: (
                   <PortionForm
-                    labels={[change.changing.label]}
+                    labels={change.changing.choices}
                     purpose={{ kind: 'change', labelCode: change.changing.label.code, text: change.changing.text, onCancel: change.cancel }}
                     onSubmit={change.save}
                   />
