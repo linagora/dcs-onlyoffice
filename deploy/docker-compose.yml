@@ -5,7 +5,10 @@ x-kas-uri: &kas-uri https://tdf.${DOMAIN}/kas
 
 services:
   onlyoffice:
-    image: onlyoffice/documentserver:9.4.0.1
+    # ONLYOFFICE Docs Community Edition, with the change that
+    # deploy/onlyoffice/Dockerfile explains.
+    build: ./onlyoffice
+    image: dcs/onlyoffice:dev
     environment:
       JWT_ENABLED: "true"
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}

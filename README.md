@@ -98,7 +98,7 @@ flowchart LR
 | `plugin` | Labelling panel inside the editor | Preact, Vite, ONLYOFFICE plugin API, OpenTDF web SDK |
 | `policy` | Reads SPIF files, validates labels, renders markings, computes the document label and its ADatP-4778.2 part, keeps the clearance directory, makes access decisions and derives OpenTDF's attributes | Node.js, Fastify, PostgreSQL |
 | `opentdf-provisioning` | One-shot job: creates the KAS's hybrid key in OpenTDF's key registry, then applies to OpenTDF the attributes and subject mappings that the policy service derives, with an IdP client that OpenTDF makes an administrator | Node.js |
-| ONLYOFFICE Docs | Document editing and co-editing | ONLYOFFICE Docs 9.4 Community Edition |
+| ONLYOFFICE Docs | Document editing and co-editing | ONLYOFFICE Docs 9.4 Community Edition, with one change (`deploy/onlyoffice/Dockerfile`) |
 | OpenTDF | Key access and attribute-based access control; resolves each person's clearances from the clearance directory | OpenTDF platform 0.27 |
 | Reverse proxy and IdP | Local TLS and fictional accounts in the `standalone` profile | Caddy, LemonLDAP::NG |
 
