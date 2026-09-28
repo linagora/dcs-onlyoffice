@@ -1,0 +1,15 @@
+# The policy service signs the document label binding at each save
+
+The ADatP-4778.2 binding of the document label is signed on the server, not by the author: its signature covers package parts that every save rewrites, such as `docProps/core.xml`, so only a party that receives the saved file can sign it, and the editor never holds that file. The portal receives every save from the Document Server; before storing it, it has the policy service compute the document label again from the stored base label and portion labels, replace a different one, and sign the binding with ECDSA P-256 and SHA-256, the profile's mandatory algorithm, over SHA-384 digests. The policy service holds the key because it is the authority on labels; the portal only brings the parts to sign.
+
+## Considered Options
+
+- **The author's browser signs**: the panel sees the document model, not the package parts the signature covers, and any later save would break the signature.
+- **The portal signs with its own key**: simpler, but it would vouch for labels it does not compute.
+- **An unsigned binding**, which the profile allows: other tools could not tell a label written by the platform from one written by hand.
+
+## Consequences
+
+- A signature proves that the platform computed and bound the label when it stored the file, not who wrote the content.
+- The demonstrator signs with a self-signed certificate that `init-env.sh` generates; a deployment would use a certificate from its PKI.
+- Files saved before signing existed get a signature at their next save.
