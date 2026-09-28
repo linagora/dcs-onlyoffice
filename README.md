@@ -43,7 +43,8 @@ The stack runs with Docker Compose: ONLYOFFICE Docs Community Edition, the OpenT
 - **Labelling panel.** It shows the signed-in person, the document label and every protected portion, and highlights the portion that holds the cursor. It speaks English or French, following the editor's language.
 - **Base label.** The author gives the document's unprotected content a base label, which decides who may open the document. Anyone may raise it; only cleared administrators are offered lower ones.
 - **Changing a portion.** An author who can read a protected portion changes its text and its portion label from the panel, under a portion lock that one author holds at a time. The panel takes the lock from the policy service, renews it while its edit form stays open, and releases it once the change is saved or dropped. The labels offered are those the author's clearance allows that do not lower the current one; lower ones only to an administrator cleared for it. Co-authors see the portion being changed, with the author's name, then its new version. The file keeps only the latest envelope, and the portion version counts the changes.
-- **Page marking.** The document label's marking, centred, in bold and in its colour, at the top and the bottom of every page. The panel writes it with the document label, after an insertion or a new base label, in a locked content control of its own that opens every header and closes every footer, first page and even pages included; the rest of a template's header and footer stays. An author whose panel finds the page marking missing, moved, changed by hand or stale, in a document labelled before page markings existed for instance, writes it again.
+- **Deleting a portion.** Under the same lock, an author who can read a protected portion deletes it from the panel once they confirm. One editor command removes its placeholder and its part, and writes the document label and the page marking again without it; co-authors' panels drop it.
+- **Page marking.** The document label's marking, centred, in bold and in its colour, at the top and the bottom of every page. The panel writes it with the document label, after an insertion, a change, a deletion or a new base label, in a locked content control of its own that opens every header and closes every footer, first page and even pages included; the rest of a template's header and footer stays. An author whose panel finds the page marking missing, moved, changed by hand or stale, in a document labelled before page markings existed for instance, writes it again.
 - **Co-editing.** Portions and the document label reach co-authors in real time, and concurrent insertions converge to the right label.
 
 ### For readers
@@ -57,7 +58,7 @@ The stack runs with Docker Compose: ONLYOFFICE Docs Community Edition, the OpenT
 
 - **Clearance administration.** Members of the `dcs-maquette-admin` group see and edit every clearance on a portal page, among the choices the security policy offers. OpenTDF applies a change, a revocation for instance, at the next key request.
 - **Lowering a label.** Only administrators whose clearance allows the current base label, or the current portion label, are offered lower ones.
-- **Journal of label changes.** The portal logs every change of a base label or a portion made in the panel, with the person who made it, the labels and, for a portion, its versions; and every save that lowers a label in clear, with the people who held a configuration for the editing session. The journal never holds a portion's text: `docker compose logs portal | grep -E 'Base label|Portion'`.
+- **Journal of label changes.** The portal logs every change of a base label or a portion and every deletion of a portion made in the panel, with the person who made it, the labels and, for a portion, its versions; and every save that lowers a label in clear or removes a portion, with the people who held a configuration for the editing session. The journal never holds a portion's text: `docker compose logs portal | grep -E 'Base label|Portion'`.
 
 ### Portal
 
@@ -293,7 +294,7 @@ The CI runs the type checks and the API tests, then starts the `standalone` stac
 
 ## Roadmap
 
-Iteration 4 is in progress: changing a portion's text and label, page markings, the journal of label changes and the signed ADatP-4778 binding are done; deleting portions and checking the signature of stored files come next.
+Iteration 4 is in progress: changing a portion's text and label, deleting portions, page markings, the journal of label changes and the signed ADatP-4778 binding are done; checking the signature of stored files comes next.
 
 | Iteration | Scope | Status |
 | --- | --- | --- |
