@@ -386,13 +386,14 @@ export function usePortionChange(documentId: string | null, envelopes: EnvelopeC
         setChanging({ ...change, leaseMs: outcome.leaseMs });
         return null;
       };
+      const run = async (): Promise<void> => {
+        setNotice(await take());
+      };
       setNotice(null);
-      take()
-        .then(setNotice)
-        .catch((error: unknown) => {
-          logProblem('Taking a portion lock', error);
-          setNotice({ portionId, message: messages.lockFailed(describeError(error)) });
-        });
+      run().catch((error: unknown) => {
+        logProblem('Taking a portion lock', error);
+        setNotice({ portionId, message: messages.lockFailed(describeError(error)) });
+      });
     },
     [documentId, refresh],
   );
