@@ -187,6 +187,23 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.code(204).send();
   });
 
+  // The panel reports each portion it deletes, which the portal logs with the
+  // person who deleted it.
+  app.post<{ Params: DocumentParams }>('/documents/:id/portion-deletion', async (request, reply) => {
+    const document = await findDocument(config.documentsDirectory, request.params.id);
+    const deletion = readPortionDeletion(request.body);
+    if (document === null || deletion === null) {
+      return reply.code(document === null ? 404 : 400).send({ error: document === null ? 'Document not found' : 'Expected { portion, before }' });
+    }
+    const { user } = requireSession(request);
+    const decision = await documentAccess.decideOne(user, document);
+    if (!decision.open) {
+      return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
+    }
+    labelJournal.recordPortionDeletion({ documentId: document.id, ...deletion }, user.id);
+    return reply.code(204).send();
+  });
+
   // The panel reports the base label changes it makes, which the portal logs
   // with the person who made them, and saves the document at once: until
   // then, whoever opens it would still be checked against the stored label.
@@ -226,15 +243,25 @@ function readPortionChange(body: unknown): { portion: string; before: PortionSta
     return null;
   }
   const { portion, before, after } = body;
-  const state = (value: unknown): PortionState | null => {
-    if (typeof value !== 'object' || value === null || !('label' in value) || typeof value.label !== 'string' || !('version' in value)) {
-      return null;
-    }
-    const { version } = value;
-    return version === null || Number.isInteger(version) ? { label: value.label, version: version === null ? null : Number(version) } : null;
-  };
-  const [stateBefore, stateAfter] = [state(before), state(after)];
+  const [stateBefore, stateAfter] = [readPortionState(before), readPortionState(after)];
   return typeof portion === 'string' && stateBefore !== null && stateAfter !== null ? { portion, before: stateBefore, after: stateAfter } : null;
+}
+
+function readPortionDeletion(body: unknown): { portion: string; before: PortionState } | null {
+  if (typeof body !== 'object' || body === null || !('portion' in body) || !('before' in body)) {
+    return null;
+  }
+  const { portion } = body;
+  const before = readPortionState(body.before);
+  return typeof portion === 'string' && before !== null ? { portion, before } : null;
+}
+
+function readPortionState(value: unknown): PortionState | null {
+  if (typeof value !== 'object' || value === null || !('label' in value) || typeof value.label !== 'string' || !('version' in value)) {
+    return null;
+  }
+  const { version } = value;
+  return version === null || Number.isInteger(version) ? { label: value.label, version: version === null ? null : Number(version) } : null;
 }
 
 function readBaseLabelChange(body: unknown): { before: string | null; after: string | null } | null {

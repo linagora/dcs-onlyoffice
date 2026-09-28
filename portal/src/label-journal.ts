@@ -27,12 +27,19 @@ export interface PortionChange {
   after: PortionState;
 }
 
+// A protected portion the panel deleted, with its last label and version.
+export interface PortionDeletion {
+  documentId: string;
+  portion: string;
+  before: PortionState;
+}
+
 // The journal of label changes, in the portal's log. Any editor can change a
 // label in the file, and the panel offers lower ones only to administrators:
-// the portal logs every lowering. The panel reports its own changes, with the
-// person who made them; a save that lowers a label is logged too, with the
-// users of its editing session, whatever made the change. Removing the base
-// label counts as lowering it.
+// the portal logs every lowering. The panel reports its own changes and
+// deletions, with the person who made them; a save that lowers a label or
+// removes a portion is logged too, with the users of its editing session,
+// whatever made the change. Removing the base label counts as lowering it.
 export class LabelJournal {
   #policyUrl: string;
   #log: FastifyBaseLogger;
@@ -52,14 +59,21 @@ export class LabelJournal {
     this.#recordReport({ ...change, user }, lowering, { changed: 'Portion changed in the panel', lowered: 'Portion label lowered in the panel' });
   }
 
+  recordPortionDeletion(deletion: PortionDeletion, user: string): void {
+    this.#log.info({ ...deletion, user }, 'Portion deleted in the panel');
+  }
+
   // What a save changed in the labels in clear of a stored file: its base
-  // label, and the labels of the portions it already held.
+  // label, and the portions it already held, one of which is removed with
+  // its placeholder, whatever becomes of its part.
   async recordSave(documentId: string, before: FileLabels, after: FileLabels, sessionUsers: string[]): Promise<void> {
     const baseLowering = await this.#lowering(before.base, after.base);
     this.#recordSaved({ documentId, before: before.base, after: after.base, sessionUsers }, baseLowering, 'Base label');
-    for (const [portion, labels] of after.portions) {
-      const previous = before.portions.get(portion);
-      if (previous !== undefined) {
+    for (const [portion, previous] of before.portions) {
+      const labels = after.portions.get(portion) ?? { part: null, tag: null };
+      if (previous.tag !== null && labels.tag === null) {
+        this.#log.warn({ documentId, portion, before: previous, after: labels, sessionUsers }, 'Portion removed');
+      } else if (after.portions.has(portion)) {
         const lowerings = await Promise.all([this.#lowering(previous.part, labels.part), this.#lowering(previous.tag, labels.tag)]);
         const lowering = lowerings.includes(true) ? true : lowerings.includes(null) ? null : false;
         this.#recordSaved({ documentId, portion, before: previous, after: labels, sessionUsers }, lowering, 'Portion label');
