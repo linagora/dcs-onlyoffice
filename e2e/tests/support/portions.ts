@@ -48,10 +48,15 @@ export async function shownPortions(reader: Page): Promise<ShownPortion[]> {
   return shown.sort((left, right) => left.marking.localeCompare(right.marking));
 }
 
-export async function storedDocx(page: Page, documentId: string): Promise<DocxInspection> {
+// A document's stored file, as its download gives it.
+export async function storedFile(page: Page, documentId: string): Promise<Buffer> {
   const response = await browserFetch(page, `/documents/${documentId}/download`);
   expect(response.status).toBe(200);
-  return inspectDocx(response.body);
+  return response.body;
+}
+
+export async function storedDocx(page: Page, documentId: string): Promise<DocxInspection> {
+  return inspectDocx(await storedFile(page, documentId));
 }
 
 // Leaves the editor on every page that has the document open, then waits for

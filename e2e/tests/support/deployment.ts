@@ -63,6 +63,12 @@ export function portionJournal(since: Date, message: string, portionId: string):
   return portalLogEntries(since).filter((entry) => field(entry, 'msg') === message && field(entry, 'portion') === portionId);
 }
 
+// The entries of the portal's log about a document since `since`, with the
+// given message.
+export function documentLogEntries(since: Date, message: string, documentId: string): unknown[] {
+  return portalLogEntries(since).filter((entry) => field(entry, 'msg') === message && field(entry, 'documentId') === documentId);
+}
+
 // Fails with docker's own message.
 function compose(...args: string[]): string {
   return execFileSync('docker', ['compose', ...args], { cwd: COMPOSE_DIRECTORY, stdio: 'pipe', encoding: 'utf8' });
