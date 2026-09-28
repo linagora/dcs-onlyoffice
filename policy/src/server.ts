@@ -1,4 +1,4 @@
-import { fastify, type FastifyInstance } from 'fastify';
+import { fastify, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { accessDecision } from './access.ts';
 import { readOriginatorLabel, reviewDateFor, serializeOriginatorLabel } from './adatp4774.ts';
 import { DEFAULT_DOCUMENT_PARTS, serializeDocumentBinding } from './adatp4778.ts';
@@ -17,12 +17,15 @@ import {
   validateLabel,
 } from './labels.ts';
 import { type Marking, renderMarking } from './marking.ts';
-import { isStringList, unknownArray } from './guards.ts';
+import { isStringList, readTextField, unknownArray } from './guards.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
 import { computeDocumentLabel, isMoreRestrictive, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
+import { PortionLocks, registerPortionLocks } from './portion-locks.ts';
 import { loadPolicies } from './spif/reader.ts';
+
+const DEFAULT_PORTION_LOCK_LEASE_MS = 5 * 60 * 1000;
 
 export interface PolicyServerOptions {
   spifDirectory: string;
@@ -32,6 +35,8 @@ export interface PolicyServerOptions {
   markingLanguage?: string;
   reviewPeriodYears?: number;
   rollupRule?: RollupRule;
+  // How long a portion lock lasts unless its holder renews it.
+  portionLockLeaseMs?: number;
   now?: () => Date;
   logger?: boolean;
 }
@@ -97,6 +102,22 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
+  // The caller's valid clearance under a policy, null without one.
+  const callerClearance = async (request: FastifyRequest, policy: SecurityPolicy): Promise<ClearanceTerms | null> => {
+    const email = callerEmail(request);
+    return clearanceDirectory === undefined || email === null ? null : currentClearanceOf(clearanceDirectory.store, email, policy.name, now());
+  };
+
+  registerPortionLocks(
+    app,
+    new PortionLocks(options.portionLockLeaseMs ?? DEFAULT_PORTION_LOCK_LEASE_MS),
+    async (request, code) => {
+      const decided = labelOfCode(code);
+      return decided === null ? null : accessDecision(decided.policy, await callerClearance(request, decided.policy), decided.label);
+    },
+    now,
+  );
+
   app.get('/policies', async () => policies.map((policy) => ({ name: policy.name, oid: policy.oid })));
 
   // What the provisioning job applies to OpenTDF.
@@ -152,9 +173,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       if (currentCode !== null && current === null) {
         return reply.code(422).send({ error: `${currentCode} is not a valid label of ${policy.name}` });
       }
-      const email = callerEmail(request);
-      const clearance =
-        clearanceDirectory === undefined || email === null ? null : await currentClearanceOf(clearanceDirectory.store, email, policy.name, now());
+      const clearance = await callerClearance(request, policy);
       const keep =
         current === null || (callerIsAdministrator(request) && accessDecision(policy, clearance, current))
           ? (): boolean => true
@@ -435,11 +454,6 @@ function readCode(body: unknown): string | null {
 function readCodeList(body: unknown): (string | null)[] | null {
   const codes: unknown = typeof body === 'object' && body !== null && 'codes' in body ? body.codes : null;
   return Array.isArray(codes) && codes.every((code: unknown) => code === null || typeof code === 'string') ? codes : null;
-}
-
-function readTextField(body: unknown, name: string): string | null {
-  const value: unknown = typeof body === 'object' && body !== null && name in body ? (body as Record<string, unknown>)[name] : null; // SAFETY: object checked just before
-  return typeof value === 'string' ? value : null;
 }
 
 function toView(policy: SecurityPolicy, label: Label, language: string): LabelView {

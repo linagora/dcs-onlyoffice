@@ -3,12 +3,18 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import type { LabelView } from './policy.ts';
-import type { InsertionResult } from './portions.ts';
+import type { WriteResult } from './portions.ts';
+
+// A new portion, which the editor's menus may have asked for, or a change of
+// a portion, starting from its label and text.
+export type PortionFormPurpose =
+  | { kind: 'insertion'; requested: boolean }
+  | { kind: 'change'; labelCode: string; text: string; onCancel: () => void };
 
 export interface PortionFormProps {
   labels: LabelView[];
-  insertionRequested: boolean;
-  onInsert: (label: LabelView, text: string) => Promise<InsertionResult>;
+  purpose: PortionFormPurpose;
+  onSubmit: (label: LabelView, text: string) => Promise<WriteResult>;
 }
 
 // Every change of a portion sends its whole part through co-editing, twice:
@@ -17,22 +23,23 @@ const TEXT_LIMIT = 20_000;
 
 // Protected text is typed here, never in the document body: text typed in the
 // body has already reached the co-editing server in clear.
-export function PortionForm({ labels, insertionRequested, onInsert }: PortionFormProps): JSX.Element {
-  const [code, setCode] = useState<string | null>(null);
-  const [text, setText] = useState('');
+export function PortionForm({ labels, purpose, onSubmit }: PortionFormProps): JSX.Element {
+  const [code, setCode] = useState<string | null>(purpose.kind === 'change' ? purpose.labelCode : null);
+  const [text, setText] = useState(purpose.kind === 'change' ? purpose.text : '');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const selected = labels.find((label) => label.code === code) ?? null;
   // Characters, not UTF-16 code units: an emoji counts once.
   const tooLong = Array.from(text).length > TEXT_LIMIT;
   const textArea = useRef<HTMLTextAreaElement>(null);
+  const focused = purpose.kind === 'change' || purpose.requested;
 
   useEffect(() => {
-    if (insertionRequested) {
+    if (focused) {
       textArea.current?.scrollIntoView({ block: 'nearest' });
       textArea.current?.focus();
     }
-  }, [insertionRequested]);
+  }, [focused]);
 
   const submit = async (event: Event): Promise<boolean> => {
     event.preventDefault();
@@ -41,21 +48,21 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
     }
     setBusy(true);
     setFailure(null);
-    const result = await onInsert(selected, text).catch((error: unknown): InsertionResult => {
-      logProblem('Inserting a portion', error);
-      return { status: 'not-inserted' };
+    const result = await onSubmit(selected, text).catch((error: unknown): WriteResult => {
+      logProblem(purpose.kind === 'change' ? 'Changing a portion' : 'Inserting a portion', error);
+      return { status: 'not-written' };
     });
     setBusy(false);
-    setFailure(failureOf(result));
-    if (result.status === 'inserted') {
+    setFailure(writeFailureOf(purpose.kind, result));
+    if (result.status === 'written' && purpose.kind === 'insertion') {
       setText('');
     }
-    return result.status === 'inserted';
+    return result.status === 'written';
   };
 
   return (
     <form class="portion-form" onSubmit={submit}>
-      {insertionRequested && (
+      {purpose.kind === 'insertion' && purpose.requested && (
         <p class="hint" data-testid="insertion-requested">
           {messages.insertionHint}
         </p>
@@ -94,11 +101,18 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
           {messages.textTooLong(TEXT_LIMIT)}
         </p>
       )}
-      <button type="submit" disabled={busy || selected === null || text.trim() === '' || tooLong}>
-        {messages.insertButton}
-      </button>
+      <div class="form-actions">
+        <button type="submit" disabled={busy || selected === null || text.trim() === '' || tooLong}>
+          {purpose.kind === 'change' ? messages.saveChangeButton : messages.insertButton}
+        </button>
+        {purpose.kind === 'change' && (
+          <button type="button" disabled={busy} onClick={purpose.onCancel}>
+            {messages.cancelButton}
+          </button>
+        )}
+      </div>
       {failure !== null && (
-        <p class="error" data-testid="insertion-failure">
+        <p class="error" data-testid={purpose.kind === 'change' ? 'change-failure' : 'insertion-failure'}>
           {failure}
         </p>
       )}
@@ -106,13 +120,14 @@ export function PortionForm({ labels, insertionRequested, onInsert }: PortionFor
   );
 }
 
-function failureOf(result: InsertionResult): string | null {
+// What went wrong with an insertion or a change, null when it was written.
+export function writeFailureOf(kind: PortionFormPurpose['kind'], result: WriteResult): string | null {
   switch (result.status) {
-    case 'inserted':
+    case 'written':
       return null;
     case 'not-encrypted':
-      return messages.encryptionFailed(result.reason);
-    case 'not-inserted':
-      return messages.insertionFailed;
+      return kind === 'change' ? messages.changeEncryptionFailed(result.reason) : messages.encryptionFailed(result.reason);
+    case 'not-written':
+      return kind === 'change' ? messages.changeFailed : messages.insertionFailed;
   }
 }

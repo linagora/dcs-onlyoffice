@@ -133,6 +133,74 @@ export async function fetchDocumentLabel(request: DocumentLabelRequest): Promise
   return { label: body.label, moreRestrictivePortions: body.moreRestrictivePortions, xml: body.xml };
 }
 
+export interface LockHolder {
+  id: string;
+  name: string;
+}
+
+// A held lock comes with its lease and the last portion version a released
+// lock reported; a taken one with its holder, unknown when the lock lapsed.
+export type LockOutcome =
+  | { status: 'held'; leaseMs: number; version: number | null }
+  | { status: 'taken'; holder: LockHolder | null }
+  | { status: 'refused' };
+
+// Takes the lock of a portion for the signed-in person or, with `renewal`,
+// renews the one they still hold. The policy service gives it only when their
+// clearance allows the portion's label.
+export async function takePortionLock(documentId: string, portionId: string, labelCode: string, renewal: boolean): Promise<LockOutcome> {
+  const response = await post(lockUrl(documentId, portionId), { code: labelCode, renewal });
+  const body: unknown = response.status === 200 || response.status === 409 ? await response.json() : null;
+  if (response.status === 200 && typeof body === 'object' && body !== null && 'leaseMs' in body && typeof body.leaseMs === 'number') {
+    const version = 'version' in body && typeof body.version === 'number' ? body.version : null;
+    return { status: 'held', leaseMs: body.leaseMs, version };
+  }
+  if (response.status === 409 && typeof body === 'object' && body !== null && 'holder' in body && (body.holder === null || isLockHolder(body.holder))) {
+    return { status: 'taken', holder: body.holder };
+  }
+  if (response.status === 403) {
+    return { status: 'refused' };
+  }
+  throw new Error(`Taking the portion lock answered ${response.status}`);
+}
+
+// Releases a lock; after a change, with the version the change wrote.
+export async function releasePortionLock(documentId: string, portionId: string, version: number | null): Promise<void> {
+  const response = await post(`${lockUrl(documentId, portionId)}/release`, version === null ? {} : { version });
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`Releasing the portion lock answered ${response.status}`);
+  }
+}
+
+// Releases a lock as the panel goes away, when an ordinary request could be
+// cut short.
+export function releasePortionLockOnLeave(documentId: string, portionId: string): void {
+  navigator.sendBeacon(`${lockUrl(documentId, portionId)}/release`, new Blob(['{}'], { type: 'application/json' }));
+}
+
+// Who holds each locked portion of a document, by portion id.
+export async function fetchPortionLocks(documentId: string): Promise<ReadonlyMap<string, LockHolder>> {
+  const body = await getJson(`${RELAY}/documents/${encodeURIComponent(documentId)}/locks`);
+  if (!Array.isArray(body)) {
+    throw new Error('Unexpected lock list');
+  }
+  const locks = new Map<string, LockHolder>();
+  for (const entry of body) {
+    if (typeof entry === 'object' && entry !== null && 'portion' in entry && typeof entry.portion === 'string' && 'holder' in entry && isLockHolder(entry.holder)) {
+      locks.set(entry.portion, entry.holder);
+    }
+  }
+  return locks;
+}
+
+function lockUrl(documentId: string, portionId: string): string {
+  return `${RELAY}/documents/${encodeURIComponent(documentId)}/portions/${encodeURIComponent(portionId)}/lock`;
+}
+
+function isLockHolder(value: unknown): value is LockHolder {
+  return typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string' && 'name' in value && typeof value.name === 'string';
+}
+
 async function getJson(url: string): Promise<unknown> {
   const response = await fetch(url, { credentials: 'same-origin' });
   if (!response.ok) {

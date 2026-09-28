@@ -5,46 +5,11 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import type { Clearance } from '../src/directory/clearance.ts';
-import type { ClearanceStore } from '../src/directory/store.ts';
 import { buildPolicyServer } from '../src/server.ts';
+import { MemoryClearanceStore } from './clearance-store.ts';
 
 const DEMO_SPIFS = path.join(import.meta.dirname, '..', '..', 'deploy', 'spif');
 const DEMO_SEEDS = path.join(import.meta.dirname, '..', '..', 'deploy', 'directory', 'seeds');
-
-// Stands for PostgreSQL: remembers what the service adds, and finds it again.
-class RecordingStore implements ClearanceStore {
-  #added: Clearance[] = [];
-
-  get added(): Clearance[] {
-    return this.#added;
-  }
-
-  async prepare(): Promise<void> {}
-
-  async addMissing(clearances: Clearance[]): Promise<number> {
-    this.#added.push(...clearances);
-    return clearances.length;
-  }
-
-  async clearanceOf(email: string, policy: string): Promise<Clearance | null> {
-    return this.#added.find((clearance) => clearance.email === email && clearance.policy === policy) ?? null;
-  }
-
-  async list(): Promise<Clearance[]> {
-    return [...this.#added];
-  }
-
-  async update(clearance: Clearance): Promise<boolean> {
-    const index = this.#added.findIndex((entry) => entry.email === clearance.email && entry.policy === clearance.policy);
-    if (index === -1) {
-      return false;
-    }
-    this.#added[index] = clearance;
-    return true;
-  }
-
-  async close(): Promise<void> {}
-}
 
 async function seedFolder(clearances: unknown[]): Promise<string> {
   const folder = await mkdtemp(path.join(tmpdir(), 'dcs-seed-'));
@@ -53,7 +18,7 @@ async function seedFolder(clearances: unknown[]): Promise<string> {
 }
 
 async function seededClearances(folder: string): Promise<Clearance[]> {
-  const store = new RecordingStore();
+  const store = new MemoryClearanceStore();
   const server = await buildPolicyServer({ spifDirectory: DEMO_SPIFS, clearanceDirectory: { store, seedFolder: folder } });
   await server.close();
   return store.added;
@@ -126,7 +91,7 @@ describe('labels a clearance allows', () => {
   before(async () => {
     server = await buildPolicyServer({
       spifDirectory: DEMO_SPIFS,
-      clearanceDirectory: { store: new RecordingStore(), seedFolder: DEMO_SEEDS },
+      clearanceDirectory: { store: new MemoryClearanceStore(), seedFolder: DEMO_SEEDS },
       now: (): Date => new Date('2026-09-26T12:00:00Z'),
     });
   });
@@ -175,7 +140,7 @@ describe('base labels a caller may set', () => {
   before(async () => {
     server = await buildPolicyServer({
       spifDirectory: DEMO_SPIFS,
-      clearanceDirectory: { store: new RecordingStore(), seedFolder: DEMO_SEEDS },
+      clearanceDirectory: { store: new MemoryClearanceStore(), seedFolder: DEMO_SEEDS },
       now: (): Date => new Date('2026-09-26T12:00:00Z'),
     });
   });
@@ -264,7 +229,7 @@ describe('clearance directory administration', () => {
   before(async () => {
     server = await buildPolicyServer({
       spifDirectory: DEMO_SPIFS,
-      clearanceDirectory: { store: new RecordingStore(), seedFolder: DEMO_SEEDS },
+      clearanceDirectory: { store: new MemoryClearanceStore(), seedFolder: DEMO_SEEDS },
       directoryAdministrationSecret: SECRET,
     });
   });

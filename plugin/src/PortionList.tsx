@@ -1,7 +1,7 @@
 import type { JSX } from 'preact';
 import { messages } from './messages.ts';
 import type { LabelView } from './policy.ts';
-import type { StoredPortion } from './portions.ts';
+import type { PortionChange, StoredPortion } from './portions.ts';
 import type { PortionReading } from './readings.ts';
 
 export interface PortionListProps {
@@ -11,9 +11,29 @@ export interface PortionListProps {
   labels: LabelView[];
   activePortionId: string | null;
   onSelect: (portion: StoredPortion) => void;
+  // What to say next to a portion, by portion id: who is changing it, or why
+  // a change of it failed.
+  notices: ReadonlyMap<string, string>;
+  // Portions whose lock someone else holds.
+  lockedByOthers: ReadonlySet<string>;
+  // Offered on the portions their reader opened; null when no change can
+  // start, in the read-only editor or while another change goes on.
+  onChangeRequest: ((change: PortionChange) => void) | null;
+  // The form of the portion being changed, shown in its place.
+  changeForm: { portionId: string; form: JSX.Element } | null;
 }
 
-export function PortionList({ portions, readings, labels, activePortionId, onSelect }: PortionListProps): JSX.Element {
+export function PortionList({
+  portions,
+  readings,
+  labels,
+  activePortionId,
+  onSelect,
+  notices,
+  lockedByOthers,
+  onChangeRequest,
+  changeForm,
+}: PortionListProps): JSX.Element {
   return (
     <section class="portions" aria-labelledby="portions-title">
       <h2 id="portions-title">{messages.portionsTitle}</h2>
@@ -25,6 +45,13 @@ export function PortionList({ portions, readings, labels, activePortionId, onSel
             const reading = readings.get(portion.id) ?? null;
             const check = shownLabelOf(portion, reading, labels);
             const label = check.shown;
+            const notice = notices.get(portion.id) ?? null;
+            const opened = reading?.status === 'opened' ? reading : null;
+            const changing = changeForm !== null && changeForm.portionId === portion.id;
+            // A portion whose label in clear differs from its bound label keeps
+            // its warning until its labels agree again.
+            const changeable =
+              onChangeRequest !== null && opened !== null && label !== null && check.warning === null && !lockedByOthers.has(portion.id);
             return (
               <li
                 key={portion.id}
@@ -46,6 +73,23 @@ export function PortionList({ portions, readings, labels, activePortionId, onSel
                   </span>
                   <PortionBody reading={reading} labelWarning={check.warning} />
                 </button>
+                {notice !== null && (
+                  <p class="portion-notice warning" data-testid="portion-status">
+                    {notice}
+                  </p>
+                )}
+                {changing && changeForm.form}
+                {!changing && changeable && (
+                  <button
+                    type="button"
+                    class="portion-action"
+                    onClick={() => {
+                      onChangeRequest({ portion, label, text: opened.text });
+                    }}
+                  >
+                    {messages.changeButton}
+                  </button>
+                )}
               </li>
             );
           })}

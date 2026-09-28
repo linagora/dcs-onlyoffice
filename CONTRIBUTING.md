@@ -19,6 +19,8 @@ deploy/scripts/init-env.sh                                # writes deploy/.env
 pnpm --filter @dcs/e2e exec playwright install chromium firefox
 ```
 
+A `deploy/.env` created before portion locks existed lacks `PORTION_LOCK_LEASE_SECONDS=20`, which the test of an abandoned lock needs: add it, then restart the stack.
+
 Check your work with:
 
 ```sh

@@ -1,11 +1,31 @@
-import { useCallback, useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import type { BubbleContent } from './bubble-channel.ts';
 import { PortionBubble } from './bubble.ts';
 import { describeError, logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import { addInsertTabButton, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
-import { type DocumentLabelRequest, fetchDocumentLabel, type LabelView } from './policy.ts';
-import { type DocumentState, parsePortionTag, readDocumentState, type StoredPortion, writeDocumentLabel } from './portions.ts';
+import type { EnvelopeClient } from './envelopes.ts';
+import {
+  type DocumentLabelRequest,
+  fetchDocumentLabel,
+  fetchPortionLocks,
+  type LabelView,
+  type LockHolder,
+  releasePortionLock,
+  releasePortionLockOnLeave,
+  takePortionLock,
+} from './policy.ts';
+import { writeFailureOf } from './PortionForm.tsx';
+import {
+  changePortion,
+  type DocumentState,
+  parsePortionTag,
+  type PortionChange,
+  readDocumentState,
+  type StoredPortion,
+  writeDocumentLabel,
+  type WriteResult,
+} from './portions.ts';
 import type { PortionReader, PortionReading } from './readings.ts';
 
 export type Loadable<T> = { status: 'loading' } | { status: 'failed'; reason: string } | { status: 'loaded'; value: T };
@@ -276,4 +296,179 @@ export function usePortionBubble(pluginReady: Promise<PluginInfo>, content: Bubb
     }
     // contentKey stands for content, compared by value.
   }, [bubble, contentKey]);
+}
+
+// Who else holds the lock of each portion of the document, by portion id,
+// reread as often as the document.
+export function usePortionLocks(documentId: string | null, userId: string | null): ReadonlyMap<string, LockHolder> {
+  const [locks, setLocks] = useState<ReadonlyMap<string, LockHolder>>(new Map());
+  useEffect(() => {
+    if (documentId === null) {
+      return;
+    }
+    let cancelled = false;
+    const reread = async (): Promise<void> => {
+      const current = await fetchPortionLocks(documentId);
+      const others = new Map([...current].filter(([, holder]) => holder.id !== userId));
+      if (!cancelled) {
+        setLocks((previous) => (sameLocks(previous, others) ? previous : others));
+      }
+    };
+    const rereadInBackground = (): void => {
+      reread().catch((error: unknown) => {
+        logProblem('Reading the portion locks', error);
+      });
+    };
+    rereadInBackground();
+    const timer = setInterval(rereadInBackground, REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [documentId, userId]);
+  return locks;
+}
+
+function sameLocks(left: ReadonlyMap<string, LockHolder>, right: ReadonlyMap<string, LockHolder>): boolean {
+  return left.size === right.size && [...left].every(([portion, holder]) => right.get(portion)?.id === holder.id);
+}
+
+// What the panel says next to one portion.
+export interface PortionNotice {
+  portionId: string;
+  message: string;
+}
+
+export interface PortionChangeView {
+  // The portion changed in this panel, under its lock.
+  changing: PortionChange | null;
+  // Why the last change could not start or be saved.
+  notice: PortionNotice | null;
+  start: (change: PortionChange) => void;
+  save: (label: LabelView, text: string) => Promise<WriteResult>;
+  cancel: () => void;
+}
+
+// A change of a portion, under the portion lock the panel takes first, renews
+// at half its lease and releases once the change is saved or dropped, or as
+// the panel goes away.
+export function usePortionChange(documentId: string | null, envelopes: EnvelopeClient | null, refresh: () => Promise<DocumentState>): PortionChangeView {
+  const [changing, setChanging] = useState<(PortionChange & { leaseMs: number }) | null>(null);
+  const [notice, setNotice] = useState<PortionNotice | null>(null);
+  // The portion whose lock the panel holds, cleared before any release so
+  // that no renewal outlives it.
+  const holding = useRef<string | null>(null);
+
+  const start = useCallback(
+    (change: PortionChange): void => {
+      const portionId = change.portion.id;
+      const take = async (): Promise<PortionNotice | null> => {
+        if (documentId === null) {
+          return { portionId, message: messages.lockFailed('the document is unknown') };
+        }
+        const outcome = await takePortionLock(documentId, portionId, change.label.code, false);
+        if (outcome.status === 'taken') {
+          return { portionId, message: outcome.holder === null ? messages.lockLost : messages.beingChangedBy(outcome.holder.name) };
+        }
+        if (outcome.status === 'refused') {
+          return { portionId, message: messages.changeRefused };
+        }
+        // The change starts from what the document holds now, which must be
+        // the version the last change wrote: an editor that has not received
+        // it yet would write over it.
+        const current = (await refresh()).portions.find((portion) => portion.id === portionId) ?? null;
+        const version = current?.version ?? null;
+        if (current === null || version !== change.portion.version || (outcome.version !== null && (version ?? 1) < outcome.version)) {
+          await releasePortionLock(documentId, portionId, null);
+          return { portionId, message: messages.portionChangedMeanwhile };
+        }
+        holding.current = portionId;
+        setChanging({ ...change, leaseMs: outcome.leaseMs });
+        return null;
+      };
+      const run = async (): Promise<void> => {
+        setNotice(await take());
+      };
+      setNotice(null);
+      run().catch((error: unknown) => {
+        logProblem('Taking a portion lock', error);
+        setNotice({ portionId, message: messages.lockFailed(describeError(error)) });
+      });
+    },
+    [documentId, refresh],
+  );
+
+  useEffect(() => {
+    if (changing === null || documentId === null) {
+      return;
+    }
+    const { portion, label, leaseMs } = changing;
+    const renew = async (): Promise<void> => {
+      const outcome = await takePortionLock(documentId, portion.id, label.code, true);
+      if (holding.current === portion.id && outcome.status !== 'held') {
+        holding.current = null;
+        setChanging(null);
+        setNotice({ portionId: portion.id, message: messages.lockLost });
+      }
+    };
+    const timer = setInterval(() => {
+      if (holding.current === portion.id) {
+        renew().catch((error: unknown) => {
+          logProblem('Renewing a portion lock', error);
+        });
+      }
+    }, leaseMs / 2);
+    const leave = (): void => {
+      if (holding.current === portion.id) {
+        releasePortionLockOnLeave(documentId, portion.id);
+      }
+    };
+    window.addEventListener('pagehide', leave);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('pagehide', leave);
+    };
+  }, [changing, documentId]);
+
+  const release = async (portionId: string, version: number | null): Promise<void> => {
+    holding.current = null;
+    setChanging(null);
+    if (documentId !== null) {
+      await releasePortionLock(documentId, portionId, version);
+    }
+  };
+
+  // Whatever happens, the lock is released, with the version written when the
+  // change went through.
+  const save = async (label: LabelView, text: string): Promise<WriteResult> => {
+    if (changing === null) {
+      return { status: 'not-written' };
+    }
+    const { portion } = changing;
+    const write = async (): Promise<WriteResult> =>
+      envelopes === null ? { status: 'not-written' } : changePortion({ portion, label, text }, envelopes);
+    const result = await write().catch((error: unknown): WriteResult => {
+      logProblem('Changing a portion', error);
+      return { status: 'not-written' };
+    });
+    await release(portion.id, result.status === 'written' ? (portion.version ?? 1) + 1 : null).catch((error: unknown) => {
+      logProblem('Releasing a portion lock', error);
+    });
+    await refresh().catch((error: unknown) => {
+      logProblem('Rereading the document', error);
+    });
+    const failure = writeFailureOf('change', result);
+    setNotice(failure === null ? null : { portionId: portion.id, message: failure });
+    return result;
+  };
+
+  const cancel = (): void => {
+    if (changing !== null) {
+      release(changing.portion.id, null).catch((error: unknown) => {
+        logProblem('Releasing a portion lock', error);
+      });
+    }
+  };
+
+  return { changing, notice, start, save, cancel };
 }

@@ -187,10 +187,15 @@ interface BrowserResponse {
 
 // Requests go through the browser: it resolves the stack's host names and
 // carries the session cookie, which Playwright's Node-side client does not.
-export async function browserFetch(page: Page, url: string, method: 'GET' | 'POST' = 'GET'): Promise<BrowserResponse> {
+// A body, when given, goes as JSON.
+export async function browserFetch(page: Page, url: string, method: 'GET' | 'POST' = 'GET', body: unknown = null): Promise<BrowserResponse> {
   const result = await page.evaluate(
-    async ({ url, method }) => {
-      const response = await fetch(url, { method, credentials: 'same-origin' });
+    async ({ url, method, json }) => {
+      const response = await fetch(url, {
+        method,
+        credentials: 'same-origin',
+        ...(json === null ? {} : { headers: { 'Content-Type': 'application/json' }, body: json }),
+      });
       const bytes = new Uint8Array(await response.arrayBuffer());
       let binary = '';
       for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -198,7 +203,7 @@ export async function browserFetch(page: Page, url: string, method: 'GET' | 'POS
       }
       return { status: response.status, base64: btoa(binary) };
     },
-    { url, method },
+    { url, method, json: body === null ? null : JSON.stringify(body) },
   );
   return { status: result.status, body: Buffer.from(result.base64, 'base64') };
 }

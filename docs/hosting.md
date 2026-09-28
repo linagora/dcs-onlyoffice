@@ -40,6 +40,7 @@ Create `deploy/.env` with `deploy/scripts/init-env.sh`, which generates the secr
 | `OIDC_SCOPES` | `openid profile email groups` |
 | `OIDC_AUDIENCE` | only when access tokens do not carry `https://tdf.<DOMAIN>` in their audience |
 | `OPENTDF_PROVISIONER_CLIENT_SECRET` | the provisioning client's secret |
+| `PORTION_LOCK_LEASE_SECONDS` | remove the example's 20, meant for tests: an author then keeps a portion lock 5 minutes without renewing it |
 
 `deploy/.env` holds secrets: it is ignored by Git and must stay on the host.
 

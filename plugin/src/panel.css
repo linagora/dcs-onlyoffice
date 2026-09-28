@@ -161,3 +161,17 @@ legend,
   display: block;
   margin: 4px 0 0;
 }
+
+.portion-action {
+  margin: 4px 0 0 18px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.portion-item > .portion-notice {
+  display: block;
+  margin: 4px 0 0 18px;
+}

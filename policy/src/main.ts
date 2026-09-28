@@ -7,10 +7,16 @@ if (!isRollupRule(rollupRule)) {
   throw new Error(`ROLLUP_RULE must be one of ${ROLLUP_RULES.join(', ')}`);
 }
 
+const portionLockLeaseSeconds = Number(process.env.PORTION_LOCK_LEASE_SECONDS ?? '300');
+if (!Number.isInteger(portionLockLeaseSeconds) || portionLockLeaseSeconds <= 0) {
+  throw new Error('PORTION_LOCK_LEASE_SECONDS must be a positive number of seconds');
+}
+
 const options: PolicyServerOptions = {
   spifDirectory: process.env.SPIF_DIR ?? '/spif',
   rollupRule,
   markingLanguage: process.env.MARKING_LANGUAGE ?? 'fr',
+  portionLockLeaseMs: portionLockLeaseSeconds * 1000,
   logger: true,
 };
 // Without a database, the service runs without a clearance directory.
