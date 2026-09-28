@@ -47,6 +47,7 @@ services:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
       ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
       DIRECTORY_ADMINISTRATION_SECRET: ${DIRECTORY_ADMINISTRATION_SECRET:?set DIRECTORY_ADMINISTRATION_SECRET in .env}
+      BINDING_SIGNATURE_SECRET: ${BINDING_SIGNATURE_SECRET:?set BINDING_SIGNATURE_SECRET in .env}
       ONLYOFFICE_INTERNAL_URL: http://onlyoffice
       PORTAL_INTERNAL_URL: http://portal:3000
       DOCUMENTS_DIR: /data/documents
@@ -100,8 +101,12 @@ services:
       DIRECTORY_DB_PASSWORD: ${DIRECTORY_DB_PASSWORD:?set DIRECTORY_DB_PASSWORD in .env}
       DIRECTORY_SEED_DIR: /directory/seeds
       # Every container of the stack reaches this service: only the portal,
-      # which holds this secret, may change the clearance directory.
+      # which holds these secrets, may change the clearance directory and have
+      # bindings signed.
       DIRECTORY_ADMINISTRATION_SECRET: ${DIRECTORY_ADMINISTRATION_SECRET:?set DIRECTORY_ADMINISTRATION_SECRET in .env}
+      BINDING_SIGNATURE_SECRET: ${BINDING_SIGNATURE_SECRET:?set BINDING_SIGNATURE_SECRET in .env}
+      BINDING_SIGNING_KEY: ${BINDING_SIGNING_KEY:?set BINDING_SIGNING_KEY in .env}
+      BINDING_SIGNING_CERTIFICATE: ${BINDING_SIGNING_CERTIFICATE:?set BINDING_SIGNING_CERTIFICATE in .env}
     volumes:
       - ./spif:/spif:ro
       - ./directory/seeds:/directory/seeds:ro
