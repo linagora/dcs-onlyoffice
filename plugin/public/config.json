@@ -48,6 +48,9 @@
         "onChangeContentControl",
         "onFocusContentControl",
         "onBlurContentControl",
+        "onKeyDown",
+        "onClick",
+        "onTargetPositionChanged",
         "onContextMenuShow",
         "onContextMenuClick",
         "onToolbarMenuClick"

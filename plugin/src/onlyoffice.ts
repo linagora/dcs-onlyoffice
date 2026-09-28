@@ -15,21 +15,54 @@ export interface PluginInfo {
 
 type CommandCallback = (result: unknown) => void;
 
+// Called with -1 and the window's id when a window of the plugin is closed
+// with its close box or the Escape key; the plugin then closes the window
+// itself. The editor's runtime sends both values.
+type ButtonHandler = (id: unknown, windowId: unknown) => void;
+
 interface AscPlugin {
   guid?: string;
   init?: () => void;
-  button?: (id: number) => void;
+  button?: ButtonHandler;
   info?: PluginInfo;
   callCommand?: (command: () => unknown, isClose: boolean, isCalc: boolean, callback: CommandCallback) => void;
   executeMethod?: (name: string, parameters: unknown[], callback: CommandCallback) => boolean;
   attachEvent?: (name: string, handler: (payload: unknown) => void) => void;
+  detachEvent?: (name: string) => void;
   attachContextMenuClickEvent?: (id: string, handler: () => void) => void;
   attachToolbarMenuClickEvent?: (id: string, handler: () => void) => void;
+}
+
+// A window the editor shows for the plugin: one of the editor's dialogs, holding
+// an iframe of one of the plugin's pages, on the plugin's origin.
+export interface PluginWindowVariation {
+  // Relative to the panel's page.
+  url: string;
+  description: string;
+  isVisual: true;
+  isModal: boolean;
+  // Shown in the read-only editor too.
+  isViewer: boolean;
+  EditorsSupport: string[];
+  buttons: [];
+  size: [number, number];
+  // No title bar, close box or buttons.
+  isCustomWindow?: boolean;
+  // Placed next to the cursor, under it when there is room.
+  isTargeted?: boolean;
+}
+
+export interface PluginWindow {
+  id: string;
+  show: (variation: PluginWindowVariation) => void;
+  close: () => void;
 }
 
 interface AscRuntime {
   plugin?: AscPlugin;
   scope?: Record<string, unknown>;
+  // Installed by the editor when the plugin starts.
+  PluginWindow?: new () => PluginWindow;
 }
 
 declare global {
@@ -39,6 +72,7 @@ declare global {
 }
 
 let ready: Promise<PluginInfo> | null = null;
+let buttonHandler: ButtonHandler = () => {};
 
 // Must run before the editor answers the plugin's handshake, hence at module
 // load: a late `init` handler would never be called.
@@ -52,11 +86,27 @@ export function whenPluginReady(): Promise<PluginInfo> {
       plugin.init = () => {
         resolve(plugin.info ?? {});
       };
-      // Panel plugins have no buttons, but the runtime calls this handler.
-      plugin.button = () => {};
+      // The panel has no buttons, but its windows do.
+      plugin.button = (id, windowId) => {
+        buttonHandler(id, windowId);
+      };
     });
   }
   return ready;
+}
+
+export function onPluginButton(handler: ButtonHandler): void {
+  buttonHandler = handler;
+}
+
+export function offEditorEvent(name: string): void {
+  window.Asc?.plugin?.detachEvent?.(name);
+}
+
+// A window not shown yet, so that its page can be prepared for its id.
+export function newPluginWindow(): PluginWindow | null {
+  const PluginWindowClass = window.Asc?.PluginWindow;
+  return PluginWindowClass === undefined ? null : new PluginWindowClass();
 }
 
 // Events must also be listed in config.json for the editor to send them.

@@ -45,9 +45,16 @@ declare const Api: SandboxApi;
 declare const Asc: { scope: unknown };
 
 const PLUGIN_PAGE = '/plugin/index.html';
+const BUBBLE_PAGE = '/plugin/bubble.html';
 
 export function pluginPanel(page: Page): FrameLocator {
   return page.frameLocator('iframe[name="frameEditor"]').frameLocator(`iframe[src*="${PLUGIN_PAGE}"]`);
+}
+
+// The bubble: the window the panel opens next to the cursor when it shows a
+// portion.
+export function bubble(page: Page): FrameLocator {
+  return page.frameLocator('iframe[name="frameEditor"]').frameLocator(`iframe[src*="${BUBBLE_PAGE}"]`);
 }
 
 export async function pluginFrame(page: Page): Promise<Frame> {

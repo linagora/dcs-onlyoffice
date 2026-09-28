@@ -27,6 +27,7 @@ Vulnerabilities of ONLYOFFICE Docs, OpenTDF, LemonLDAP::NG or other dependencies
 These are known properties of the demonstrator, not vulnerabilities:
 
 - Nothing prevents a reader from copying the decrypted text of a portion from the labelling panel into the document body, where it is stored in clear and passes through the Document Server.
+- The window that shows a portion's text next to the cursor relies on plugin window options that ONLYOFFICE Docs does not document (`ShowWindow` with `isTargeted` and `isCustomWindow`), which an end-to-end test checks. To place and close it, the panel receives the keys pressed and the clicks made in the document, and keeps none of them. The editor sees the window's size, which grows with the text, as the envelope's size in the document already shows.
 - Unencrypted portions, written before encryption existed, keep their text base64-encoded in the DOCX; they can still be read, but no longer created.
 - Portions encrypted before the hybrid key, whose key a static RSA key of earlier versions wrapped, can no longer be read: the KAS no longer holds that key.
 - The KAS's private keys are wrapped with a root key kept in `deploy/.env`, not in a hardware security module.

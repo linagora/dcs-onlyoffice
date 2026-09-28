@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
+import type { BubbleContent } from './bubble-channel.ts';
+import { PortionBubble } from './bubble.ts';
 import { describeError, logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import { addInsertTabButton, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
@@ -233,4 +235,45 @@ function needsRetry(reading: PortionReading): boolean {
     return reading.boundLabel.status === 'unchecked' || reading.partLabel.status === 'unchecked';
   }
   return reading.status === 'failed' && reading.retry;
+}
+
+// The bubble: the text of the portion that holds the cursor, shown next to
+// it. The window only changes when what it shows changes, not at every
+// reading of the document. The hook only drives the editor, hence no return
+// value.
+export function usePortionBubble(pluginReady: Promise<PluginInfo>, content: BubbleContent | null): void {
+  const [bubble, setBubble] = useState<PortionBubble | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const created = new PortionBubble();
+    const wire = async (): Promise<void> => {
+      await pluginReady;
+      if (cancelled) {
+        return;
+      }
+      if (!created.attach()) {
+        logProblem('Showing portions at the cursor', new Error('The editor runtime offers no events'));
+      }
+      setBubble(created);
+    };
+    wire().catch((error: unknown) => {
+      logProblem('Showing portions at the cursor', error);
+    });
+    return () => {
+      cancelled = true;
+      created.detach();
+    };
+  }, [pluginReady]);
+  const contentKey = content === null ? null : JSON.stringify(content);
+  useEffect(() => {
+    if (bubble === null) {
+      return;
+    }
+    if (content === null) {
+      bubble.clear();
+    } else {
+      bubble.show(content);
+    }
+    // contentKey stands for content, compared by value.
+  }, [bubble, contentKey]);
 }
