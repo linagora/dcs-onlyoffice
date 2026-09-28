@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -8,6 +8,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import type { FastifyInstance } from 'fastify';
 import JSZip from 'jszip';
 import { buildPolicyServer } from '../src/server.ts';
+import { verifyWithXmlsec } from './xmlsec.ts';
 
 const DEMO_SPIFS = path.join(import.meta.dirname, '..', '..', 'deploy', 'spif');
 const TEMPLATE = path.join(import.meta.dirname, '..', '..', 'deploy', 'demo', 'documents', 'exercise-northwind.docx');
@@ -32,12 +33,6 @@ const DIFFUSION_RESTREINTE = 'DEMO-FR:2';
 interface Signed {
   part: string;
   xml: string;
-}
-
-interface XmlsecVerification {
-  status: number | null;
-  // "Manifests References (ok/all)", as xmlsec1 reports it.
-  manifest: string | null;
 }
 
 // What a signed binding declares besides its values.
@@ -178,54 +173,6 @@ describe('the signature of the document label binding', () => {
     };
   }
 
-  // Verifies a signed binding with xmlsec1, the independent verifier, against
-  // the certificate, with the package parts its Manifest references mapped to
-  // their pack:/// addresses. `alter` may change the extracted parts first.
-  async function verifyWithXmlsec(docx: Uint8Array, signed: Signed, alter: (directory: string) => Promise<void> = async () => {}): Promise<XmlsecVerification> {
-    const directory = await mkdtemp(path.join(tmpdir(), 'binding-parts-'));
-    try {
-      const zip = await JSZip.loadAsync(docx);
-      const binding = new DOMParser().parseFromString(signed.xml, 'text/xml');
-      const uris = Array.from(binding.getElementsByTagNameNS(SIGNATURE_NAMESPACE, 'Manifest'))
-        .flatMap((manifest) => Array.from(manifest.getElementsByTagNameNS(SIGNATURE_NAMESPACE, 'Reference')))
-        .map((reference) => reference.getAttribute('URI') ?? '');
-      const maps: string[] = [];
-      for (const uri of uris) {
-        const name = uri.replace('pack:///', '');
-        const target = path.join(directory, 'parts', name);
-        await mkdir(path.dirname(target), { recursive: true });
-        await writeFile(target, (await zip.file(name)?.async('uint8array')) ?? new Uint8Array());
-        maps.push(`--url-map:${uri}`, target);
-      }
-      await alter(path.join(directory, 'parts'));
-      await writeFile(path.join(directory, 'binding.xml'), signed.xml);
-      await writeFile(path.join(directory, 'certificate.pem'), certificate);
-      // xmlsec1 1.3 prints its Manifest report only when verbose; 1.2 always
-      // does, and knows no --verbose.
-      const verbose = /xmlsec1 1\.2\./.test(execFileSync('xmlsec1', ['--version'], { encoding: 'utf8' })) ? [] : ['--verbose'];
-      const result = spawnSync(
-        'xmlsec1',
-        [
-          '--verify',
-          ...verbose,
-          '--trusted-pem',
-          path.join(directory, 'certificate.pem'),
-          `--id-attr:Id`,
-          `${BINDING_NAMESPACE}:MetadataBinding`,
-          '--enabled-reference-uris',
-          'same-doc,remote',
-          ...maps,
-          path.join(directory, 'binding.xml'),
-        ],
-        { encoding: 'utf8' },
-      );
-      const report = /Manifests References \(ok\/all\): (\d+\/\d+)/.exec(`${result.stdout}${result.stderr}`);
-      return { status: result.status, manifest: report?.[1] ?? null };
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  }
-
   it('signs the binding first in its part, as xmlsec1 verifies against the certificate', async () => {
     const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
 
@@ -246,16 +193,16 @@ describe('the signature of the document label binding', () => {
       certificates: [certificate.replace(/-----(BEGIN|END) CERTIFICATE-----/g, '').replace(/\s/g, '')],
       metadataBindings: 1,
     });
-    const verification = await verifyWithXmlsec(docx, signed);
+    const verification = await verifyWithXmlsec(docx, signed.xml, certificate);
     const count = bindableParts(await JSZip.loadAsync(docx)).length;
-    assert.deepEqual(verification, { status: 0, manifest: `${count}/${count}` });
+    assert.deepEqual([verification.status, verification.manifest], [0, `${count}/${count}`]);
   });
 
   it('gives a binding that a part changed after signing no longer matches', async () => {
     const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
     const signed = signedOf((await sign(docx)).body);
 
-    const verification = await verifyWithXmlsec(docx, signed, async (parts) => {
+    const verification = await verifyWithXmlsec(docx, signed.xml, certificate, async (parts) => {
       const document = path.join(parts, 'word', 'document.xml');
       await writeFile(document, `${await readFile(document, 'utf8')}<!-- changed after signing -->`);
     });
@@ -274,7 +221,8 @@ describe('the signature of the document label binding', () => {
     const signed = signedOf(body);
     assert.match(signed.xml, /<slab:Classification>DIFFUSION RESTREINTE<\/slab:Classification>/);
     const count = bindableParts(await JSZip.loadAsync(docx)).length;
-    assert.deepEqual(await verifyWithXmlsec(docx, signed), { status: 0, manifest: `${count}/${count}` });
+    const verification = await verifyWithXmlsec(docx, signed.xml, certificate);
+    assert.deepEqual([verification.status, verification.manifest], [0, `${count}/${count}`]);
   });
 
   it('writes the binding again from the labels in clear, so that nothing written in it by hand gets signed', async () => {
@@ -323,7 +271,7 @@ describe('the signature of the document label binding', () => {
   it('leaves a document without a binding unsigned', async () => {
     const { statusCode, body } = await sign(new Uint8Array(await readFile(TEMPLATE)));
     assert.equal(statusCode, 200);
-    assert.deepEqual(body, { signed: null, replacement: null });
+    assert.deepEqual(body, { signed: null, parts: [], replacement: null });
   });
 
   it('finds a stored package whose binding it signed valid', async () => {

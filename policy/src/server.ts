@@ -17,6 +17,7 @@ import {
   parseLabelCode,
   validateLabel,
 } from './labels.ts';
+import { loadLabelMapping, mappedSensitivityLabel } from './label-mapping.ts';
 import { type Marking, renderMarking } from './marking.ts';
 import { isStringList, readTextField, unknownArray } from './guards.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
@@ -25,6 +26,7 @@ import { computeDocumentLabel, type DocumentLabelResult, isMoreRestrictive, type
 import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
 import { PortionLocks, registerPortionLocks } from './portion-locks.ts';
+import type { MappedSensitivityLabel } from './sensitivity-label.ts';
 import { loadPolicies } from './spif/reader.ts';
 
 const DEFAULT_PORTION_LOCK_LEASE_MS = 5 * 60 * 1000;
@@ -42,6 +44,9 @@ export interface PolicyServerOptions {
   rollupRule?: RollupRule;
   // How long a portion lock lasts unless its holder renews it.
   portionLockLeaseMs?: number;
+  // The label mapping of a Microsoft 365 tenant, which gives each stored
+  // document its sensitivity label; without it, none is written.
+  labelMappingFile?: string;
   now?: () => Date;
   logger?: boolean;
 }
@@ -92,6 +97,34 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       }
     }
     return null;
+  };
+
+  // A mapping pairs labels of the security policy without informative
+  // categories, which no sensitivity label reflects (ADR 0005).
+  const labelMapping =
+    options.labelMappingFile === undefined
+      ? null
+      : await loadLabelMapping(options.labelMappingFile, (code) => {
+          const found = labelOfCode(code);
+          if (found === null) {
+            return { ok: false, problem: 'is no label of the security policy' };
+          }
+          return found.label.categories.some(isInformative)
+            ? { ok: false, problem: 'has an informative category, which sensitivity labels leave out' }
+            : { ok: true, code: labelCode(found.policy, found.label) };
+        });
+
+  // What the label mapping gives a document label, null without a mapping.
+  const sensitivityLabelOf = (code: string | null): MappedSensitivityLabel | null => {
+    if (labelMapping === null) {
+      return null;
+    }
+    const found = code === null ? null : labelOfCode(code);
+    if (found === null) {
+      return { tenant: labelMapping.tenant, label: null };
+    }
+    const restricting = { ...found.label, categories: found.label.categories.filter((category) => !isInformative(category)) };
+    return mappedSensitivityLabel(labelMapping, labelCode(found.policy, restricting));
   };
 
   const leastRestrictiveLabel = (): { policy: SecurityPolicy; label: Label } | null => {
@@ -416,6 +449,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     registerPackageSignatures(app, {
       ...bindingSignature,
       now,
+      sensitivityLabelOf,
       codeOfLabelXml: (xml) => {
         const designated = readOriginatorLabel(xml);
         const found = designated === null ? null : designatedLabel(designated);
@@ -470,6 +504,11 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
   );
 
   return app;
+}
+
+// An informative category restricts nothing: no access rule reads it.
+function isInformative(category: LabelCategory): boolean {
+  return category.type === 'INFORMATIVE';
 }
 
 function labelFromCode(policy: SecurityPolicy, code: string): Label | null {

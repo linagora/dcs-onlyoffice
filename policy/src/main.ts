@@ -19,6 +19,11 @@ const options: PolicyServerOptions = {
   portionLockLeaseMs: portionLockLeaseSeconds * 1000,
   logger: true,
 };
+// Without a label mapping, stored documents get no sensitivity label.
+const labelMappingFile = process.env.LABEL_MAPPING_FILE ?? '';
+if (labelMappingFile !== '') {
+  options.labelMappingFile = labelMappingFile;
+}
 // Without a database, the service runs without a clearance directory.
 const directoryHost = process.env.DIRECTORY_DB_HOST ?? '';
 if (directoryHost !== '') {

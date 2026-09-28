@@ -1,0 +1,9 @@
+{
+  "tenant": "00000000-0000-0000-0000-000000000000",
+  "labels": {
+    "DEMO-FR:1": { "id": "10000000-0000-4000-8000-000000000001", "name": "DCS-Non-Protege" },
+    "DEMO-FR:2": { "id": "10000000-0000-4000-8000-000000000002", "name": "DCS-Diffusion-Restreinte-Standard" },
+    "DEMO-FR:2/2.1": { "id": "10000000-0000-4000-8000-000000000003", "name": "DCS-Diffusion-Restreinte-OTAN" },
+    "DEMO-FR:2/1.1": { "id": "10000000-0000-4000-8000-000000000004", "name": "DCS-Diffusion-Restreinte-Special-France" }
+  }
+}
