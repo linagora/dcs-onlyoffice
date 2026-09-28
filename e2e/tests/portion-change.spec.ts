@@ -35,9 +35,11 @@ test('a portion changed under its lock is shown being changed to a co-author, th
   const textbox = alicePortion.getByRole('textbox', { name: 'Portion text' });
   await expect(textbox).toHaveValue(before);
 
-  // bob sees who changes it, is offered no change and cannot take its lock.
+  // bob sees who changes it, is offered no change nor deletion and cannot
+  // take its lock.
   await expect(bobPortion.getByTestId('portion-status')).toHaveText('Being changed by Alice Martin.');
   await expect(bobPortion.getByRole('button', { name: 'Change', exact: true })).toHaveCount(0);
+  await expect(bobPortion.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   expect(await lockAnswer(bob, portion)).toBe(409);
 
   const after = markedText('Fictional paragraph after its change');
