@@ -67,7 +67,8 @@ export async function createDocumentFromTemplate(
 
 // A forced save keeps the editing session open, so the key must not change:
 // co-authors joining later would otherwise land in a separate session. Only a
-// save that ends the session moves the document to a new key.
+// save that ends the session moves the document to a new key, besides the
+// portal ending a session (moveDocumentToNewKey).
 export async function saveDocumentContent(
   directory: string,
   id: string,
@@ -82,10 +83,24 @@ export async function saveDocumentContent(
   await writeFile(temporaryPath, content);
   await rename(temporaryPath, current.filePath);
   if (kind === 'session-ended') {
-    const metadata = await readOrCreateMetadata(directory, id);
-    await writeMetadata(directory, id, { ...metadata, version: metadata.version + 1 });
+    await incrementVersion(directory, id);
   }
   return findDocument(directory, id);
+}
+
+// The document's next editing session gets a key that no earlier editor
+// configuration names.
+export async function moveDocumentToNewKey(directory: string, id: string): Promise<StoredDocument | null> {
+  if ((await findDocument(directory, id)) === null) {
+    return null;
+  }
+  await incrementVersion(directory, id);
+  return findDocument(directory, id);
+}
+
+async function incrementVersion(directory: string, id: string): Promise<void> {
+  const metadata = await readOrCreateMetadata(directory, id);
+  await writeMetadata(directory, id, { ...metadata, version: metadata.version + 1 });
 }
 
 async function listDocxIds(directory: string): Promise<string[]> {

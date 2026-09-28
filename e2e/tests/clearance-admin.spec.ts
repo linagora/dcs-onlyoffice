@@ -1,5 +1,5 @@
-import type { Locator, Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
+import { ALICE, ALICE_TERMS, CHLOE, CHLOE_TERMS, entryForm, saveTerms, shownTerms, yesterday } from './support/clearances.ts';
 import { DOMAIN } from './support/deployment.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
@@ -10,27 +10,6 @@ import { insertPortion, leaveAndWaitForSave, shownPortions } from './support/por
 const NON_PROTEGE = 'NON PROTÉGÉ';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 
-// What the page edits of an entry: its validity period as its first and
-// last days.
-interface Terms {
-  classification: string;
-  categories: string[];
-  validFrom: string;
-  validThrough: string;
-}
-
-// The demo seed's entries (deploy/directory/seeds/demo.json), which every test
-// restores.
-const ALICE = 'alice.martin@dcs.test';
-const ALICE_TERMS: Terms = {
-  classification: 'DIFFUSION RESTREINTE',
-  categories: ['Special Handling:SPECIAL FRANCE', 'Releasable To:NATO'],
-  validFrom: '2026-01-01',
-  validThrough: '2035-12-31',
-};
-const CHLOE = 'chloe.bernard@dcs.test';
-const CHLOE_TERMS: Terms = { classification: 'NON PROTEGE', categories: [], validFrom: '2026-01-01', validThrough: '2035-12-31' };
-
 // A write of alice's own terms: refused, it would change nothing either.
 const HARMLESS_WRITE = {
   email: ALICE,
@@ -39,40 +18,6 @@ const HARMLESS_WRITE = {
   validFrom: ALICE_TERMS.validFrom,
   validThrough: ALICE_TERMS.validThrough,
 };
-
-function entryForm(page: Page, email: string): Locator {
-  return page.getByRole('form', { name: `Clearance of ${email}` });
-}
-
-async function shownTerms(page: Page, email: string): Promise<Terms> {
-  const form = entryForm(page, email);
-  const categories: string[] = [];
-  for (const checkbox of await form.getByRole('checkbox').all()) {
-    if (await checkbox.isChecked()) {
-      categories.push((await checkbox.getAttribute('value')) ?? '');
-    }
-  }
-  return {
-    classification: await form.getByLabel('Highest classification').inputValue(),
-    categories,
-    validFrom: await form.getByLabel('Valid from').inputValue(),
-    validThrough: await form.getByLabel('Valid through').inputValue(),
-  };
-}
-
-// Saves an entry's terms through the administration page, as an administrator.
-async function saveTerms(page: Page, email: string, terms: Terms): Promise<void> {
-  await page.goto('/admin/clearances');
-  const form = entryForm(page, email);
-  await form.getByLabel('Highest classification').selectOption(terms.classification);
-  for (const checkbox of await form.getByRole('checkbox').all()) {
-    await checkbox.setChecked(terms.categories.includes((await checkbox.getAttribute('value')) ?? ''));
-  }
-  await form.getByLabel('Valid from').fill(terms.validFrom);
-  await form.getByLabel('Valid through').fill(terms.validThrough);
-  await form.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('status')).toHaveText(`Clearance of ${email} saved.`);
-}
 
 test('the administration page lists every clearance of the directory', async ({ page }) => {
   await page.goto('/');
@@ -166,10 +111,9 @@ test('an entry outside its validity period grants nothing', async ({ page, brows
   const unprotected = markedText('Fictional public paragraph');
   await insertPortion(page, { marking: NON_PROTEGE, text: unprotected });
   await leaveAndWaitForSave([page], documentId, 1);
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   try {
-    await saveTerms(page, CHLOE, { ...CHLOE_TERMS, validThrough: yesterday });
+    await saveTerms(page, CHLOE, { ...CHLOE_TERMS, validThrough: yesterday() });
     const chloe = await signedInPage(browser, DEMO_ACCOUNTS.chloe);
     // Not even the document's base label, NON PROTÉGÉ: the document does not
     // open. OpenTDF's refusal is in access-decisions.spec.ts.

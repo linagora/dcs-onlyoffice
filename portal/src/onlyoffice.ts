@@ -22,6 +22,16 @@ export interface CallbackPayload {
   url: string | null;
   // The ids of the users of the editing session.
   users: string[];
+  // The ids of the users the callback reports as having just joined the
+  // session. The Document Server reports editors only, never viewers.
+  joined: string[];
+}
+
+// Where the portal reaches the Document Server's command service, and the
+// secret that signs its commands.
+export interface CommandService {
+  internalUrl: string;
+  secret: string;
 }
 
 export type ForceSaveOutcome = 'accepted' | 'no-changes' | 'unknown-document' | 'failed';
@@ -30,6 +40,9 @@ const CALLBACK_STATUSES: readonly number[] = Object.values(CALLBACK_STATUS);
 
 // Error codes in the command service's answers.
 const COMMAND_ERROR = { none: 0, unknownKey: 1, notModified: 4 } as const;
+
+// Types of the callbacks' `actions` entries.
+const CALLBACK_ACTION = { joined: 1 } as const;
 
 export async function signOnlyofficeToken(payload: Record<string, unknown>, secret: string): Promise<string> {
   return new SignJWT(payload).setProtectedHeader({ alg: 'HS256', typ: 'JWT' }).sign(encodeSecret(secret));
@@ -80,24 +93,8 @@ export function bearerToken(authorization: string | undefined): string | null {
   return authorization?.startsWith('Bearer ') === true ? authorization.slice('Bearer '.length) : null;
 }
 
-export async function requestForceSave(
-  onlyofficeInternalUrl: string,
-  key: string,
-  secret: string,
-): Promise<ForceSaveOutcome> {
-  const command = { c: 'forcesave', key };
-  const token = await signOnlyofficeToken(command, secret);
-  const response = await fetch(`${onlyofficeInternalUrl}/command`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ ...command, token }),
-  });
-  if (!response.ok) {
-    return 'failed';
-  }
-  const result: unknown = await response.json();
-  const error = isRecord(result) && typeof result.error === 'number' ? result.error : null;
-  switch (error) {
+export async function requestForceSave(service: CommandService, key: string): Promise<ForceSaveOutcome> {
+  switch (commandError(await sendCommand(service, { c: 'forcesave', key }))) {
     case COMMAND_ERROR.none:
       return 'accepted';
     case COMMAND_ERROR.notModified:
@@ -107,6 +104,48 @@ export async function requestForceSave(
     default:
       return 'failed';
   }
+}
+
+// The ids of the editors connected to the session of a key: none when no
+// session is open, null when the Document Server does not answer. Viewers
+// are not listed.
+export async function requestSessionEditors(service: CommandService, key: string): Promise<string[] | null> {
+  const result = await sendCommand(service, { c: 'info', key });
+  switch (commandError(result)) {
+    case COMMAND_ERROR.unknownKey:
+      return [];
+    case COMMAND_ERROR.none:
+      return Array.isArray(result?.users) ? stringsOf(result.users) : null;
+    default:
+      return null;
+  }
+}
+
+// Disconnects some editors from the session of a key, or every connection,
+// viewers included, when `users` is null. Their editors stop editing and
+// keep showing what they had loaded.
+export async function dropFromSession(service: CommandService, key: string, users: string[] | null): Promise<boolean> {
+  const error = commandError(await sendCommand(service, users === null ? { c: 'drop', key } : { c: 'drop', key, users }));
+  return error === COMMAND_ERROR.none || error === COMMAND_ERROR.unknownKey;
+}
+
+// The command service's answer, null when it cannot be had.
+async function sendCommand(service: CommandService, command: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const token = await signOnlyofficeToken(command, service.secret);
+  const response = await fetch(`${service.internalUrl}/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ...command, token }),
+  });
+  if (!response.ok) {
+    return null;
+  }
+  const result: unknown = await response.json();
+  return isRecord(result) ? result : null;
+}
+
+function commandError(result: Record<string, unknown> | null): number | null {
+  return typeof result?.error === 'number' ? result.error : null;
 }
 
 // Saved files are served by the Document Server under its public origin; the
@@ -123,8 +162,16 @@ function parseCallbackPayload(value: unknown): CallbackPayload | null {
   if (!isRecord(value) || typeof value.key !== 'string' || typeof value.status !== 'number' || !isCallbackStatus(value.status)) {
     return null;
   }
-  const users = Array.isArray(value.users) ? value.users.filter((user: unknown): user is string => typeof user === 'string') : [];
-  return { key: value.key, status: value.status, url: typeof value.url === 'string' ? value.url : null, users };
+  const users = Array.isArray(value.users) ? stringsOf(value.users) : [];
+  const actions: unknown[] = Array.isArray(value.actions) ? value.actions : [];
+  const joined = actions.flatMap((action) =>
+    isRecord(action) && action.type === CALLBACK_ACTION.joined && typeof action.userid === 'string' ? [action.userid] : [],
+  );
+  return { key: value.key, status: value.status, url: typeof value.url === 'string' ? value.url : null, users, joined };
+}
+
+function stringsOf(values: unknown[]): string[] {
+  return values.filter((value): value is string => typeof value === 'string');
 }
 
 function isCallbackStatus(value: number): value is CallbackStatus {

@@ -124,6 +124,21 @@ export function renderRestrictedDocumentPage(user: UserIdentity, decision: Exclu
   );
 }
 
+// Shown while the session the portal ended after a base label change sends
+// its last save; the page tries again by itself.
+export function renderSavingDocumentPage(user: UserIdentity): string {
+  return page(
+    'Saving the document',
+    `${renderHeader(user)}
+<main>
+  <h2>Saving the document</h2>
+  <p>This document's base label changed, so its editing session ended. The document opens as soon as its last changes are saved.</p>
+  <p><a href="/">Back to the documents</a></p>
+</main>`,
+    2,
+  );
+}
+
 function restrictionText(decision: Exclude<DocumentDecision, { open: true }>): string {
   if (decision.reason === 'unavailable') {
     return '<span class="marking">access cannot be checked right now</span>';
@@ -236,11 +251,11 @@ function renderHeader(user: UserIdentity): string {
 </header>`;
 }
 
-function page(title: string, body: string): string {
+function page(title: string, body: string, refreshSeconds: number | null = null): string {
   return `<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8">${refreshSeconds === null ? '' : `\n  <meta http-equiv="refresh" content="${refreshSeconds}">`}
   <title>${escapeHtml(title)} - DCS ONLYOFFICE</title>
   <style>${STYLE}</style>
 </head>

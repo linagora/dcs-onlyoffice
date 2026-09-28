@@ -14,11 +14,12 @@ import { BaseLabelAudit } from './base-label-audit.ts';
 import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts';
 import { BaseLabels } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
+import { EditingSessions } from './editing-sessions.ts';
 import { createDocumentFromTemplate, DOCX_CONTENT_TYPE, findDocument, listDocuments, listTemplates } from './documents.ts';
 import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
-import { requestForceSave } from './onlyoffice.ts';
+import { type CommandService, requestForceSave } from './onlyoffice.ts';
 import { registerOpentdfRelay } from './opentdf-relay.ts';
-import { renderDocumentListPage, renderEditorPage, renderRestrictedDocumentPage } from './pages.ts';
+import { renderDocumentListPage, renderEditorPage, renderRestrictedDocumentPage, renderSavingDocumentPage } from './pages.ts';
 import { registerPluginRoutes } from './plugin-routes.ts';
 import { registerPolicyRelay } from './policy-relay.ts';
 
@@ -63,6 +64,8 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   const baseLabels = new BaseLabels();
   const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, baseLabels, app.log);
   const baseLabelAudit = new BaseLabelAudit(config.policyInternalUrl, app.log);
+  const commands: CommandService = { internalUrl: config.onlyofficeInternalUrl, secret: config.onlyofficeJwtSecret };
+  const editingSessions = new EditingSessions(commands, documentAccess, app.log);
   // A document the person may not open answers every address the same way,
   // without its name.
   const refuse = (reply: FastifyReply, user: UserIdentity, decision: Exclude<DocumentDecision, { open: true }>): FastifyReply =>
@@ -116,10 +119,16 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (!decision.open) {
       return refuse(reply, user, decision);
     }
+    // A session the portal ended may still send its last save: a newer
+    // session would start without it.
+    if (editingSessions.isRetiring(document.id)) {
+      return reply.code(503).header('Retry-After', '2').type('text/html; charset=utf-8').send(renderSavingDocumentPage(user));
+    }
     const editorConfig = await signEditorConfig(
       buildEditorConfig(document, { id: user.id, name: user.name }, plugin, mode, language, config),
       config.onlyofficeJwtSecret,
     );
+    editingSessions.remember(document.key, user);
     return reply.type('text/html; charset=utf-8').send(
       renderEditorPage({
         title: document.fileName,
@@ -156,7 +165,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (!decision.open) {
       return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
     }
-    const outcome = await requestForceSave(config.onlyofficeInternalUrl, document.key, config.onlyofficeJwtSecret);
+    const outcome = await requestForceSave(commands, document.key);
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
@@ -177,15 +186,15 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     await baseLabelAudit.recordReport({ documentId: document.id, ...change }, user.id);
     // The change reaches the Document Server through the editor's websocket,
     // which may come after this request: until then, it has nothing to save.
-    let outcome = await requestForceSave(config.onlyofficeInternalUrl, document.key, config.onlyofficeJwtSecret);
+    let outcome = await requestForceSave(commands, document.key);
     for (let attempt = 1; outcome === 'no-changes' && attempt < FORCE_SAVE_ATTEMPTS; attempt += 1) {
       await setTimeout(FORCE_SAVE_RETRY_MS);
-      outcome = await requestForceSave(config.onlyofficeInternalUrl, document.key, config.onlyofficeJwtSecret);
+      outcome = await requestForceSave(commands, document.key);
     }
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
-  registerDocumentServerRoutes(app, config, { baseLabels, audit: baseLabelAudit });
+  registerDocumentServerRoutes(app, config, { baseLabels, audit: baseLabelAudit, editingSessions });
 
   return app;
 }

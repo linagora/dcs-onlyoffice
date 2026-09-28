@@ -1384,6 +1384,24 @@ Derived from the 9.4 source (see the sections above):
     behaviour of `PLUGINS_ENABLED=true` without Internet access.
 15. **arm64:** is behaviour identical to amd64 for the scenarios above?
 
+## 16. Editing sessions after a configuration is signed (observed, 9.4.0)
+
+Observed on the stack while working on #54:
+
+- The Document Server calls back with status 1 whenever someone joins a session:
+  `{"status":1,"users":["alice"],"actions":[{"type":1,"userid":"alice"}]}`; a session that closes
+  without changes calls back with status 4 and an action of type 0.
+- The command service's `info` answers at once with the connected users:
+  `{"error":0,"users":["alice","bob"]}`, besides calling back.
+- `drop` disconnects users from a session: their editor shows "The file cannot be accessed right
+  now.", stops editing and keeps showing what it had loaded; `info` no longer lists them. Without
+  `users`, it disconnects every connection of the document, viewers included
+  (`dropUserFromDocument` in `DocsCoServer.js`).
+- Callbacks and `info` report editors only: a viewer joins a session unreported.
+- A session with changes ends with status 2, even when a forced save stored them before.
+- An editor configuration whose key's version was saved opens nothing: the editor raises
+  `onRequestRefreshFile`, asking its page for a new configuration.
+
 <!-- Links -->
 
 [sdkjs-tag]: https://github.com/ONLYOFFICE/sdkjs/tree/v9.4.0.129
