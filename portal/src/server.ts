@@ -1,4 +1,4 @@
-import { createReadStream } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 import path from 'node:path';
 import { fastifyCookie } from '@fastify/cookie';
@@ -65,6 +65,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   const baseLabels = new BaseLabels();
   const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, baseLabels, app.log);
   const labelJournal = new LabelJournal(config.policyInternalUrl, app.log);
+  const bindingSignatures = new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, app.log);
   const commands: CommandService = { internalUrl: config.onlyofficeInternalUrl, secret: config.onlyofficeJwtSecret };
   const editingSessions = new EditingSessions(commands, documentAccess, app.log);
   // A document the person may not open answers every address the same way,
@@ -151,10 +152,12 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (!decision.open) {
       return refuse(reply, user, decision);
     }
+    const content = await readFile(document.filePath);
+    bindingSignatures.checkAside(content, document.id, 'download');
     return reply
       .type(DOCX_CONTENT_TYPE)
       .header('Content-Disposition', `attachment; filename="${document.fileName}"`)
-      .send(createReadStream(document.filePath));
+      .send(content);
   });
 
   app.post<{ Params: DocumentParams }>('/documents/:id/forcesave', async (request, reply) => {
@@ -229,11 +232,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
-  registerDocumentServerRoutes(app, config, {
-    signatures: new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, app.log),
-    journal: labelJournal,
-    editingSessions,
-  });
+  registerDocumentServerRoutes(app, config, { signatures: bindingSignatures, journal: labelJournal, editingSessions });
 
   return app;
 }
