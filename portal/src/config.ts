@@ -15,6 +15,8 @@ export interface PortalConfig {
   // Shared with the policy service: only the portal administers the
   // clearance directory.
   directoryAdministrationSecret: string;
+  // Held to have the policy service sign the bindings of saves.
+  bindingSignatureSecret: string;
   // Language editors open in, unless a document's address asks for another.
   editorLanguage: EditorLanguage;
   documentsDirectory: string;
@@ -40,6 +42,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     opentdfInternalUrl: env.OPENTDF_INTERNAL_URL ?? 'http://opentdf:8080',
     onlyofficeJwtSecret: requireEnv(env, 'ONLYOFFICE_JWT_SECRET'),
     directoryAdministrationSecret: requireEnv(env, 'DIRECTORY_ADMINISTRATION_SECRET'),
+    bindingSignatureSecret: requireEnv(env, 'BINDING_SIGNATURE_SECRET'),
     editorLanguage: readEditorLanguage(env),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
     templatesDirectory: env.TEMPLATES_DIR ?? '/templates',

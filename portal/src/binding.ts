@@ -2,6 +2,7 @@ import { type Document, DOMParser, type Element, XMLSerializer } from '@xmldom/x
 import JSZip from 'jszip';
 
 const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
+const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
 const XMIME_NAMESPACE = 'http://www.w3.org/2005/05/xmlmime';
 const DOCUMENT_BINDING_ID = 'mb-document';
 
@@ -36,8 +37,10 @@ const MEDIA_TYPES: Readonly<Record<string, string>> = {
 
 // A whole-document binding must reference every present part of Tables 5-2
 // and 5-3. Only the saved package tells which parts exist, so the reference
-// list of the document label is rewritten at every save.
-export async function refreshBindingReferences(docx: Uint8Array): Promise<Uint8Array> {
+// list of the document label is rewritten at every save. The signature of an
+// earlier save covers other parts: it is dropped, and the policy service signs
+// the binding again, so that a binding it could not sign is stored unsigned.
+export async function refreshBinding(docx: Uint8Array): Promise<Uint8Array> {
   const zip = await JSZip.loadAsync(docx);
   const files = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
   const wanted = BINDABLE_PARTS.flatMap((pattern) => files.filter((name) => pattern.test(name)).sort());
@@ -47,11 +50,16 @@ export async function refreshBindingReferences(docx: Uint8Array): Promise<Uint8A
     if (root === null || root.namespaceURI !== BINDING_NAMESPACE || root.localName !== 'BindingInformation') {
       continue;
     }
-    for (const binding of Array.from(root.getElementsByTagNameNS(BINDING_NAMESPACE, 'MetadataBinding'))) {
-      if (binding.getAttribute('Id') === DOCUMENT_BINDING_ID && replaceReferences(document, binding, wanted)) {
-        zip.file(name, new XMLSerializer().serializeToString(document));
-        changed = true;
-      }
+    const signatures = Array.from(root.childNodes).filter((node) => node.namespaceURI === SIGNATURE_NAMESPACE && node.localName === 'Signature');
+    for (const signature of signatures) {
+      root.removeChild(signature);
+    }
+    const replaced = Array.from(root.getElementsByTagNameNS(BINDING_NAMESPACE, 'MetadataBinding')).filter(
+      (binding) => binding.getAttribute('Id') === DOCUMENT_BINDING_ID && replaceReferences(document, binding, wanted),
+    );
+    if (signatures.length > 0 || replaced.length > 0) {
+      zip.file(name, new XMLSerializer().serializeToString(document));
+      changed = true;
     }
   }
   return changed ? zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }) : docx;
