@@ -1,9 +1,8 @@
 import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
-import { deploymentSetting, portalLog, portalLogEntries } from './support/deployment.ts';
+import { deploymentSetting, portalLog, portionJournal } from './support/deployment.ts';
 import { browserFetch, openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
-import { field } from './support/json.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { documentWithPortion, forceSavedDocx, type SavedPortion } from './support/portions.ts';
@@ -54,10 +53,8 @@ test('a portion changed under its lock is shown being changed to a co-author, th
   ]);
   expect(docx.portionParts[0]?.content).not.toBe(portion.envelope);
   // The journal holds the change, without its text.
-  const journal = (): unknown[] =>
-    portalLogEntries(since).filter((entry) => field(entry, 'msg') === 'Portion changed in the panel' && field(entry, 'portion') === portion.portionId);
   await expect
-    .poll(journal)
+    .poll(() => portionJournal(since, 'Portion changed in the panel', portion.portionId))
     .toEqual([
       expect.objectContaining({
         documentId: portion.documentId,

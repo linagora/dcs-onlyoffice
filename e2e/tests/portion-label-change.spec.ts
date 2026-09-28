@@ -1,10 +1,9 @@
 import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
-import { portalLog, portalLogEntries } from './support/deployment.ts';
+import { portalLog, portionJournal } from './support/deployment.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
 import { pageMarkingTexts, parsedTag } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
-import { field } from './support/json.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, relabelPortionPart } from './support/plugin.ts';
 import { documentWithPortion, forceSavedDocx, insertPortion, savedPortion } from './support/portions.ts';
@@ -18,12 +17,6 @@ const WITH_MORE_RESTRICTIVE_PORTIONS = `${DIFFUSION_RESTREINTE} – CONTIENT DES
 const NON_PROTEGE_CODE = 'DEMO-FR:1';
 const DIFFUSION_RESTREINTE_CODE = 'DEMO-FR:2';
 const SPECIAL_FRANCE_CODE = 'DEMO-FR:2/1.1';
-
-// The entries of the portal's journal about a portion since `since`, with
-// the given message.
-function journal(since: Date, message: string, portionId: string): unknown[] {
-  return portalLogEntries(since).filter((entry) => field(entry, 'msg') === message && field(entry, 'portion') === portionId);
-}
 
 // Starts the change of the page's only portion, and gives the markings of
 // the labels its form offers.
@@ -71,7 +64,7 @@ test('the French officer raises a portion to SPÉCIAL FRANCE, which the allied o
   ]);
   expect(pageMarkingTexts(docx)).toEqual(Array.from({ length: 6 }, () => WITH_MORE_RESTRICTIVE_PORTIONS));
   await expect
-    .poll(() => journal(since, 'Portion changed in the panel', portion.portionId))
+    .poll(() => portionJournal(since, 'Portion changed in the panel', portion.portionId))
     .toEqual([
       expect.objectContaining({
         documentId,
@@ -100,7 +93,7 @@ test('only an administrator cleared for a portion label is offered a lower one, 
 
   await expect(pluginPanel(page).getByTestId('portion-item').getByTestId('portion-marking')).toHaveText(NON_PROTEGE);
   await expect
-    .poll(() => journal(since, 'Portion label lowered in the panel', portion.portionId))
+    .poll(() => portionJournal(since, 'Portion label lowered in the panel', portion.portionId))
     .toEqual([
       expect.objectContaining({
         documentId: portion.documentId,
@@ -121,7 +114,7 @@ test('a save that lowers a portion label outside the panel is logged with the us
 
   await forceSavedDocx(page, portion.documentId, (saved) => saved.portionParts[0]?.label === NON_PROTEGE_CODE);
   await expect
-    .poll(() => journal(since, 'Portion label lowered', portion.portionId))
+    .poll(() => portionJournal(since, 'Portion label lowered', portion.portionId))
     .toEqual([
       expect.objectContaining({
         documentId: portion.documentId,
