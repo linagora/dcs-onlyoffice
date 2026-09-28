@@ -73,6 +73,7 @@ The stack runs with Docker Compose: ONLYOFFICE Docs Community Edition, the OpenT
 - **Document label.** Computed from the base label and the portion labels, with one of two rules: `clear-parts` (the base label plus an indicator when a portion is more restrictive) or `high-water-mark` (the ADatP-4774.1 dominant label).
 - **ADatP-4778.2 binding.** The document label is stored as the standard OOXML binding, which references the package parts it covers; the portal brings that list of parts up to date at every save.
 - **Signed binding.** At each save it stores, the portal has the policy service compute the document label again from the labels in clear, replace a different one, which the portal logs, write the binding again and sign it as ADatP-4778.2 Annexes A and B lay out: an XML signature first in the binding, ECDSA P-256 with SHA-256 over SHA-384 digests, exclusive canonicalization, the certificate in `KeyInfo`, the package parts in a `Manifest` and the signing time in `SignatureProperties` ([ADR 0004](docs/adr/0004-the-policy-service-signs-the-document-label-binding.md)). The signature proves that the platform computed the label from the labels in clear and bound it to those parts when it stored the file, not who wrote the content; [SECURITY.md](SECURITY.md) tells what it leaves out. The tests check it with `xmlsec1`, an independent verifier.
+- **Signature check.** Whenever the portal serves a stored file, to the Document Server or for a download, the policy service checks its signature against the configured certificate and digests the signed parts again. The portal logs a file that no longer matches its signature, or holds anything beside what it covers, with the parts that changed, and a file stored before signing existed, until its next save signs it; it serves both all the same.
 - **Security policy from a SPIF.** The policy service reads Open XML SPIF 2.1 files: valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part. No policy name, label or rule is hard-coded.
 
 ### Encryption
@@ -294,7 +295,7 @@ The CI runs the type checks and the API tests, then starts the `standalone` stac
 
 ## Roadmap
 
-Iteration 4 is in progress: changing a portion's text and label, deleting portions, page markings, the journal of label changes and the signed ADatP-4778 binding are done; checking the signature of stored files comes next.
+Iteration 4 is in progress: changing a portion's text and label, deleting portions, page markings, the journal of label changes, the signed ADatP-4778 binding and the check of stored files' signatures are done; the demo on a hosted stack comes next.
 
 | Iteration | Scope | Status |
 | --- | --- | --- |
