@@ -127,6 +127,8 @@ export function writeFailureOf(kind: PortionFormPurpose['kind'], result: WriteRe
       return null;
     case 'not-encrypted':
       return kind === 'change' ? messages.changeEncryptionFailed(result.reason) : messages.encryptionFailed(result.reason);
+    case 'changed-meanwhile':
+      return messages.portionChangedMeanwhile;
     case 'not-written':
       return kind === 'change' ? messages.changeFailed : messages.insertionFailed;
   }

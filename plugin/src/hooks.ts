@@ -8,6 +8,7 @@ import type { EnvelopeClient } from './envelopes.ts';
 import {
   type DocumentLabelRequest,
   fetchDocumentLabel,
+  fetchPortionLabelChoices,
   fetchPortionLocks,
   type LabelView,
   type LockHolder,
@@ -15,10 +16,12 @@ import {
   releasePortionLockOnLeave,
   takePortionLock,
 } from './policy.ts';
+import { reportPortionChange } from './portal.ts';
 import { writeFailureOf } from './PortionForm.tsx';
 import {
   changePortion,
   type DocumentState,
+  nextVersion,
   parsePortionTag,
   type PortionChange,
   readDocumentState,
@@ -348,9 +351,14 @@ export interface PortionNotice {
   message: string;
 }
 
+// A change under way, with the labels the portion may take.
+export interface PortionChangeUnderWay extends PortionChange {
+  choices: LabelView[];
+}
+
 export interface PortionChangeView {
   // The portion changed in this panel, under its lock.
-  changing: PortionChange | null;
+  changing: PortionChangeUnderWay | null;
   // Why the last change could not start or be saved.
   notice: PortionNotice | null;
   start: (change: PortionChange) => void;
@@ -360,9 +368,15 @@ export interface PortionChangeView {
 
 // A change of a portion, under the portion lock the panel takes first, renews
 // at half its lease and releases once the change is saved or dropped, or as
-// the panel goes away.
-export function usePortionChange(documentId: string | null, envelopes: EnvelopeClient | null, refresh: () => Promise<DocumentState>): PortionChangeView {
-  const [changing, setChanging] = useState<(PortionChange & { leaseMs: number }) | null>(null);
+// the panel goes away. `baseLabelCode` stands in for a document that has not
+// stored its base label yet.
+export function usePortionChange(
+  documentId: string | null,
+  envelopes: EnvelopeClient | null,
+  refresh: () => Promise<DocumentState>,
+  baseLabelCode: string | null,
+): PortionChangeView {
+  const [changing, setChanging] = useState<(PortionChangeUnderWay & { leaseMs: number }) | null>(null);
   const [notice, setNotice] = useState<PortionNotice | null>(null);
   // The portion whose lock the panel holds, cleared before any release so
   // that no renewal outlives it.
@@ -374,6 +388,13 @@ export function usePortionChange(documentId: string | null, envelopes: EnvelopeC
       const take = async (): Promise<PortionNotice | null> => {
         if (documentId === null) {
           return { portionId, message: messages.lockFailed('the document is unknown') };
+        }
+        let choices: LabelView[];
+        try {
+          choices = await fetchPortionLabelChoices(change.label.policy, change.label.code);
+        } catch (error: unknown) {
+          logProblem('Reading the labels a portion may take', error);
+          return { portionId, message: messages.labelChoicesFailed(describeError(error)) };
         }
         const outcome = await takePortionLock(documentId, portionId, change.label.code, false);
         if (outcome.status === 'taken') {
@@ -392,7 +413,7 @@ export function usePortionChange(documentId: string | null, envelopes: EnvelopeC
           return { portionId, message: messages.portionChangedMeanwhile };
         }
         holding.current = portionId;
-        setChanging({ ...change, leaseMs: outcome.leaseMs });
+        setChanging({ ...change, choices, leaseMs: outcome.leaseMs });
         return null;
       };
       const run = async (): Promise<void> => {
@@ -448,21 +469,42 @@ export function usePortionChange(documentId: string | null, envelopes: EnvelopeC
   };
 
   // Whatever happens, the lock is released, with the version written when the
-  // change went through.
+  // change went through, and the portal is told of the change.
   const save = async (label: LabelView, text: string): Promise<WriteResult> => {
     if (changing === null) {
       return { status: 'not-written' };
     }
     const { portion } = changing;
-    const write = async (): Promise<WriteResult> =>
-      envelopes === null ? { status: 'not-written' } : changePortion({ portion, label, text }, envelopes);
+    const version = nextVersion(portion);
+    const write = async (): Promise<WriteResult> => {
+      const current = await refresh();
+      const base = current.baseLabelCode ?? baseLabelCode;
+      if (envelopes === null || base === null) {
+        return { status: 'not-written' };
+      }
+      // Changed outside the panel since the change started: writing would
+      // drop that change.
+      const now = current.portions.find((other) => other.id === portion.id);
+      if (now === undefined || now.version !== portion.version || now.labelCode !== portion.labelCode) {
+        return { status: 'changed-meanwhile' };
+      }
+      const portionLabelCodes = current.portions.filter((other) => other.id !== portion.id).map((other) => other.labelCode);
+      return changePortion({ portion, label, text }, { baseLabelCode: base, portionLabelCodes }, envelopes);
+    };
     const result = await write().catch((error: unknown): WriteResult => {
       logProblem('Changing a portion', error);
       return { status: 'not-written' };
     });
-    await release(portion.id, result.status === 'written' ? (portion.version ?? 1) + 1 : null).catch((error: unknown) => {
+    await release(portion.id, result.status === 'written' ? version : null).catch((error: unknown) => {
       logProblem('Releasing a portion lock', error);
     });
+    if (result.status === 'written' && documentId !== null) {
+      reportPortionChange(documentId, portion.id, { label: changing.label.code, version: portion.version }, { label: label.code, version }).catch(
+        (error: unknown) => {
+          logProblem('Reporting a portion change', error);
+        },
+      );
+    }
     await refresh().catch((error: unknown) => {
       logProblem('Rereading the document', error);
     });

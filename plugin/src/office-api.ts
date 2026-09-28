@@ -13,6 +13,7 @@ export interface ApiRun {
 export interface ApiParagraph {
   GetClassType(): 'paragraph';
   AddText(text: string): ApiRun;
+  RemoveAllElements(): boolean;
   GetText(): string;
   GetPosInParent(): number;
   GetInternalId(): string;
@@ -61,10 +62,13 @@ export interface ApiSection {
   GetFooter(type: HeaderFooterType, create: boolean): ApiDocumentContent | null;
 }
 
-export interface ApiContentControl {
+export interface ApiInlineLvlSdt {
+  GetClassType(): 'inlineLvlSdt';
   GetTag(): string;
   GetInternalId(): string;
 }
+
+export type ApiContentControl = ApiBlockLvlSdt | ApiInlineLvlSdt;
 
 export interface ApiCustomXmlPart {
   GetXml(): string;

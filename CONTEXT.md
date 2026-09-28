@@ -62,6 +62,10 @@ _Avoid_: global label, rollup
 The marking of the document label, repeated at the top and the bottom of every page, in a place of its own that authors cannot edit.
 _Avoid_: banner, header label
 
+**Journal**:
+The record of label changes: each change of a base label or of a protected portion made in the panel, with who made it, and each save that lowers a label, with who took part in the editing session. It never holds a portion's text.
+_Avoid_: audit trail, history
+
 **Envelope**:
 The encrypted form of a protected portion's text: a ZTDF object that also carries the portion label, bound to it.
 _Avoid_: ciphertext, blob, TDF (for the concept)
