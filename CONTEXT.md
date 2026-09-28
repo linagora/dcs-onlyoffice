@@ -33,7 +33,15 @@ A part of a document whose text is typed in the labelling panel, never in the do
 _Avoid_: secret paragraph, encrypted block
 
 **Portion label**:
-The label of one protected portion. The file holds it in clear, for everyone and for other labelling tools, and bound in the portion's envelope.
+The label of one protected portion. The file holds it in clear, for everyone and for other labelling tools, and bound in the portion's envelope. An author changing the portion may raise it to any label their clearance allows; only an administrator whose clearance allows it may lower it.
+
+**Portion lock**:
+The right to change or delete a protected portion, held by one author at a time who can edit the document and read the portion; it lapses unless their labelling panel renews it.
+_Avoid_: checkout, reservation
+
+**Portion version**:
+How many times a protected portion's text or label has changed since it was inserted; the file keeps only its latest envelope.
+_Avoid_: revision, history
 
 **Bound label**:
 The portion label as the envelope carries it, bound to the envelope. For a reader who can open the envelope, it prevails over the label in clear, which anyone able to edit the file could change.
@@ -47,8 +55,12 @@ A document whose base label the person's clearance does not allow: the portal li
 _Avoid_: hidden document, protected document
 
 **Document label**:
-The label of the whole document, computed from its base label and its portion labels, and bound to the file as ADatP-4778.2 prescribes.
+The label of the whole document, computed from its base label and its portion labels, and bound to the file as ADatP-4778.2 prescribes, in a binding the policy service signs.
 _Avoid_: global label, rollup
+
+**Page marking**:
+The marking of the document label, repeated at the top and the bottom of every page, in a place of its own that authors cannot edit.
+_Avoid_: banner, header label
 
 **Envelope**:
 The encrypted form of a protected portion's text: a ZTDF object that also carries the portion label, bound to it.
