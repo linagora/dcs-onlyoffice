@@ -3,6 +3,7 @@ import { messages } from './messages.ts';
 import type {
   ApiBlockLvlSdt,
   ApiContentControl,
+  ApiCustomXmlPart,
   ApiDocumentContent,
   ApiDocumentElement,
   ApiParagraph,
@@ -88,10 +89,11 @@ interface PortionBlockScope {
 }
 
 // A portion the command writes, with its part: a new one, or a new version
-// of one the document holds.
+// of one the document holds; or one it deletes.
 type PortionWriteScope =
   | { kind: 'insertion'; alias: string; block: PortionBlockScope; xml: string }
-  | { kind: 'change'; id: string; block: PortionBlockScope; xml: string };
+  | { kind: 'change'; id: string; block: PortionBlockScope; xml: string }
+  | { kind: 'deletion'; id: string };
 
 interface PageMarkingScope {
   tag: string;
@@ -164,9 +166,10 @@ export interface PortionChange {
 declare const Api: OfficeApi;
 declare const Asc: { scope: CommandScope };
 
-// One command writes a new portion or a portion's change, if there is one,
-// with the document label and its page marking, so that a single undo
-// reverts all of them. False when the portion to change is gone.
+// One command writes a new portion, a portion's change or its deletion, if
+// there is one, with the document label and its page marking, so that a
+// single undo reverts all of them. False when the portion to change or delete
+// is gone.
 function writeLabellingCommand(): boolean {
   const scope = Asc.scope;
   const document = Api.GetDocument();
@@ -225,31 +228,58 @@ function writeLabellingCommand(): boolean {
     parts.Add(portion.xml);
   };
 
-  // The portion's part, found by the portion id its root element names,
-  // however the editor serialises it, is replaced with its new version; its
-  // placeholder block, found by the portion id in its tag, shows its label.
-  // Nothing changes unless the document holds both.
-  const changePortionBlock = (change: Extract<PortionWriteScope, { kind: 'change' }>): boolean => {
-    const current = parts
+  // A portion's part, found by the portion id its root element names, however
+  // the editor serialises it, and its placeholder block, found by the portion
+  // id in its tag; null unless the document holds both.
+  const portionInDocument = (id: string): { portionParts: ApiCustomXmlPart[]; placeholders: ApiBlockLvlSdt[] } | null => {
+    const portionParts = parts
       .GetByNamespace(scope.portionNamespace)
-      .filter((part) => /<(?:[\w-]+:)?portion\b[^>]*?\sid=["']([^"']*)["']/.exec(part.GetXml())?.[1] === change.id);
-    const controls = document.GetAllContentControls().filter((control): control is ApiBlockLvlSdt => {
+      .filter((part) => /<(?:[\w-]+:)?portion\b[^>]*?\sid=["']([^"']*)["']/.exec(part.GetXml())?.[1] === id);
+    const placeholders = document.GetAllContentControls().filter((control): control is ApiBlockLvlSdt => {
       const tag = isBlock(control) ? parsedTag(control.GetTag()) : null;
-      return typeof tag === 'object' && tag !== null && 'id' in tag && tag.id === change.id;
+      return typeof tag === 'object' && tag !== null && 'id' in tag && tag.id === id;
     });
-    if (current.length === 0 || controls.length === 0) {
+    return portionParts.length === 0 || placeholders.length === 0 ? null : { portionParts, placeholders };
+  };
+
+  // The portion's part is replaced with its new version, and its placeholder
+  // block shows its label.
+  const changePortionBlock = (change: Extract<PortionWriteScope, { kind: 'change' }>): boolean => {
+    const portion = portionInDocument(change.id);
+    if (portion === null) {
       return false;
     }
-    for (const part of current) {
+    for (const part of portion.portionParts) {
       part.Delete();
     }
     parts.Add(change.xml);
-    for (const control of controls) {
+    for (const control of portion.placeholders) {
       control.SetLock('unlocked');
       control.SetTag(change.block.tag);
       const first = control.GetContent().GetElement(0);
       showPortionLabel(isParagraph(first) ? first : null, control, change.block);
       control.SetLock('sdtContentLocked');
+    }
+    return true;
+  };
+
+  // The portion's placeholder block goes, unlocked first since the editor
+  // refuses to delete a locked one, then its part. Should the editor refuse
+  // all the same, the part stays and nothing counts as deleted.
+  const deletePortionBlock = (deletion: Extract<PortionWriteScope, { kind: 'deletion' }>): boolean => {
+    const portion = portionInDocument(deletion.id);
+    if (portion === null) {
+      return false;
+    }
+    const deleted = portion.placeholders.map((control) => {
+      control.SetLock('unlocked');
+      return control.Delete(false);
+    });
+    if (deleted.includes(false)) {
+      return false;
+    }
+    for (const part of portion.portionParts) {
+      part.Delete();
     }
     return true;
   };
@@ -307,6 +337,9 @@ function writeLabellingCommand(): boolean {
     insertPortionBlock(scope.portion);
   }
   if (scope.portion?.kind === 'change' && !changePortionBlock(scope.portion)) {
+    return false;
+  }
+  if (scope.portion?.kind === 'deletion' && !deletePortionBlock(scope.portion)) {
     return false;
   }
   for (const replacement of scope.replacements) {
@@ -398,6 +431,13 @@ export async function changePortion(change: PortionChange, others: OtherLabels, 
   }
   const xml = buildPortionPart({ id: portion.id, version: nextVersion(portion), labelCode: label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
   return writeLabelling({ kind: 'change', id: portion.id, block: portionBlockScope(portion.id, label), xml }, sealed.documentLabel, others);
+}
+
+// Deletes a portion and its part, with the document label and the page
+// marking that the document's other labels give.
+export async function deletePortion(portion: StoredPortion, policy: string, others: OtherLabels): Promise<WriteResult> {
+  const documentLabel = await fetchDocumentLabel({ policy, ...others });
+  return writeLabelling({ kind: 'deletion', id: portion.id }, documentLabel, others);
 }
 
 // The version a change of the portion writes.

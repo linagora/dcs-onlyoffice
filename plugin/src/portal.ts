@@ -28,6 +28,12 @@ export async function reportPortionChange(documentId: string, portionId: string,
   await postReport(documentId, 'portion-change', { portion: portionId, before, after });
 }
 
+// Tells the portal about a portion the panel deleted, which the portal logs
+// with the signed-in person and the portion's last label and version.
+export async function reportPortionDeletion(documentId: string, portionId: string, before: PortionState): Promise<void> {
+  await postReport(documentId, 'portion-deletion', { portion: portionId, before });
+}
+
 async function postReport(documentId: string, report: string, body: object): Promise<void> {
   const response = await fetch(`/documents/${encodeURIComponent(documentId)}/${report}`, {
     method: 'POST',

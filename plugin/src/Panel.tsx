@@ -10,7 +10,7 @@ import {
   useLoadable,
   usePortionBubble,
   type PortionNotice,
-  usePortionChange,
+  usePortionEdit,
   usePortionLocks,
   usePortionReadings,
 } from './hooks.ts';
@@ -28,7 +28,7 @@ import {
   type LabelView,
 } from './policy.ts';
 import { documentIdOf, reportBaseLabelChange } from './portal.ts';
-import { PortionForm } from './PortionForm.tsx';
+import { PortionDeletionForm, PortionForm } from './PortionForm.tsx';
 import { PortionList, shownLabelOf } from './PortionList.tsx';
 import { insertPortion, type StoredPortion, writeDocumentLabel, type WriteResult } from './portions.ts';
 import { type PortionReading, PortionReader } from './readings.ts';
@@ -73,7 +73,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // Until the author picks one, the base label is the least restrictive.
   const storedBaseLabelCode = documentState?.baseLabelCode ?? null;
   const baseLabelCode = storedBaseLabelCode ?? labelList[0]?.code ?? null;
-  const change = usePortionChange(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh, baseLabelCode);
+  const edit = usePortionEdit(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh, baseLabelCode);
   // Lowering the base label is reserved to administrators cleared for it.
   // Until the choices for the current label are known, only it is offered.
   const documentLoaded = documentState !== null;
@@ -209,21 +209,24 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
         labels={labelList}
         activePortionId={activePortionId}
         onSelect={selectPortion}
-        notices={portionNotices(othersLocks, change.notice)}
+        notices={portionNotices(othersLocks, edit.notice)}
         lockedByOthers={new Set(othersLocks.keys())}
-        onChangeRequest={readOnly || change.changing !== null ? null : change.start}
-        changeForm={
-          change.changing === null
+        onEditRequest={readOnly || edit.underWay !== null ? null : edit.start}
+        editForm={
+          edit.underWay === null
             ? null
             : {
-                portionId: change.changing.portion.id,
-                form: (
-                  <PortionForm
-                    labels={change.changing.choices}
-                    purpose={{ kind: 'change', labelCode: change.changing.label.code, text: change.changing.text, onCancel: change.cancel }}
-                    onSubmit={change.save}
-                  />
-                ),
+                portionId: edit.underWay.portion.id,
+                form:
+                  edit.underWay.kind === 'change' ? (
+                    <PortionForm
+                      labels={edit.underWay.choices}
+                      purpose={{ kind: 'change', labelCode: edit.underWay.label.code, text: edit.underWay.text, onCancel: edit.cancel }}
+                      onSubmit={edit.save}
+                    />
+                  ) : (
+                    <PortionDeletionForm onConfirm={edit.confirmDeletion} onCancel={edit.cancel} />
+                  ),
               }
         }
       />
@@ -247,7 +250,7 @@ function bubbleContentOf(portion: StoredPortion, reading: PortionReading | null,
 }
 
 // What the panel says next to a portion: who else is changing it, or why the
-// last change of it could not start or be saved.
+// last change or deletion of it could not start or be written.
 function portionNotices(othersLocks: ReadonlyMap<string, LockHolder>, notice: PortionNotice | null): ReadonlyMap<string, string> {
   const notices = new Map([...othersLocks].map(([portionId, holder]) => [portionId, messages.beingChangedBy(holder.name)]));
   if (notice !== null && !notices.has(notice.portionId)) {
