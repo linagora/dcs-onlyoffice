@@ -26,11 +26,15 @@ interface SignatureAnswer {
 
 // What the policy service finds in a stored file: a binding whose signature
 // holds, one that no longer matches it, one without a signature, or no labels.
-type BindingVerification =
+type BindingVerification = (
   | { status: 'valid' }
   | { status: 'altered'; reason: string; changedParts: string[] }
   | { status: 'unsigned' }
-  | { status: 'unlabelled' };
+  | { status: 'unlabelled' }
+) & {
+  // A Sensitivity Label Information part, which the signature does not cover.
+  labelInformationPart: string | null;
+};
 
 // Where the portal serves a stored file.
 export type ServedTo = 'document-server' | 'download';
@@ -94,6 +98,11 @@ export class BindingSignatures {
     } else if (verification.status === 'unsigned') {
       this.#log.info({ documentId, servedTo }, 'Stored file unsigned');
     }
+    // The platform never writes one (ADR 0005): it came from outside, and Word
+    // could show its label instead of the signed one.
+    if (verification.labelInformationPart !== null) {
+      this.#log.warn({ documentId, servedTo, part: verification.labelInformationPart }, 'Stored file holds a Sensitivity Label Information part');
+    }
   }
 
   // The header that carries the stored file's custom properties, empty when
@@ -136,17 +145,21 @@ export class BindingSignatures {
 }
 
 function readVerification(body: unknown): BindingVerification | null {
-  if (typeof body !== 'object' || body === null || !('status' in body)) {
+  if (typeof body !== 'object' || body === null || !('status' in body) || !('labelInformationPart' in body)) {
+    return null;
+  }
+  const { labelInformationPart } = body;
+  if (labelInformationPart !== null && typeof labelInformationPart !== 'string') {
     return null;
   }
   if (body.status === 'valid' || body.status === 'unsigned' || body.status === 'unlabelled') {
-    return { status: body.status };
+    return { status: body.status, labelInformationPart };
   }
   if (body.status !== 'altered' || !('reason' in body) || typeof body.reason !== 'string' || !('changedParts' in body) || !Array.isArray(body.changedParts)) {
     return null;
   }
   const changedParts: unknown[] = body.changedParts;
-  return changedParts.every((part): part is string => typeof part === 'string') ? { status: 'altered', reason: body.reason, changedParts } : null;
+  return changedParts.every((changed): changed is string => typeof changed === 'string') ? { status: 'altered', reason: body.reason, changedParts, labelInformationPart } : null;
 }
 
 function readSignatureAnswer(body: unknown): SignatureAnswer | null {
