@@ -1,7 +1,8 @@
 import type { JSX } from 'preact';
+import type { PortionEditKind, PortionEditRequest } from './hooks.ts';
 import { messages } from './messages.ts';
 import type { LabelView } from './policy.ts';
-import type { PortionChange, StoredPortion } from './portions.ts';
+import type { StoredPortion } from './portions.ts';
 import type { PortionReading } from './readings.ts';
 
 export interface PortionListProps {
@@ -16,11 +17,11 @@ export interface PortionListProps {
   notices: ReadonlyMap<string, string>;
   // Portions whose lock someone else holds.
   lockedByOthers: ReadonlySet<string>;
-  // Offered on the portions their reader opened; null when no change can
-  // start, in the read-only editor or while another change goes on.
-  onChangeRequest: ((change: PortionChange) => void) | null;
-  // The form of the portion being changed, shown in its place.
-  changeForm: { portionId: string; form: JSX.Element } | null;
+  // Offered on the portions their reader opened; null when no change nor
+  // deletion can start, in the read-only editor or while another goes on.
+  onEditRequest: ((request: PortionEditRequest, kind: PortionEditKind) => void) | null;
+  // The form of the portion being changed or deleted, shown in its place.
+  editForm: { portionId: string; form: JSX.Element } | null;
 }
 
 export function PortionList({
@@ -31,8 +32,8 @@ export function PortionList({
   onSelect,
   notices,
   lockedByOthers,
-  onChangeRequest,
-  changeForm,
+  onEditRequest,
+  editForm,
 }: PortionListProps): JSX.Element {
   return (
     <section class="portions" aria-labelledby="portions-title">
@@ -47,11 +48,11 @@ export function PortionList({
             const label = check.shown;
             const notice = notices.get(portion.id) ?? null;
             const opened = reading?.status === 'opened' ? reading : null;
-            const changing = changeForm !== null && changeForm.portionId === portion.id;
+            const editing = editForm !== null && editForm.portionId === portion.id;
             // A portion whose label in clear differs from its bound label keeps
             // its warning until its labels agree again.
-            const changeable =
-              onChangeRequest !== null && opened !== null && label !== null && check.warning === null && !lockedByOthers.has(portion.id);
+            const editable =
+              onEditRequest !== null && opened !== null && label !== null && check.warning === null && !lockedByOthers.has(portion.id);
             return (
               <li
                 key={portion.id}
@@ -78,17 +79,26 @@ export function PortionList({
                     {notice}
                   </p>
                 )}
-                {changing && changeForm.form}
-                {!changing && changeable && (
-                  <button
-                    type="button"
-                    class="portion-action"
-                    onClick={() => {
-                      onChangeRequest({ portion, label, text: opened.text });
-                    }}
-                  >
-                    {messages.changeButton}
-                  </button>
+                {editing && editForm.form}
+                {!editing && editable && (
+                  <div class="portion-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onEditRequest({ portion, label, text: opened.text }, 'change');
+                      }}
+                    >
+                      {messages.changeButton}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onEditRequest({ portion, label, text: opened.text }, 'deletion');
+                      }}
+                    >
+                      {messages.deleteButton}
+                    </button>
+                  </div>
                 )}
               </li>
             );

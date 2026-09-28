@@ -120,16 +120,51 @@ export function PortionForm({ labels, purpose, onSubmit }: PortionFormProps): JS
   );
 }
 
-// What went wrong with an insertion or a change, null when it was written.
-export function writeFailureOf(kind: PortionFormPurpose['kind'], result: WriteResult): string | null {
+export interface PortionDeletionFormProps {
+  onConfirm: () => Promise<WriteResult>;
+  onCancel: () => void;
+}
+
+// A deletion waits for its author's confirmation, under the portion's lock.
+// The form closes with the lock, whatever the outcome: the panel says next to
+// the portion why a deletion failed.
+export function PortionDeletionForm({ onConfirm, onCancel }: PortionDeletionFormProps): JSX.Element {
+  const [busy, setBusy] = useState(false);
+
+  const confirm = (event: Event): void => {
+    event.preventDefault();
+    setBusy(true);
+    onConfirm().catch((error: unknown) => {
+      logProblem('Deleting a portion', error);
+    });
+  };
+
+  return (
+    <form class="portion-form" data-testid="deletion-confirmation" onSubmit={confirm}>
+      <p>{messages.deletionQuestion}</p>
+      <div class="form-actions">
+        <button type="submit" disabled={busy}>
+          {messages.confirmDeletionButton}
+        </button>
+        <button type="button" disabled={busy} onClick={onCancel}>
+          {messages.cancelButton}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// What went wrong with an insertion, a change or a deletion, null when it was
+// written.
+export function writeFailureOf(kind: 'insertion' | 'change' | 'deletion', result: WriteResult): string | null {
   switch (result.status) {
     case 'written':
       return null;
     case 'not-encrypted':
-      return kind === 'change' ? messages.changeEncryptionFailed(result.reason) : messages.encryptionFailed(result.reason);
+      return kind === 'insertion' ? messages.encryptionFailed(result.reason) : messages.changeEncryptionFailed(result.reason);
     case 'changed-meanwhile':
       return messages.portionChangedMeanwhile;
     case 'not-written':
-      return kind === 'change' ? messages.changeFailed : messages.insertionFailed;
+      return { insertion: messages.insertionFailed, change: messages.changeFailed, deletion: messages.deletionFailed }[kind];
   }
 }

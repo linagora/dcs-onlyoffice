@@ -162,7 +162,9 @@ legend,
   margin: 4px 0 0;
 }
 
-.portion-action {
+.portion-actions {
+  display: flex;
+  gap: 8px;
   margin: 4px 0 0 18px;
 }
 

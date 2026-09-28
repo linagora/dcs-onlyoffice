@@ -63,7 +63,7 @@ The marking of the document label, repeated at the top and the bottom of every p
 _Avoid_: banner, header label
 
 **Journal**:
-The record of label changes: each change of a base label or of a protected portion made in the panel, with who made it, and each save that lowers a label, with who took part in the editing session. It never holds a portion's text.
+The record of label changes: each change of a base label or of a protected portion, and each deletion of a protected portion, made in the panel, with who made it; and each save that lowers a label or removes a protected portion, with who took part in the editing session. It never holds a portion's text.
 _Avoid_: audit trail, history
 
 **Envelope**:

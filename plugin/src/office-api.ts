@@ -37,6 +37,8 @@ export interface ApiBlockLvlSdt {
   GetLock(): ContentControlLock;
   GetContent(): ApiDocumentContent;
   GetInternalId(): string;
+  // Refused while the control is locked against deletion.
+  Delete(keepContent: boolean): boolean;
 }
 
 // What the document, a header, a footer or a block content control holds.

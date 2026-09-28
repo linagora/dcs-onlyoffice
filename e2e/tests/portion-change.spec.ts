@@ -1,9 +1,8 @@
 import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
-import { deploymentSetting, portalLog, portalLogEntries } from './support/deployment.ts';
+import { deploymentSetting, portalLog, portionJournal } from './support/deployment.ts';
 import { browserFetch, openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
-import { field } from './support/json.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { documentWithPortion, forceSavedDocx, type SavedPortion } from './support/portions.ts';
@@ -36,9 +35,11 @@ test('a portion changed under its lock is shown being changed to a co-author, th
   const textbox = alicePortion.getByRole('textbox', { name: 'Portion text' });
   await expect(textbox).toHaveValue(before);
 
-  // bob sees who changes it, is offered no change and cannot take its lock.
+  // bob sees who changes it, is offered no change nor deletion and cannot
+  // take its lock.
   await expect(bobPortion.getByTestId('portion-status')).toHaveText('Being changed by Alice Martin.');
   await expect(bobPortion.getByRole('button', { name: 'Change', exact: true })).toHaveCount(0);
+  await expect(bobPortion.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   expect(await lockAnswer(bob, portion)).toBe(409);
 
   const after = markedText('Fictional paragraph after its change');
@@ -54,10 +55,8 @@ test('a portion changed under its lock is shown being changed to a co-author, th
   ]);
   expect(docx.portionParts[0]?.content).not.toBe(portion.envelope);
   // The journal holds the change, without its text.
-  const journal = (): unknown[] =>
-    portalLogEntries(since).filter((entry) => field(entry, 'msg') === 'Portion changed in the panel' && field(entry, 'portion') === portion.portionId);
   await expect
-    .poll(journal)
+    .poll(() => portionJournal(since, 'Portion changed in the panel', portion.portionId))
     .toEqual([
       expect.objectContaining({
         documentId: portion.documentId,

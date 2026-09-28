@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
+import { field } from './json.ts';
 
 const COMPOSE_DIRECTORY = fileURLToPath(new URL('../../../deploy/', import.meta.url));
 const SETTINGS_FILE = new URL('../../../deploy/.env', import.meta.url);
@@ -54,6 +55,12 @@ export function portalLogEntries(since: Date): unknown[] {
         throw error;
       }
     });
+}
+
+// The entries of the portal's journal about a portion since `since`, with
+// the given message.
+export function portionJournal(since: Date, message: string, portionId: string): unknown[] {
+  return portalLogEntries(since).filter((entry) => field(entry, 'msg') === message && field(entry, 'portion') === portionId);
 }
 
 // Fails with docker's own message.
