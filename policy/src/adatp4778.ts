@@ -4,6 +4,8 @@ export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 
 const XMIME_NAMESPACE = 'http://www.w3.org/2005/05/xmlmime';
 const PACK_PREFIX = 'pack:///';
+// The Id of the whole-document MetadataBinding, which a signature references.
+export const DOCUMENT_BINDING_ID = 'mb-document';
 
 // Parts a DOCX saved by ONLYOFFICE always contains among those of ADatP-4778.2
 // Tables 5-2 and 5-3. The portal lists the actual parts at every save.
@@ -43,7 +45,7 @@ export function serializeDocumentBinding(labelXml: string, parts: readonly strin
     .join('');
   return (
     `<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}" xmlns:xmime="${XMIME_NAMESPACE}">` +
-    '<mb:MetadataBindingContainer><mb:MetadataBinding Id="mb-document">' +
+    `<mb:MetadataBindingContainer><mb:MetadataBinding Id="${DOCUMENT_BINDING_ID}">` +
     `<mb:Metadata>${labelXml}</mb:Metadata>` +
     references +
     '</mb:MetadataBinding></mb:MetadataBindingContainer></mb:BindingInformation>'

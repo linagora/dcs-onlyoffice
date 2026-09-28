@@ -34,7 +34,7 @@ interface Signed {
   xml: string;
 }
 
-interface Verification {
+interface XmlsecVerification {
   status: number | null;
   // "Manifests References (ok/all)", as xmlsec1 reports it.
   manifest: string | null;
@@ -55,22 +55,32 @@ describe('the signature of the document label binding', () => {
   let keys = '';
   let certificate = '';
 
-  // A demo key and its self-signed certificate, as init-env.sh makes them.
+  // A demo key and its self-signed certificate, as init-env.sh makes them;
+  // the other one belongs to another signer.
   before(async () => {
     keys = await mkdtemp(path.join(tmpdir(), 'binding-keys-'));
-    execFileSync('openssl', ['ecparam', '-name', 'prime256v1', '-genkey', '-noout', '-out', path.join(keys, 'key.pem')]);
-    execFileSync('openssl', ['req', '-new', '-x509', '-key', path.join(keys, 'key.pem'), '-out', path.join(keys, 'certificate.pem'), '-days', '30', '-subj', '/CN=Fictional test signer']);
-    certificate = await readFile(path.join(keys, 'certificate.pem'), 'utf8');
-    server = await buildPolicyServer({
-      spifDirectory: DEMO_SPIFS,
-      bindingSignature: { secret: SECRET, signer: { privateKey: await readFile(path.join(keys, 'key.pem'), 'utf8'), certificate } },
-      now: () => NOW,
-    });
+    for (const name of ['signer', 'other-signer']) {
+      execFileSync('openssl', ['ecparam', '-name', 'prime256v1', '-genkey', '-noout', '-out', path.join(keys, `${name}.key`)]);
+      execFileSync('openssl', ['req', '-new', '-x509', '-key', path.join(keys, `${name}.key`), '-out', path.join(keys, `${name}.pem`), '-days', '30', '-subj', `/CN=Fictional ${name}`]);
+    }
+    certificate = await readFile(path.join(keys, 'signer.pem'), 'utf8');
+    server = await signingServer('signer');
   });
   after(async () => {
     await server.close();
     await rm(keys, { recursive: true, force: true });
   });
+
+  async function signingServer(name: string): Promise<FastifyInstance> {
+    return buildPolicyServer({
+      spifDirectory: DEMO_SPIFS,
+      bindingSignature: {
+        secret: SECRET,
+        signer: { privateKey: await readFile(path.join(keys, `${name}.key`), 'utf8'), certificate: await readFile(path.join(keys, `${name}.pem`), 'utf8') },
+      },
+      now: () => NOW,
+    });
+  }
 
   // The demo template, labelled: its base label, and a binding that the
   // policy service computed for `bindingLabel` over its bindable parts, which
@@ -115,6 +125,38 @@ describe('the signature of the document label binding', () => {
     return { part: signed.part, xml: signed.xml };
   }
 
+  // A package whose binding `signer` signed, as the portal stores it.
+  async function signedPackage(docx: Uint8Array, signer: FastifyInstance = server): Promise<Uint8Array> {
+    const response = await signer.inject({
+      method: 'POST',
+      url: '/bindings/sign',
+      headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` },
+      payload: Buffer.from(docx),
+    });
+    const signed = signedOf(response.json());
+    const zip = await JSZip.loadAsync(docx);
+    zip.file(signed.part, signed.xml);
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  // A package with one of its parts rewritten.
+  async function withChangedPart(docx: Uint8Array, name: string, change: (content: string) => string): Promise<Uint8Array> {
+    const zip = await JSZip.loadAsync(docx);
+    zip.file(name, change((await zip.file(name)?.async('string')) ?? ''));
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  // The policy service's verdict on a package.
+  async function verdictOf(docx: Uint8Array, secret: string | null = SECRET): Promise<{ statusCode: number; body: unknown }> {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/bindings/verify',
+      headers: { 'content-type': DOCX_TYPE, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
+      payload: Buffer.from(docx),
+    });
+    return { statusCode: response.statusCode, body: response.json() };
+  }
+
   function replacementOf(body: unknown): unknown {
     assert.ok(typeof body === 'object' && body !== null && 'replacement' in body, 'expected a replacement');
     return body.replacement;
@@ -139,7 +181,7 @@ describe('the signature of the document label binding', () => {
   // Verifies a signed binding with xmlsec1, the independent verifier, against
   // the certificate, with the package parts its Manifest references mapped to
   // their pack:/// addresses. `alter` may change the extracted parts first.
-  async function verify(docx: Uint8Array, signed: Signed, alter: (directory: string) => Promise<void> = async () => {}): Promise<Verification> {
+  async function verifyWithXmlsec(docx: Uint8Array, signed: Signed, alter: (directory: string) => Promise<void> = async () => {}): Promise<XmlsecVerification> {
     const directory = await mkdtemp(path.join(tmpdir(), 'binding-parts-'));
     try {
       const zip = await JSZip.loadAsync(docx);
@@ -204,7 +246,7 @@ describe('the signature of the document label binding', () => {
       certificates: [certificate.replace(/-----(BEGIN|END) CERTIFICATE-----/g, '').replace(/\s/g, '')],
       metadataBindings: 1,
     });
-    const verification = await verify(docx, signed);
+    const verification = await verifyWithXmlsec(docx, signed);
     const count = bindableParts(await JSZip.loadAsync(docx)).length;
     assert.deepEqual(verification, { status: 0, manifest: `${count}/${count}` });
   });
@@ -213,7 +255,7 @@ describe('the signature of the document label binding', () => {
     const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
     const signed = signedOf((await sign(docx)).body);
 
-    const verification = await verify(docx, signed, async (parts) => {
+    const verification = await verifyWithXmlsec(docx, signed, async (parts) => {
       const document = path.join(parts, 'word', 'document.xml');
       await writeFile(document, `${await readFile(document, 'utf8')}<!-- changed after signing -->`);
     });
@@ -232,7 +274,7 @@ describe('the signature of the document label binding', () => {
     const signed = signedOf(body);
     assert.match(signed.xml, /<slab:Classification>DIFFUSION RESTREINTE<\/slab:Classification>/);
     const count = bindableParts(await JSZip.loadAsync(docx)).length;
-    assert.deepEqual(await verify(docx, signed), { status: 0, manifest: `${count}/${count}` });
+    assert.deepEqual(await verifyWithXmlsec(docx, signed), { status: 0, manifest: `${count}/${count}` });
   });
 
   it('writes the binding again from the labels in clear, so that nothing written in it by hand gets signed', async () => {
@@ -284,9 +326,96 @@ describe('the signature of the document label binding', () => {
     assert.deepEqual(body, { signed: null, replacement: null });
   });
 
+  it('finds a stored package whose binding it signed valid', async () => {
+    const docx = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+
+    assert.deepEqual(await verdictOf(docx), { statusCode: 200, body: { status: 'valid' } });
+  });
+
+  it('names the parts changed since signing', async () => {
+    const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+
+    const docx = await withChangedPart(signed, 'word/document.xml', (xml) => `${xml}<!-- changed after signing -->`);
+
+    assert.deepEqual(await verdictOf(docx), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'Parts changed since signing', changedParts: ['word/document.xml'] },
+    });
+  });
+
+  it('finds a binding changed since signing, or signed with another key, altered', async () => {
+    const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+    const relabelled = await withChangedPart(signed, 'customXml/item1.xml', (xml) =>
+      xml.replace('<slab:Classification>DIFFUSION RESTREINTE</slab:Classification>', '<slab:Classification>NON PROTÉGÉ</slab:Classification>'),
+    );
+    const otherSigner = await signingServer('other-signer');
+    const signedElsewhere = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE), otherSigner);
+    await otherSigner.close();
+
+    for (const docx of [relabelled, signedElsewhere]) {
+      assert.deepEqual(await verdictOf(docx), {
+        statusCode: 200,
+        body: { status: 'altered', reason: 'The signature does not hold', changedParts: [] },
+      });
+    }
+  });
+
+  it('finds what the binding holds beside what its signature covers altered', async () => {
+    const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+    const forged =
+      '<slab:originatorConfidentialityLabel xmlns:slab="urn:nato:stanag:4774:confidentialitymetadatalabel:1:0">' +
+      '<slab:ConfidentialityInformation><slab:Classification>NON PROTÉGÉ</slab:Classification></slab:ConfidentialityInformation>' +
+      '</slab:originatorConfidentialityLabel>';
+    const additions: ((xml: string) => string)[] = [
+      (xml) => xml.replace('<X509Data>', `${forged}<X509Data>`),
+      (xml) => xml.replace('</Signature>', `<Object>${forged}</Object></Signature>`),
+      (xml) => xml.replace('<mb:MetadataBindingContainer>', `<mb:MetadataBindingContainer><mb:Metadata>${forged}</mb:Metadata></mb:MetadataBindingContainer><mb:MetadataBindingContainer>`),
+      (xml) => xml.replace('</mb:MetadataBindingContainer>', '</mb:MetadataBindingContainer><mb:DataReference URI="pack:///word/fictional.xml"/>'),
+    ];
+
+    for (const add of additions) {
+      assert.deepEqual(await verdictOf(await withChangedPart(signed, 'customXml/item1.xml', add)), {
+        statusCode: 200,
+        body: { status: 'altered', reason: 'The binding holds what its signature does not cover', changedParts: [] },
+      });
+    }
+  });
+
+  it('finds a binding that is no well-formed XML without a DTD altered', async () => {
+    const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+    const breakages: ((xml: string) => string)[] = [(xml) => `<!DOCTYPE fictional [<!ENTITY label "NON PROTÉGÉ">]>${xml}`, (xml) => xml.slice(0, -20)];
+
+    for (const breakage of breakages) {
+      assert.deepEqual(await verdictOf(await withChangedPart(signed, 'customXml/item1.xml', breakage)), {
+        statusCode: 200,
+        body: { status: 'altered', reason: 'The binding is not well-formed XML', changedParts: [] },
+      });
+    }
+  });
+
+  it('finds a package whose base label has no binding altered', async () => {
+    const zip = await JSZip.loadAsync(await readFile(TEMPLATE));
+    zip.file('customXml/item1.xml', `<dcs:document xmlns:dcs="urn:linagora:dcs:document:1" base="${DIFFUSION_RESTREINTE}"/>`);
+
+    assert.deepEqual(await verdictOf(await zip.generateAsync({ type: 'uint8array' })), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'The package has a base label but no document label binding', changedParts: [] },
+    });
+  });
+
+  it('finds a binding without a signature unsigned, and a package without labels unlabelled', async () => {
+    assert.deepEqual(await verdictOf(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE)), {
+      statusCode: 200,
+      body: { status: 'unsigned' },
+    });
+    assert.deepEqual(await verdictOf(new Uint8Array(await readFile(TEMPLATE))), { statusCode: 200, body: { status: 'unlabelled' } });
+  });
+
   it('answers only the holder of the shared secret', async () => {
     const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
     assert.equal((await sign(docx, null)).statusCode, 403);
     assert.equal((await sign(docx, 'not-the-secret')).statusCode, 403);
+    assert.equal((await verdictOf(docx, null)).statusCode, 403);
+    assert.equal((await verdictOf(docx, 'not-the-secret')).statusCode, 403);
   });
 });
