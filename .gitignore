@@ -14,3 +14,5 @@ playwright-report/
 blob-report/
 # Seeds with real people's addresses stay on the host.
 deploy/directory/seeds/local-*.json
+# So does the label mapping of a real Microsoft 365 tenant.
+deploy/spif/local-*.json
