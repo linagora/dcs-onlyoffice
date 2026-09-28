@@ -69,6 +69,15 @@ export function watchBubbleOpenings(page: Page): string[] {
   return openings;
 }
 
+// The frame where ONLYOFFICE's own scripts run.
+export function editorFrame(page: Page): Frame {
+  const frame = page.frame({ name: 'frameEditor' });
+  if (frame === null) {
+    throw new Error('The page holds no editor');
+  }
+  return frame;
+}
+
 export async function pluginFrame(page: Page): Promise<Frame> {
   let found: Frame | null = null;
   await expect
