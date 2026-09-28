@@ -28,7 +28,7 @@ A document often mixes information of different sensitivity: a report releasable
 
 DCS ONLYOFFICE lets authors insert protected portions into a document edited in ONLYOFFICE Docs. Each portion carries its own ADatP-4774 label, chosen among the labels that the security policy and the author's clearance allow. Its text is typed in a side panel, the labelling panel, and never reaches the document body, which only shows a locked, coloured placeholder. The author's browser encrypts that text with [OpenTDF](https://opentdf.io), wrapping its key with hybrid post-quantum key encapsulation, and OpenTDF only hands the key to readers whose clearance allows the label.
 
-The document carries a label computed from its content, stored as the standard ADatP-4778.2 OOXML binding so that other labelling tools can read it, and marked at the top and the bottom of every page. The security policy is never hard-coded: it is read from an Open XML SPIF file.
+The document carries a label computed from its content, stored as the standard ADatP-4778.2 OOXML binding so that other labelling tools can read it, signed by the platform at each save, and marked at the top and the bottom of every page. The security policy is never hard-coded: it is read from an Open XML SPIF file.
 
 The stack runs with Docker Compose: ONLYOFFICE Docs Community Edition, the OpenTDF platform, a portal that signs people in and stores the documents, a policy service and PostgreSQL, plus a local reverse proxy and identity provider for standalone use.
 
@@ -71,6 +71,7 @@ The stack runs with Docker Compose: ONLYOFFICE Docs Community Edition, the OpenT
 - **ADatP-4774 labels.** Each portion label sits in the file in clear, for everyone and for other labelling tools, and bound in the portion's envelope.
 - **Document label.** Computed from the base label and the portion labels, with one of two rules: `clear-parts` (the base label plus an indicator when a portion is more restrictive) or `high-water-mark` (the ADatP-4774.1 dominant label).
 - **ADatP-4778.2 binding.** The document label is stored as the standard OOXML binding, which references the package parts it covers; the portal brings that list of parts up to date at every save.
+- **Signed binding.** At each save it stores, the portal has the policy service compute the document label again from the labels in clear, replace a different one, which the portal logs, write the binding again and sign it as ADatP-4778.2 Annexes A and B lay out: an XML signature first in the binding, ECDSA P-256 with SHA-256 over SHA-384 digests, exclusive canonicalization, the certificate in `KeyInfo`, the package parts in a `Manifest` and the signing time in `SignatureProperties` ([ADR 0004](docs/adr/0004-the-policy-service-signs-the-document-label-binding.md)). The signature proves that the platform computed the label from the labels in clear and bound it to those parts when it stored the file, not who wrote the content; [SECURITY.md](SECURITY.md) tells what it leaves out. The tests check it with `xmlsec1`, an independent verifier.
 - **Security policy from a SPIF.** The policy service reads Open XML SPIF 2.1 files: valid labels and their rules, markings in several languages, ADatP-4774 serialization and the ADatP-4778.2 binding part. No policy name, label or rule is hard-coded.
 
 ### Encryption
@@ -169,7 +170,7 @@ The policy service, PostgreSQL and the local identity provider publish no port. 
 | --- | --- | --- |
 | `portal` | Sign-in, document list and storage, editor configuration, relays to the policy service and to OpenTDF, clearance administration page; serves the plugin | Node.js 22, [Fastify](https://fastify.dev) 5, [openid-client](https://github.com/panva/openid-client) 6 |
 | `plugin` | Labelling panel and bubble inside the editor | [Preact](https://preactjs.com) 10, [Vite](https://vite.dev) 8, ONLYOFFICE plugin API, [OpenTDF web SDK](https://github.com/opentdf/web-sdk) 0.21 with hybrid key wrapping ([`plugin/vendor`](plugin/vendor/README.md)) |
-| `policy` | Reads SPIF files, validates labels, renders markings, computes the document label and its ADatP-4778.2 part, holds portion locks, keeps the clearance directory, makes access decisions and derives OpenTDF's attributes | Node.js 22, Fastify 5, PostgreSQL |
+| `policy` | Reads SPIF files, validates labels, renders markings, computes the document label and its ADatP-4778.2 part, signs that part at each save, holds portion locks, keeps the clearance directory, makes access decisions and derives OpenTDF's attributes | Node.js 22, Fastify 5, PostgreSQL, [xml-crypto](https://github.com/node-saml/xml-crypto) 6 |
 | `opentdf-provisioning` | One-shot job: creates the KAS's hybrid key in OpenTDF's key registry, then applies to OpenTDF the attributes and subject mappings that the policy service derives, with an IdP client that OpenTDF makes an administrator | Node.js 22, in the policy service's image |
 | `init`, `database-setup` | One-shot jobs: the demo documents and the local certificate authority; the roles and schemas of PostgreSQL | Shell scripts |
 | `onlyoffice` | Document editing and co-editing | [ONLYOFFICE Docs](https://github.com/ONLYOFFICE/DocumentServer) 9.4 Community Edition, with one change ([`deploy/onlyoffice/Dockerfile`](deploy/onlyoffice/Dockerfile)) |
@@ -184,7 +185,7 @@ Third-party images are pinned to exact versions in [`deploy/docker-compose.yml`]
 ### What the document holds
 
 - **Each portion** is a locked content control whose tag names the portion and its label, and whose content is a placeholder with the portion's marking. Its envelope, a ZTDF archive holding the encrypted text and the label as a bound assertion, and its ADatP-4774 label in clear sit in **one Custom XML part per portion** (`urn:linagora:dcs:portion:1`). Portions written before encryption keep their text in clear there; the panel still shows them, with a warning.
-- **The document label** is stored as an ADatP-4778.2 `BindingInformation` part that references the package parts it covers, alongside a small part (`urn:linagora:dcs:document:1`) that keeps the base label.
+- **The document label** is stored as an ADatP-4778.2 `BindingInformation` part that references the package parts it covers, alongside a small part (`urn:linagora:dcs:document:1`) that keeps the base label. Its first child is the XML signature the policy service adds at each save.
 - **The page marking** is a locked content control, first in every header and last in every footer, whose tag names the document label it shows and whose paragraph holds its marking. The first section has all three kinds of header and footer (default, first page, even pages); a later section only keeps the page marking in the ones of its own, the others showing the previous section's.
 - Custom XML parts survive saving to DOCX and reopening, and propagate to co-authors; the end-to-end tests prove both.
 
@@ -254,6 +255,8 @@ The stack reads `deploy/.env`, created from [`deploy/.env.example`](deploy/.env.
 | `OPENTDF_PLATFORM_DB_PASSWORD` | Password of the OpenTDF platform's database role, which may create schemas and owns the platform's, but has no right on the clearance directory, generated by `init-env.sh` |
 | `DIRECTORY_DB_PASSWORD`, `DIRECTORY_READER_PASSWORD` | Passwords of the clearance directory's database roles, generated by `init-env.sh` |
 | `DIRECTORY_ADMINISTRATION_SECRET` | Secret the portal shares with the policy service, which lets the portal alone change the clearance directory, generated by `init-env.sh` |
+| `BINDING_SIGNING_KEY`, `BINDING_SIGNING_CERTIFICATE` | The ECDSA P-256 key that signs document label bindings and its certificate, as base64-encoded PEM: `init-env.sh` generates a demo key with a self-signed certificate |
+| `BINDING_SIGNATURE_SECRET` | Secret the portal shares with the policy service to have bindings signed, generated by `init-env.sh` |
 | `OPENTDF_PROVISIONER_CLIENT_SECRET` | Secret of `dcs-provisioner`, the IdP client of the provisioning job (client credentials grant only), generated by `init-env.sh` and shared with the local IdP |
 | `OPENTDF_KAS_ROOT_KEY` | Root key of OpenTDF's key registry, which wraps the KAS's private keys in OpenTDF's database, generated by `init-env.sh`; without it, no envelope can be read |
 
@@ -290,7 +293,7 @@ The CI runs the type checks and the API tests, then starts the `standalone` stac
 
 ## Roadmap
 
-Iteration 4 is in progress: changing a portion's text and label, page markings and the journal of label changes are done; deleting portions and the signed ADatP-4778 binding come next.
+Iteration 4 is in progress: changing a portion's text and label, page markings, the journal of label changes and the signed ADatP-4778 binding are done; deleting portions and checking the signature of stored files come next.
 
 | Iteration | Scope | Status |
 | --- | --- | --- |
