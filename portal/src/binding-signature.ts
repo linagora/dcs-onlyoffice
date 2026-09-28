@@ -9,11 +9,23 @@ interface SignatureAnswer {
   replacement: { before: string | null; after: string } | null;
 }
 
+// What the policy service finds in a stored file: a binding whose signature
+// holds, one that no longer matches it, one without a signature, or no labels.
+type BindingVerification =
+  | { status: 'valid' }
+  | { status: 'altered'; reason: string; changedParts: string[] }
+  | { status: 'unsigned' }
+  | { status: 'unlabelled' };
+
+// Where the portal serves a stored file.
+export type ServedTo = 'document-server' | 'download';
+
 // Has the policy service sign the document label's binding of each file the
-// portal is about to store (ADR 0004). The policy service first computes the
-// document label again from the labels in clear, and replaces a different
-// one, which the portal logs. A file whose binding cannot be signed is stored
-// unsigned, and the failure logged: a save is never lost.
+// portal is about to store (ADR 0004), and check it whenever the portal
+// serves a stored file. The policy service first computes the document label
+// again from the labels in clear, and replaces a different one, which the
+// portal logs. A file whose binding cannot be signed is stored unsigned, and
+// the failure logged: a save is never lost.
 export class BindingSignatures {
   #policyUrl: string;
   #secret: string;
@@ -28,7 +40,7 @@ export class BindingSignatures {
   async signed(docx: Uint8Array, documentId: string): Promise<Uint8Array> {
     let answer: SignatureAnswer;
     try {
-      answer = await this.#ask(docx);
+      answer = await this.#ask('/bindings/sign', docx, readSignatureAnswer);
     } catch (error: unknown) {
       this.#log.error({ documentId, err: error }, 'The binding of a save could not be signed');
       return docx;
@@ -44,21 +56,54 @@ export class BindingSignatures {
     return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   }
 
-  async #ask(docx: Uint8Array): Promise<SignatureAnswer> {
-    const response = await fetch(new URL('/bindings/sign', this.#policyUrl), {
+  // Checks a stored file being served, aside: it is served all the same. A
+  // file that no longer matches its binding's signature is logged, and so is
+  // one that holds none, until its next save signs it.
+  checkAside(docx: Uint8Array, documentId: string, servedTo: ServedTo): void {
+    this.#check(docx, documentId, servedTo).catch((error: unknown) => {
+      this.#log.error({ documentId, servedTo, err: error }, 'The signature of a stored file could not be checked');
+    });
+  }
+
+  async #check(docx: Uint8Array, documentId: string, servedTo: ServedTo): Promise<void> {
+    const verification = await this.#ask('/bindings/verify', docx, readVerification);
+    if (verification.status === 'altered') {
+      const { reason, changedParts } = verification;
+      this.#log.warn({ documentId, servedTo, reason, changedParts }, 'Stored file no longer matches its signature');
+    } else if (verification.status === 'unsigned') {
+      this.#log.info({ documentId, servedTo }, 'Stored file unsigned');
+    }
+  }
+
+  async #ask<T>(route: string, docx: Uint8Array, read: (body: unknown) => T | null): Promise<T> {
+    const response = await fetch(new URL(route, this.#policyUrl), {
       method: 'POST',
       headers: { authorization: `Bearer ${this.#secret}`, 'content-type': DOCX_CONTENT_TYPE },
       body: docx,
       signal: AbortSignal.timeout(SIGNATURE_TIMEOUT_MS),
     });
     const body: unknown = await response.json();
-    const answer = response.ok ? readSignatureAnswer(body) : null;
+    const answer = response.ok ? read(body) : null;
     if (answer === null) {
-      const reason = typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string' ? body.error : 'no signed binding';
+      const reason = typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string' ? body.error : 'an unexpected answer';
       throw new Error(`The policy service answered ${response.status}: ${reason}`);
     }
     return answer;
   }
+}
+
+function readVerification(body: unknown): BindingVerification | null {
+  if (typeof body !== 'object' || body === null || !('status' in body)) {
+    return null;
+  }
+  if (body.status === 'valid' || body.status === 'unsigned' || body.status === 'unlabelled') {
+    return { status: body.status };
+  }
+  if (body.status !== 'altered' || !('reason' in body) || typeof body.reason !== 'string' || !('changedParts' in body) || !Array.isArray(body.changedParts)) {
+    return null;
+  }
+  const changedParts: unknown[] = body.changedParts;
+  return changedParts.every((part): part is string => typeof part === 'string') ? { status: 'altered', reason: body.reason, changedParts } : null;
 }
 
 function readSignatureAnswer(body: unknown): SignatureAnswer | null {

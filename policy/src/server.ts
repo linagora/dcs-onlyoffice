@@ -20,7 +20,7 @@ import {
 import { type Marking, renderMarking } from './marking.ts';
 import { isStringList, readTextField, unknownArray } from './guards.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
-import { registerPackageSigning } from './package-signing.ts';
+import { registerPackageSignatures } from './package-signing.ts';
 import { computeDocumentLabel, type DocumentLabelResult, isMoreRestrictive, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
@@ -413,7 +413,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
 
   const { bindingSignature } = options;
   if (bindingSignature !== undefined) {
-    registerPackageSigning(app, {
+    registerPackageSignatures(app, {
       ...bindingSignature,
       now,
       codeOfLabelXml: (xml) => {

@@ -1,27 +1,15 @@
-import type { Page } from '@playwright/test';
-import { deploymentSetting, portalLogEntries } from './support/deployment.ts';
+import { documentLogEntries } from './support/deployment.ts';
 import { browserFetch, openNewDocument } from './support/documents.ts';
 import { BINDING_NAMESPACE } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
-import { field, stringField } from './support/json.ts';
+import { stringField } from './support/json.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, replaceCustomXmlParts } from './support/plugin.ts';
-import { forceSavedDocx, insertPortion } from './support/portions.ts';
-import { verifyBindingSignature } from './support/signature.ts';
+import { forceSavedDocx, insertPortion, storedFile } from './support/portions.ts';
+import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
-
-// The demo certificate init-env.sh generated, as deploy/.env holds it.
-function demoCertificate(): string {
-  return Buffer.from(deploymentSetting('BINDING_SIGNING_CERTIFICATE'), 'base64').toString('utf8');
-}
-
-async function storedFile(page: Page, documentId: string): Promise<Buffer> {
-  const response = await browserFetch(page, `/documents/${documentId}/download`);
-  expect(response.status).toBe(200);
-  return response.body;
-}
 
 test('each save signs the document label binding, which xmlsec1 verifies against the demo certificate', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
@@ -59,8 +47,7 @@ test('a document label written in the file by hand is replaced at the next save,
   await replaceCustomXmlParts(await pluginFrame(page), BINDING_NAMESPACE, binding);
 
   // The editor keeps the hand-written label: each save replaces it again.
-  const replacements = (): unknown[] =>
-    portalLogEntries(since).filter((entry) => field(entry, 'msg') === 'Document label replaced at save' && field(entry, 'documentId') === documentId);
+  const replacements = (): unknown[] => documentLogEntries(since, 'Document label replaced at save', documentId);
   await expect
     .poll(async () => {
       await browserFetch(page, `/documents/${documentId}/forcesave`, 'POST');

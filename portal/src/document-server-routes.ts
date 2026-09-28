@@ -1,4 +1,3 @@
-import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { BindingSignatures } from './binding-signature.ts';
@@ -47,7 +46,9 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
     if (document === null) {
       return reply.code(404).send({ error: 'Document not found' });
     }
-    return reply.type(DOCX_CONTENT_TYPE).send(createReadStream(document.filePath));
+    const content = await readFile(document.filePath);
+    services.signatures.checkAside(content, document.id, 'document-server');
+    return reply.type(DOCX_CONTENT_TYPE).send(content);
   });
 
   app.post<{ Params: DocumentParams }>(`${INTERNAL_DOCUMENTS_PATH}/:id/callback`, async (request, reply) => {

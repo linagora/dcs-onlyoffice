@@ -4,19 +4,25 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DOMParser } from '@xmldom/xmldom';
 import JSZip from 'jszip';
+import { deploymentSetting } from './deployment.ts';
 import { BINDING_NAMESPACE, SIGNATURE_NAMESPACE } from './docx.ts';
 
-export interface BindingVerification {
+export interface XmlsecVerification {
   status: number | null;
   // "Manifests References (ok/all)", as xmlsec1 reports it.
   manifest: string | null;
+}
+
+// The demo certificate init-env.sh generated, as deploy/.env holds it.
+export function demoCertificate(): string {
+  return Buffer.from(deploymentSetting('BINDING_SIGNING_CERTIFICATE'), 'base64').toString('utf8');
 }
 
 // Verifies the signature of a DOCX package's document label binding with
 // xmlsec1, the independent verifier, against a certificate: xmlsec1 exits
 // with 0 when the signature and the references of its SignedInfo hold, and
 // reports how many of the package parts its Manifest references still match.
-export async function verifyBindingSignature(docx: Buffer, certificate: string): Promise<BindingVerification> {
+export async function verifyBindingSignature(docx: Buffer, certificate: string): Promise<XmlsecVerification> {
   const directory = await mkdtemp(path.join(tmpdir(), 'binding-'));
   try {
     const zip = await JSZip.loadAsync(docx);
