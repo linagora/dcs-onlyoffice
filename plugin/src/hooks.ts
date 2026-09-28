@@ -133,8 +133,13 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
 // The document label computed from the document's content. Two authors
 // inserting at the same moment each write a document label that misses the
 // other's portion, and the last writer wins: whoever may write and notices
-// that the stored label is stale rewrites it.
-export function useDocumentLabel(request: DocumentLabelRequest | null, storedLabelCode: string | null, canWrite: boolean): LabelView | null {
+// that the stored label or its page marking is stale rewrites both. So does
+// the first author to open a labelled document that has no page marking yet.
+export function useDocumentLabel(
+  request: DocumentLabelRequest | null,
+  stored: Pick<DocumentState, 'documentLabelCode' | 'pageMarking'> | null,
+  canWrite: boolean,
+): LabelView | null {
   const [label, setLabel] = useState<LabelView | null>(null);
   useEffect(() => {
     if (request === null) {
@@ -147,7 +152,11 @@ export function useDocumentLabel(request: DocumentLabelRequest | null, storedLab
         return;
       }
       setLabel(computed.label);
-      if (canWrite && storedLabelCode !== null && storedLabelCode !== computed.label.code) {
+      const storedLabelCode = stored?.documentLabelCode ?? null;
+      const pageMarking = stored?.pageMarking ?? null;
+      const stale =
+        storedLabelCode !== computed.label.code || pageMarking?.labelCode !== computed.label.code || pageMarking.text !== computed.label.marking.text;
+      if (canWrite && storedLabelCode !== null && stale) {
         await writeDocumentLabel(request);
       }
     };
@@ -160,7 +169,7 @@ export function useDocumentLabel(request: DocumentLabelRequest | null, storedLab
     return () => {
       cancelled = true;
     };
-  }, [request, storedLabelCode, canWrite]);
+  }, [request, stored, canWrite]);
   return label;
 }
 

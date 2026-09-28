@@ -32,12 +32,16 @@ declare global {
 // Globals of the editor's sandbox, where a command runs.
 interface SandboxBlock {
   SetTag(tag: string): unknown;
-  GetContent(): { GetElement(index: number): { AddText(text: string): unknown } };
+  GetContent(): { GetElement(index: number): { AddText(text: string): unknown; RemoveAllElements(): unknown } };
   SetLock(lock: string): unknown;
 }
 
 interface SandboxApi {
-  GetDocument(): { InsertContent(content: SandboxBlock[]): unknown; GetCustomXmlParts(): { Add(xml: string): unknown } };
+  GetDocument(): {
+    InsertContent(content: SandboxBlock[]): unknown;
+    GetCustomXmlParts(): { Add(xml: string): unknown };
+    GetSections(): { GetHeader(type: 'default', create: false): { GetElement(index: number): SandboxBlock | null } | null }[];
+  };
   CreateBlockLvlSdt(): SandboxBlock;
 }
 
@@ -165,16 +169,10 @@ export async function insertMovedEnvelope(frame: Frame, portion: MovedEnvelope):
   await writePortion(frame, portion, 'ztdf', portion.envelope);
 }
 
-// The plugin SDK keeps a single callback slot, so the panel's commands are
-// held off, and the test waits for the one the editor may still be answering
-// before it sends its own.
+// Writes a portion bypassing the panel.
 async function writePortion(frame: Frame, portion: WrittenPortion, encoding: StoredEncoding, content: string): Promise<void> {
-  await breakEditorCommands(frame, 'Held off while the test writes a portion');
-  try {
-    await expect
-      .poll(async () => frame.evaluate(() => (window.Asc?.plugin?.onCallCommandCallback ?? null) === null), { timeout: 30_000 })
-      .toBe(true);
-    await frame.evaluate(
+  await whilePanelCommandsHeld(frame, async () =>
+    frame.evaluate(
       async (scope) =>
         new Promise<void>((resolve, reject) => {
           const runtime = window.Asc;
@@ -206,7 +204,100 @@ async function writePortion(frame: Frame, portion: WrittenPortion, encoding: Sto
           );
         }),
       portionScope(portion, encoding, content),
-    );
+    ),
+  );
+}
+
+// Adds Custom XML parts to the document, bypassing the panel.
+export async function addCustomXmlParts(frame: Frame, xmls: string[]): Promise<void> {
+  await whilePanelCommandsHeld(frame, async () =>
+    frame.evaluate(
+      async (parts) =>
+        new Promise<void>((resolve, reject) => {
+          const runtime = window.Asc;
+          const callCommand = window.dcsWorkingCallCommand;
+          if (runtime === undefined || callCommand === undefined) {
+            reject(new Error('The plugin runtime has no callCommand'));
+            return;
+          }
+          runtime.scope = parts;
+          callCommand.call(
+            runtime.plugin,
+            () => {
+              // Runs in the editor's sandbox, with Api and Asc.scope only.
+              const added = Asc.scope as string[]; // SAFETY: the scope set just above
+              const customXmlParts = Api.GetDocument().GetCustomXmlParts();
+              for (const xml of added) {
+                customXmlParts.Add(xml);
+              }
+              return true;
+            },
+            false,
+            true,
+            () => {
+              resolve();
+            },
+          );
+        }),
+      xmls,
+    ),
+  );
+}
+
+// Changes the words of the page marking that opens the first section's
+// default header, as an author could once they unlock it. The panel's
+// commands must be held.
+export async function rewordPageMarking(frame: Frame, words: string): Promise<void> {
+  await frame.evaluate(
+    async (scope) =>
+      new Promise<void>((resolve, reject) => {
+        const runtime = window.Asc;
+        const callCommand = window.dcsWorkingCallCommand;
+        if (runtime === undefined || callCommand === undefined) {
+          reject(new Error('The panel\'s commands are not held'));
+          return;
+        }
+        runtime.scope = scope;
+        callCommand.call(
+          runtime.plugin,
+          () => {
+            // Runs in the editor's sandbox, with Api and Asc.scope only.
+            const text = Asc.scope as string; // SAFETY: the scope set just above
+            const marking = Api.GetDocument().GetSections()[0]?.GetHeader('default', false)?.GetElement(0) ?? null;
+            if (marking === null) {
+              return false;
+            }
+            marking.SetLock('unlocked');
+            const paragraph = marking.GetContent().GetElement(0);
+            paragraph.RemoveAllElements();
+            paragraph.AddText(text);
+            return true;
+          },
+          false,
+          true,
+          () => {
+            resolve();
+          },
+        );
+      }),
+    words,
+  );
+}
+
+// The plugin SDK keeps a single callback slot, so the panel's commands are
+// held off, and the test waits for the one the editor may still be answering
+// before it sends its own.
+export async function holdPanelCommands(frame: Frame): Promise<void> {
+  await breakEditorCommands(frame, 'Held off while the test writes to the document');
+  await expect
+    .poll(async () => frame.evaluate(() => (window.Asc?.plugin?.onCallCommandCallback ?? null) === null), { timeout: 30_000 })
+    .toBe(true);
+}
+
+async function whilePanelCommandsHeld(frame: Frame, write: () => Promise<void>): Promise<void> {
+  await holdPanelCommands(frame);
+  try {
+    await write();
   } finally {
     await restoreEditorCommands(frame);
   }

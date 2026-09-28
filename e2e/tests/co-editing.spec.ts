@@ -1,5 +1,6 @@
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
+import { pageMarkingTexts } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
@@ -29,7 +30,7 @@ test('portions and the document label reach a co-author without reloading', asyn
   await bob.context().close();
 });
 
-test('portions inserted at the same moment by two authors are both kept, with the right document label', async ({
+test('portions inserted at the same moment by two authors are both kept, with the right document label and page marking', async ({
   page,
   browser,
 }) => {
@@ -64,12 +65,16 @@ test('portions inserted at the same moment by two authors are both kept, with th
     documentId,
     (saved) =>
       saved.portionParts.length === 2 &&
-      saved.bindings[0]?.label?.categories.some((category) => category.tagName === 'Composition') === true,
+      saved.bindings[0]?.label?.categories.some((category) => category.tagName === 'Composition') === true &&
+      pageMarkingTexts(saved).every((text) => text === WITH_MORE_RESTRICTIVE_PORTIONS),
   );
   expect(docx.portionParts.map((part) => part.encoding)).toEqual(['ztdf', 'ztdf']);
   expect(docx.allText).not.toContain(aliceText);
   expect(docx.allText).not.toContain(bobText);
   expect(docx.contentControls).toHaveLength(2);
   expect(docx.bindings).toHaveLength(1);
+  // One page marking in each of the six headers and footers: default, first
+  // page and even pages.
+  expect(pageMarkingTexts(docx)).toEqual(Array.from({ length: 6 }, () => WITH_MORE_RESTRICTIVE_PORTIONS));
   await bob.context().close();
 });

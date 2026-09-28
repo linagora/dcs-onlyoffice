@@ -54,6 +54,7 @@ const ENGLISH = {
   toolbarButtonHint: 'Insert a protected portion',
   // Portion blocks, written into the document
   portionAlias: 'Protected portion',
+  pageMarkingAlias: 'Page marking',
   portionPlaceholder: (marking: string): string => `${marking} – protected portion`,
 };
 
@@ -106,6 +107,7 @@ const FRENCH: Messages = {
   toolbarButton: 'Portion protégée',
   toolbarButtonHint: 'Insérer une portion protégée',
   portionAlias: 'Portion protégée',
+  pageMarkingAlias: 'Marquage de page',
   portionPlaceholder: (marking: string): string => `${marking} – portion protégée`,
 };
 
