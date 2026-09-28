@@ -90,6 +90,7 @@ services:
       SPIF_DIR: /spif
       MARKING_LANGUAGE: ${MARKING_LANGUAGE:-fr}
       ROLLUP_RULE: ${ROLLUP_RULE:-clear-parts}
+      PORTION_LOCK_LEASE_SECONDS: ${PORTION_LOCK_LEASE_SECONDS:-300}
       DIRECTORY_DB_HOST: postgres
       DIRECTORY_DB_NAME: opentdf
       DIRECTORY_DB_USER: dcs_directory

@@ -17,3 +17,20 @@ export function callerIsAdministrator(request: FastifyRequest): boolean {
   const groups = typeof header === 'string' && header !== '' ? header.split(',').map(decodeURIComponent) : [];
   return groups.includes(ADMINISTRATORS);
 }
+
+export interface CallerIdentity {
+  id: string;
+  name: string;
+}
+
+// The caller's user id and display name, which the relay sends URI-encoded;
+// null without an id.
+export function callerIdentity(request: FastifyRequest): CallerIdentity | null {
+  const id = request.headers['x-user-id'];
+  const name = request.headers['x-user-name'];
+  const decodedId = typeof id === 'string' ? decodeURIComponent(id) : '';
+  if (decodedId === '') {
+    return null;
+  }
+  return { id: decodedId, name: typeof name === 'string' && name !== '' ? decodeURIComponent(name) : decodedId };
+}
