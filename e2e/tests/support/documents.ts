@@ -1,5 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import JSZip from 'jszip';
+import { DOMAIN } from './deployment.ts';
 
 // Annotation naming a document a test created; the page fixture attaches its
 // stored DOCX to the test's results as evidence.
@@ -23,6 +24,55 @@ export async function openNewDocument(page: Page, templateFileName: string): Pro
 export async function openDocument(page: Page, documentId: string): Promise<void> {
   await page.goto(`/documents/${documentId}/edit`);
   await waitForEditorReady(page);
+}
+
+// Starts the editor with a configuration the portal signed earlier, as an
+// editor page kept open since would when it reconnects. It runs on a page the
+// portal serves: Chromium keeps a page that Playwright serves itself from
+// loading the editor's script, on the stack's private network. The page
+// records the names of the events the editor raises.
+export async function openWithEarlierConfig(page: Page, config: EditorPageConfig): Promise<void> {
+  await page.goto('/');
+  await page.evaluate(
+    async ({ config, apiScriptUrl }) => {
+      document.body.innerHTML = '<div id="editor" style="height: 100vh"></div>';
+      document.body.style.margin = '0';
+      await new Promise<void>((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = apiScriptUrl;
+        script.addEventListener('load', () => {
+          resolve();
+        });
+        script.addEventListener('error', () => {
+          reject(new Error(`${apiScriptUrl} did not load`));
+        });
+        document.head.append(script);
+      });
+      const docsApi = Reflect.get(window, 'DocsAPI') as { DocEditor: new (id: string, config: unknown) => unknown }; // SAFETY: api.js has just installed it
+      const events: string[] = [];
+      Object.assign(window, { dcsEditorEvents: events });
+      const record = (name: string) => () => {
+        events.push(name);
+      };
+      new docsApi.DocEditor('editor', {
+        ...config,
+        events: {
+          onDocumentReady: record('onDocumentReady'),
+          onError: record('onError'),
+          onOutdatedVersion: record('onOutdatedVersion'),
+          onRequestRefreshFile: record('onRequestRefreshFile'),
+          onWarning: record('onWarning'),
+        },
+      });
+    },
+    { config, apiScriptUrl: `https://docs.${DOMAIN}/web-apps/apps/api/documents/api.js` },
+  );
+}
+
+// The events that the editor started by openWithEarlierConfig has raised.
+export async function earlierEditorEvents(page: Page): Promise<string[]> {
+  const events: unknown = await page.evaluate(() => Reflect.get(window, 'dcsEditorEvents'));
+  return Array.isArray(events) ? events.map(String) : [];
 }
 
 // ONLYOFFICE's editor sometimes runs one of its own modules before the base
@@ -69,7 +119,7 @@ async function editorLoadOutcome(page: Page): Promise<'ready' | 'failed'> {
   return (await outcome()) === 'ready' ? 'ready' : 'failed';
 }
 
-interface EditorPageConfig {
+export interface EditorPageConfig {
   document: { key: string; permissions: { edit: boolean } };
   editorConfig: { mode: string; user: { id: string; name: string } };
 }

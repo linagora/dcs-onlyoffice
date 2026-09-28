@@ -4,7 +4,8 @@ import type { BaseLabelAudit } from './base-label-audit.ts';
 import { refreshBindingReferences } from './binding.ts';
 import type { PortalConfig } from './config.ts';
 import { type BaseLabels, baseLabelCodeOf } from './document-labels.ts';
-import { DOCX_CONTENT_TYPE, findDocument, type SaveKind, saveDocumentContent } from './documents.ts';
+import { DOCX_CONTENT_TYPE, findDocument, moveDocumentToNewKey, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
+import type { EditingSessions } from './editing-sessions.ts';
 import { INTERNAL_DOCUMENTS_PATH, internalDocumentUrl } from './editor-config.ts';
 import {
   CALLBACK_FAILED,
@@ -20,15 +21,16 @@ interface DocumentParams {
   id: string;
 }
 
-// What a save needs to log the lowering of a base label: the stored file's
-// label and the audit.
-export interface SaveAudit {
+// What a save needs besides the file: the stored file's base label, the audit
+// that logs its lowering, and the editing sessions that follow it.
+export interface SaveServices {
   baseLabels: BaseLabels;
   audit: BaseLabelAudit;
+  editingSessions: EditingSessions;
 }
 
 // Routes the Document Server calls to load and save documents.
-export function registerDocumentServerRoutes(app: FastifyInstance, config: PortalConfig, saveAudit: SaveAudit): FastifyInstance {
+export function registerDocumentServerRoutes(app: FastifyInstance, config: PortalConfig, services: SaveServices): FastifyInstance {
   // Routes under /internal are only reachable from the Compose network: the
   // reverse proxy refuses them.
   // Only a Document Server download token for this very document's URL.
@@ -55,7 +57,10 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
       request.log.warn({ documentId: request.params.id }, 'Rejected an unsigned or invalid callback');
       return reply.code(401).send(CALLBACK_FAILED);
     }
-    const saved = await inArrivalOrder(request.params.id, async () => storeCallbackFile(config, saveAudit, request.log, request.params.id, callback));
+    if (callback.joined.length > 0) {
+      admitInBackground(config, services.editingSessions, request.log, request.params.id, callback);
+    }
+    const saved = await inArrivalOrder(request.params.id, async () => storeCallbackFile(config, services, request.log, request.params.id, callback));
     if (saved === 'failed') {
       request.log.error({ documentId: request.params.id, status: callback.status }, 'Saving the document failed');
       return reply.send(CALLBACK_FAILED);
@@ -94,13 +99,41 @@ async function runAfter<T>(previous: Promise<unknown>, task: () => Promise<T>): 
   return task();
 }
 
+// Whoever joins a session is decided again, against the stored base label:
+// the Document Server waits for the callback's answer, so this runs aside.
+function admitInBackground(
+  config: PortalConfig,
+  editingSessions: EditingSessions,
+  log: FastifyBaseLogger,
+  documentId: string,
+  callback: CallbackPayload,
+): void {
+  const admit = async (): Promise<void> => {
+    const document = await findDocument(config.documentsDirectory, documentId);
+    if (document !== null) {
+      await editingSessions.admit(document, callback.key, callback.joined);
+    }
+  };
+  admit().catch((error: unknown) => {
+    log.error({ documentId, err: error }, 'The people joining an editing session could not be checked');
+  });
+}
+
 async function storeCallbackFile(
   config: PortalConfig,
-  saveAudit: SaveAudit,
+  services: SaveServices,
   log: FastifyBaseLogger,
   documentId: string,
   callback: CallbackPayload,
 ): Promise<CallbackOutcome> {
+  const { editingSessions } = services;
+  // The last save of a session the portal ended comes under its old key, and
+  // no newer session has started without it.
+  const lastOfEnded = editingSessions.retiringKey(documentId) === callback.key;
+  if (lastOfEnded && callback.status === CALLBACK_STATUS.closedWithoutChanges) {
+    editingSessions.retired(documentId);
+    return 'ignored';
+  }
   const kind = saveKindOf(callback);
   if (kind === null) {
     return 'ignored';
@@ -111,7 +144,7 @@ async function storeCallbackFile(
   // A callback for another key belongs to an earlier session: saving it would
   // overwrite a newer version.
   const document = await findDocument(config.documentsDirectory, documentId);
-  if (document === null || document.key !== callback.key) {
+  if (document === null || (document.key !== callback.key && !lastOfEnded)) {
     return 'ignored';
   }
   const response = await fetch(toInternalUrl(callback.url, config.onlyofficeInternalUrl));
@@ -121,17 +154,52 @@ async function storeCallbackFile(
   const content = await refreshBindingReferences(new Uint8Array(await response.arrayBuffer()));
   // Reading the labels must not cost the save: an unreadable one skips the log.
   const [before, after] = await Promise.all([
-    readBaseLabel(log, documentId, async () => saveAudit.baseLabels.of(document)),
+    readBaseLabel(log, documentId, async () => services.baseLabels.of(document)),
     readBaseLabel(log, documentId, async () => baseLabelCodeOf(content)),
   ]);
-  const saved = await saveDocumentContent(config.documentsDirectory, documentId, content, kind);
+  // The document already moved to a new key when its session was ended.
+  const saved = await saveDocumentContent(config.documentsDirectory, documentId, content, lastOfEnded ? 'forced' : kind);
   if (saved !== null && before !== undefined && after !== undefined) {
     // Logged in the background: the Document Server waits for this answer.
-    saveAudit.audit.recordSave({ documentId, before, after }, callback.users).catch((error: unknown) => {
+    services.audit.recordSave({ documentId, before, after }, callback.users).catch((error: unknown) => {
       log.error({ documentId, err: error }, 'The lowering of a base label could not be checked');
     });
   }
+  if (saved !== null) {
+    followEditingSession(config, editingSessions, log, callback, { kind, lastOfEnded, labelChanged: before !== after, saved });
+  }
   return saved === null ? 'failed' : 'saved';
+}
+
+interface StoredSave {
+  kind: SaveKind;
+  lastOfEnded: boolean;
+  labelChanged: boolean;
+  saved: StoredDocument;
+}
+
+// Keeps the editing sessions in step with what was stored: a session that
+// ended frees its key, and a session going on under a new base label ends
+// when that label excludes someone who may join it.
+function followEditingSession(
+  config: PortalConfig,
+  editingSessions: EditingSessions,
+  log: FastifyBaseLogger,
+  callback: CallbackPayload,
+  { kind, lastOfEnded, labelChanged, saved }: StoredSave,
+): void {
+  if (lastOfEnded && kind === 'session-ended') {
+    editingSessions.retired(saved.id);
+  } else if (kind === 'session-ended') {
+    editingSessions.forget(callback.key);
+  } else if (labelChanged && !lastOfEnded) {
+    // Checked in the background: the Document Server waits for this answer.
+    editingSessions
+      .endIfExcluded(saved, callback.key, async () => moveDocumentToNewKey(config.documentsDirectory, saved.id))
+      .catch((error: unknown) => {
+        log.error({ documentId: saved.id, err: error }, 'An editing session could not be checked against a new base label');
+      });
+  }
 }
 
 // Undefined when the label cannot be read.
