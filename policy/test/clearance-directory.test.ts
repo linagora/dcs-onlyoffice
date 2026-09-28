@@ -132,10 +132,10 @@ describe('labels a clearance allows', () => {
   });
 });
 
-// Anyone may raise a document's base label. Lowering it, which shows the
-// document's content in clear to more readers, is reserved to administrators
-// whose clearance allows the current label.
-describe('base labels a caller may set', () => {
+// Anyone may raise a document's base label or a portion's label. Lowering
+// one, which shows what it covers to more readers, is reserved to
+// administrators whose clearance allows the current label.
+describe('labels a caller may give a document or a portion', () => {
   let server: FastifyInstance;
   before(async () => {
     server = await buildPolicyServer({
@@ -150,14 +150,23 @@ describe('base labels a caller may set', () => {
 
   const EVERY_LABEL = ['DEMO-FR:1', 'DEMO-FR:2', 'DEMO-FR:2/1.1', 'DEMO-FR:2/2.1'];
 
-  async function baseChoices(current: string | null, email: string, groups: string[] = []): Promise<string[]> {
+  // The codes of the labels a route offers the caller instead of `current`.
+  async function choices(route: 'base-choices' | 'portion-choices', current: string | null, email: string, groups: string[]): Promise<string[]> {
     const headers = { 'x-user-email': encodeURIComponent(email), 'x-user-groups': groups.map(encodeURIComponent).join(',') };
     const query = current === null ? '' : `?current=${encodeURIComponent(current)}`;
-    const response = await server.inject({ method: 'GET', url: `/policies/DEMO-FR/labels/base-choices${query}`, headers });
+    const response = await server.inject({ method: 'GET', url: `/policies/DEMO-FR/labels/${route}${query}`, headers });
     assert.equal(response.statusCode, 200);
     const labels: unknown = response.json();
     assert.ok(Array.isArray(labels), 'expected a label list');
     return labels.map((label: unknown) => (typeof label === 'object' && label !== null && 'code' in label ? String(label.code) : ''));
+  }
+
+  async function baseChoices(current: string | null, email: string, groups: string[] = []): Promise<string[]> {
+    return choices('base-choices', current, email, groups);
+  }
+
+  async function portionChoices(current: string, email: string, groups: string[] = []): Promise<string[]> {
+    return choices('portion-choices', current, email, groups);
   }
 
   async function lowering(from: string, to: string): Promise<{ statusCode: number; body: unknown }> {
@@ -191,6 +200,25 @@ describe('base labels a caller may set', () => {
 
   it('offers every label to a document without a base label yet', async () => {
     assert.deepEqual(await baseChoices(null, 'chloe.bernard@dcs.test'), EVERY_LABEL);
+  });
+
+  // An author never writes what they could not read, so a portion is only
+  // offered the labels the author's clearance allows.
+  it('offers an author the labels their clearance allows that do not lower a portion label', async () => {
+    assert.deepEqual(await portionChoices('DEMO-FR:2', 'alice.martin@dcs.test', ['dcs-maquette']), ['DEMO-FR:2', 'DEMO-FR:2/1.1', 'DEMO-FR:2/2.1']);
+    assert.deepEqual(await portionChoices('DEMO-FR:2', 'bob.walker@dcs.test', ['dcs-maquette']), ['DEMO-FR:2', 'DEMO-FR:2/2.1']);
+    assert.deepEqual(await portionChoices('DEMO-FR:1', 'chloe.bernard@dcs.test', ['dcs-maquette']), ['DEMO-FR:1']);
+  });
+
+  it('offers lower portion labels to an administrator whose clearance allows the current one', async () => {
+    assert.deepEqual(await portionChoices('DEMO-FR:2/1.1', 'alice.martin@dcs.test', ['dcs-maquette', 'dcs-maquette-admin']), EVERY_LABEL);
+    assert.deepEqual(await portionChoices('DEMO-FR:2/1.1', 'bob.walker@dcs.test', ['dcs-maquette', 'dcs-maquette-admin']), []);
+  });
+
+  it('refuses portion choices without a valid current label', async () => {
+    const headers = { 'x-user-email': encodeURIComponent('alice.martin@dcs.test') };
+    assert.equal((await server.inject({ method: 'GET', url: '/policies/DEMO-FR/labels/portion-choices', headers })).statusCode, 400);
+    assert.equal((await server.inject({ method: 'GET', url: '/policies/DEMO-FR/labels/portion-choices?current=DEMO-FR%3A9', headers })).statusCode, 422);
   });
 
   it("decides who opens a document from its base label and the caller's clearance", async () => {
