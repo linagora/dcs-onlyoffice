@@ -198,6 +198,39 @@ describe('the sensitivity label of a stored document', () => {
     return { relationships: await attributesOf('_rels/.rels', 'Relationship'), overrides: await attributesOf('[Content_Types].xml', 'Override') };
   }
 
+  // A package with a Sensitivity Label Information part named `part`, its
+  // package relationship and its content type, as Office writes it in a
+  // tenant that enables co-authoring of encrypted files.
+  async function withLabelInformation(docx: Uint8Array, part: string, target: string | null = part): Promise<Uint8Array> {
+    const zip = await JSZip.loadAsync(docx);
+    zip.file(
+      part,
+      `<?xml version="1.0" encoding="utf-8" standalone="yes"?><clbl:labelList xmlns:clbl="http://schemas.microsoft.com/office/2020/mipLabelMetadata"><clbl:label id="{${DIFFUSION_RESTREINTE_SENSITIVITY_LABEL}}" enabled="1" method="Privileged" siteId="{${DEMO_TENANT}}" contentBits="0" removed="0" /></clbl:labelList>`,
+    );
+    if (target !== null) {
+      const relationships = (await zip.file('_rels/.rels')?.async('string')) ?? '';
+      zip.file(
+        '_rels/.rels',
+        relationships.replace('</Relationships>', `<Relationship Id="rIdLabels" Type="http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels" Target="${target}"/></Relationships>`),
+      );
+    }
+    const contentTypes = (await zip.file('[Content_Types].xml')?.async('string')) ?? '';
+    zip.file('[Content_Types].xml', contentTypes.replace('</Types>', `<Override PartName="/${part}" ContentType="application/vnd.ms-office.classificationlabels+xml"/></Types>`));
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  // The policy service's verdict on a stored package.
+  async function verdictOf(docx: Uint8Array): Promise<unknown> {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/bindings/verify',
+      headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` },
+      payload: Buffer.from(docx),
+    });
+    assert.equal(response.statusCode, 200);
+    return response.json();
+  }
+
   // The sensitivity label properties of one label, by attribute name.
   function labelProperties(properties: CustomProperty[], labelId: string): Record<string, string> {
     const prefix = `MSIP_Label_${labelId}_`;
@@ -479,5 +512,50 @@ describe('the sensitivity label of a stored document', () => {
     const answer = await signingAnswer(await zip.generateAsync({ type: 'uint8array' }));
 
     assert.deepEqual(answer.parts, []);
+  });
+
+  it('names the Sensitivity Label Information part that a stored file holds, found by its relationship type', async () => {
+    const stored = await storedPackage(await labelledDocument(DIFFUSION_RESTREINTE));
+
+    assert.deepEqual(await verdictOf(stored), { status: 'valid', labelInformationPart: null });
+    // The signature covers neither the part nor its relationship: it holds.
+    assert.deepEqual(await verdictOf(await withLabelInformation(stored, 'docMetadata/LabelInfo.xml')), {
+      status: 'valid',
+      labelInformationPart: 'docMetadata/LabelInfo.xml',
+    });
+  });
+
+  it('names a Sensitivity Label Information part of another name, and in a file without labels', async () => {
+    const unlabelled = await withLabelInformation(new Uint8Array(await readFile(TEMPLATE)), 'docMetadata/Labels.xml');
+
+    assert.deepEqual(await verdictOf(unlabelled), { status: 'unlabelled', labelInformationPart: 'docMetadata/Labels.xml' });
+  });
+
+  it('finds a Sensitivity Label Information part as OPC resolves its relationship, and only through it', async () => {
+    const stored = await storedPackage(await labelledDocument(DIFFUSION_RESTREINTE));
+    const relative = await withLabelInformation(stored, 'docMetadata/LabelInfo.xml', './docmetadata/labelinfo.xml');
+    const unrelated = await withLabelInformation(stored, 'docMetadata/LabelInfo.xml', null);
+    // A relationship to a missing part comes first.
+    const zip = await JSZip.loadAsync(relative);
+    const relationships = (await zip.file('_rels/.rels')?.async('string')) ?? '';
+    zip.file('_rels/.rels', relationships.replace('<Relationship Id="rIdLabels"', '<Relationship Id="rIdGone" Type="http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels" Target="docMetadata/Gone.xml"/><Relationship Id="rIdLabels"'));
+    const dangling = await zip.generateAsync({ type: 'uint8array' });
+
+    assert.deepEqual(await verdictOf(relative), { status: 'valid', labelInformationPart: 'docMetadata/LabelInfo.xml' });
+    assert.deepEqual(await verdictOf(dangling), { status: 'valid', labelInformationPart: 'docMetadata/LabelInfo.xml' });
+    assert.deepEqual(await verdictOf(unrelated), { status: 'valid', labelInformationPart: null });
+  });
+
+  it('names the Sensitivity Label Information part beside an altered verdict', async () => {
+    const stored = await storedPackage(await labelledDocument(DIFFUSION_RESTREINTE));
+    const zip = await JSZip.loadAsync(await withLabelInformation(stored, 'docMetadata/LabelInfo.xml'));
+    zip.file('docProps/app.xml', `${(await zip.file('docProps/app.xml')?.async('string')) ?? ''}<!-- changed outside the portal -->`);
+
+    assert.deepEqual(await verdictOf(await zip.generateAsync({ type: 'uint8array' })), {
+      status: 'altered',
+      reason: 'Parts changed since signing',
+      changedParts: ['docProps/app.xml'],
+      labelInformationPart: 'docMetadata/LabelInfo.xml',
+    });
   });
 });

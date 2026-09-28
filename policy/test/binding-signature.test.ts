@@ -277,7 +277,7 @@ describe('the signature of the document label binding', () => {
   it('finds a stored package whose binding it signed valid', async () => {
     const docx = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
 
-    assert.deepEqual(await verdictOf(docx), { statusCode: 200, body: { status: 'valid' } });
+    assert.deepEqual(await verdictOf(docx), { statusCode: 200, body: { status: 'valid', labelInformationPart: null } });
   });
 
   it('names the parts changed since signing', async () => {
@@ -287,7 +287,7 @@ describe('the signature of the document label binding', () => {
 
     assert.deepEqual(await verdictOf(docx), {
       statusCode: 200,
-      body: { status: 'altered', reason: 'Parts changed since signing', changedParts: ['word/document.xml'] },
+      body: { status: 'altered', reason: 'Parts changed since signing', changedParts: ['word/document.xml'], labelInformationPart: null },
     });
   });
 
@@ -303,7 +303,7 @@ describe('the signature of the document label binding', () => {
     for (const docx of [relabelled, signedElsewhere]) {
       assert.deepEqual(await verdictOf(docx), {
         statusCode: 200,
-        body: { status: 'altered', reason: 'The signature does not hold', changedParts: [] },
+        body: { status: 'altered', reason: 'The signature does not hold', changedParts: [], labelInformationPart: null },
       });
     }
   });
@@ -324,7 +324,7 @@ describe('the signature of the document label binding', () => {
     for (const add of additions) {
       assert.deepEqual(await verdictOf(await withChangedPart(signed, 'customXml/item1.xml', add)), {
         statusCode: 200,
-        body: { status: 'altered', reason: 'The binding holds what its signature does not cover', changedParts: [] },
+        body: { status: 'altered', reason: 'The binding holds what its signature does not cover', changedParts: [], labelInformationPart: null },
       });
     }
   });
@@ -336,7 +336,7 @@ describe('the signature of the document label binding', () => {
     for (const breakage of breakages) {
       assert.deepEqual(await verdictOf(await withChangedPart(signed, 'customXml/item1.xml', breakage)), {
         statusCode: 200,
-        body: { status: 'altered', reason: 'The binding is not well-formed XML', changedParts: [] },
+        body: { status: 'altered', reason: 'The binding is not well-formed XML', changedParts: [], labelInformationPart: null },
       });
     }
   });
@@ -347,16 +347,16 @@ describe('the signature of the document label binding', () => {
 
     assert.deepEqual(await verdictOf(await zip.generateAsync({ type: 'uint8array' })), {
       statusCode: 200,
-      body: { status: 'altered', reason: 'The package has a base label but no document label binding', changedParts: [] },
+      body: { status: 'altered', reason: 'The package has a base label but no document label binding', changedParts: [], labelInformationPart: null },
     });
   });
 
   it('finds a binding without a signature unsigned, and a package without labels unlabelled', async () => {
     assert.deepEqual(await verdictOf(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE)), {
       statusCode: 200,
-      body: { status: 'unsigned' },
+      body: { status: 'unsigned', labelInformationPart: null },
     });
-    assert.deepEqual(await verdictOf(new Uint8Array(await readFile(TEMPLATE))), { statusCode: 200, body: { status: 'unlabelled' } });
+    assert.deepEqual(await verdictOf(new Uint8Array(await readFile(TEMPLATE))), { statusCode: 200, body: { status: 'unlabelled', labelInformationPart: null } });
   });
 
   it('answers only the holder of the shared secret', async () => {

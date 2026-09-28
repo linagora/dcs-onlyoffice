@@ -5,7 +5,7 @@ import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
-import { type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
+import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -119,16 +119,20 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
       return reply.code(received.status).send({ error: received.error });
     }
     const { zip } = received;
+    // A Sensitivity Label Information part could change the label Word shows,
+    // and the signature does not cover it: the verdict names it.
+    const labelInformationPart = await labelInformationPartOf(zip);
+    const reporting = <T extends object>(verdict: T): T & { labelInformationPart: string | null } => ({ ...verdict, labelInformationPart });
     const sole = soleBinding(await readPackageLabels(zip));
     if (!sole.ok) {
-      return bindingAltered(sole.reason);
+      return reporting(bindingAltered(sole.reason));
     }
     if (sole.binding === null) {
-      return { status: 'unlabelled' };
+      return reporting({ status: 'unlabelled' });
     }
     const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
     const names = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
-    return verifyDocumentBinding(bindingXml, await partsOf(zip, names), options.signer.certificate);
+    return reporting(verifyDocumentBinding(bindingXml, await partsOf(zip, names), options.signer.certificate));
   });
 }
 
