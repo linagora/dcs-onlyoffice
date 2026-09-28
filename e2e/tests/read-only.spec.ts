@@ -23,6 +23,7 @@ test('a document opened read-only shows its portions in the panel and next to th
   await expect(panel.getByTestId('portion-text')).toHaveText([secret]);
   await expect(panel.getByTestId('portion-marking')).toHaveText([SPECIAL_FRANCE]);
   await expect(panel.getByRole('button', { name: 'Insert protected portion' })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Change', exact: true })).toHaveCount(0);
 
   // The portion that holds the cursor also shows next to it.
   await panel.getByTestId('portion-item').getByRole('button').click();

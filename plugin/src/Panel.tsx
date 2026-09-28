@@ -3,7 +3,17 @@ import { useCallback, useMemo, useState } from 'preact/hooks';
 import type { BubbleContent } from './bubble-channel.ts';
 import { DocumentLabel } from './DocumentLabel.tsx';
 import { type EnvelopeClient, envelopeClientFor, unavailableOpener } from './envelopes.ts';
-import { useDocumentLabel, useDocumentState, useInsertionEntryPoints, useLoadable, usePortionBubble, usePortionReadings } from './hooks.ts';
+import {
+  useDocumentLabel,
+  useDocumentState,
+  useInsertionEntryPoints,
+  useLoadable,
+  usePortionBubble,
+  type PortionNotice,
+  usePortionChange,
+  usePortionLocks,
+  usePortionReadings,
+} from './hooks.ts';
 import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
@@ -11,6 +21,7 @@ import { callEditorMethod, type PluginInfo } from './onlyoffice.ts';
 import {
   type DocumentLabelRequest,
   fetchAllowedLabels,
+  type LockHolder,
   fetchBaseLabelChoices,
   fetchDefaultPolicyLabels,
   fetchLabelOfAdatp4774,
@@ -19,7 +30,7 @@ import {
 import { documentIdOf, reportBaseLabelChange } from './portal.ts';
 import { PortionForm } from './PortionForm.tsx';
 import { PortionList, shownLabelOf } from './PortionList.tsx';
-import { type InsertionResult, insertPortion, type StoredPortion, writeDocumentLabel } from './portions.ts';
+import { insertPortion, type StoredPortion, writeDocumentLabel, type WriteResult } from './portions.ts';
 import { type PortionReading, PortionReader } from './readings.ts';
 
 // One empty list, so that the portions' readings do not restart on every render.
@@ -45,6 +56,14 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   );
   const { state: documentState, activePortionId, rereadProblem, refresh } = useDocumentState(pluginReady);
   const [insertionRequested, setInsertionRequested] = useState(false);
+  const editor = useLoadable<{ documentId: string | null; userId: string | null }>(async () => {
+    const info = await pluginReady;
+    return { documentId: documentIdOf(info), userId: typeof info.userId === 'string' ? info.userId : null };
+  }, [pluginReady]);
+  const documentId = editor.status === 'loaded' ? editor.value.documentId : null;
+  const userId = editor.status === 'loaded' ? editor.value.userId : null;
+  const othersLocks = usePortionLocks(documentId, userId);
+  const change = usePortionChange(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
   const policy = labelList[0]?.policy ?? null;
@@ -94,12 +113,12 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     });
   };
 
-  const insert = async (label: LabelView, text: string): Promise<InsertionResult> => {
+  const insert = async (label: LabelView, text: string): Promise<WriteResult> => {
     if (envelopes.status === 'failed') {
       return { status: 'not-encrypted', reason: envelopes.reason };
     }
     if (baseLabelCode === null || envelopes.status === 'loading') {
-      return { status: 'not-inserted' };
+      return { status: 'not-written' };
     }
     const current = await refresh();
     const result = await insertPortion(
@@ -107,7 +126,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       envelopes.value,
     );
     await refresh();
-    if (result.status === 'inserted') {
+    if (result.status === 'written') {
       setInsertionRequested(false);
     }
     return result;
@@ -177,13 +196,36 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
                 </p>
               )}
               {offeredLabels !== null && offeredLabels.length > 0 && (
-                <PortionForm labels={offeredLabels} insertionRequested={insertionRequested} onInsert={insert} />
+                <PortionForm labels={offeredLabels} purpose={{ kind: 'insertion', requested: insertionRequested }} onSubmit={insert} />
               )}
             </section>
           )}
         </>
       )}
-      <PortionList portions={portions} readings={readings} labels={labelList} activePortionId={activePortionId} onSelect={selectPortion} />
+      <PortionList
+        portions={portions}
+        readings={readings}
+        labels={labelList}
+        activePortionId={activePortionId}
+        onSelect={selectPortion}
+        notices={portionNotices(othersLocks, change.notice)}
+        lockedByOthers={new Set(othersLocks.keys())}
+        onChangeRequest={readOnly || change.changing !== null ? null : change.start}
+        changeForm={
+          change.changing === null
+            ? null
+            : {
+                portionId: change.changing.portion.id,
+                form: (
+                  <PortionForm
+                    labels={[change.changing.label]}
+                    purpose={{ kind: 'change', labelCode: change.changing.label.code, text: change.changing.text, onCancel: change.cancel }}
+                    onSubmit={change.save}
+                  />
+                ),
+              }
+        }
+      />
     </main>
   );
 }
@@ -201,4 +243,14 @@ function bubbleContentOf(portion: StoredPortion, reading: PortionReading | null,
     text,
     warning: reading.status === 'unencrypted' ? messages.notEncrypted : shown.warning,
   };
+}
+
+// What the panel says next to a portion: who else is changing it, or why the
+// last change of it could not start or be saved.
+function portionNotices(othersLocks: ReadonlyMap<string, LockHolder>, notice: PortionNotice | null): ReadonlyMap<string, string> {
+  const notices = new Map([...othersLocks].map(([portionId, holder]) => [portionId, messages.beingChangedBy(holder.name)]));
+  if (notice !== null && !notices.has(notice.portionId)) {
+    notices.set(notice.portionId, notice.message);
+  }
+  return notices;
 }

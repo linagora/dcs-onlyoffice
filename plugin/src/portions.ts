@@ -58,8 +58,14 @@ interface InsertPortionScope {
   xml: string;
 }
 
+interface ChangePortionScope {
+  id: string;
+  xml: string;
+}
+
 interface CommandScope {
   portion: InsertPortionScope;
+  change: ChangePortionScope;
   replacements: PartReplacement[];
   portionNamespace: string;
   documentNamespace: string;
@@ -79,7 +85,19 @@ interface PortionPartContent {
   content: PortionContent | null;
 }
 
-export type InsertionResult = { status: 'inserted' } | { status: 'not-encrypted'; reason: string } | { status: 'not-inserted' };
+// What writing a portion's text gave: nothing reaches the document when its
+// text cannot be encrypted.
+export type WriteResult = { status: 'written' } | { status: 'not-encrypted'; reason: string } | { status: 'not-written' };
+
+// A new text for a portion the author holds the lock of, under the label the
+// portion keeps.
+export interface PortionChange {
+  portion: StoredPortion;
+  label: LabelView;
+  text: string;
+}
+
+
 
 declare const Api: OfficeApi;
 declare const Asc: { scope: CommandScope };
@@ -121,6 +139,25 @@ function insertPortionCommand(): string {
   return block.GetInternalId();
 }
 
+// Replaces a portion's part with its new version, found by the portion id its
+// root element names, however the editor serialises it; false when the
+// document no longer holds it.
+function changePortionCommand(): boolean {
+  const scope = Asc.scope;
+  const parts = Api.GetDocument().GetCustomXmlParts();
+  const current = parts
+    .GetByNamespace(scope.portionNamespace)
+    .filter((part) => /<(?:[\w-]+:)?portion\b[^>]*?\sid=["']([^"']*)["']/.exec(part.GetXml())?.[1] === scope.change.id);
+  if (current.length === 0) {
+    return false;
+  }
+  for (const part of current) {
+    part.Delete();
+  }
+  parts.Add(scope.change.xml);
+  return true;
+}
+
 function replacePartsCommand(): boolean {
   const parts = Api.GetDocument().GetCustomXmlParts();
   for (const replacement of Asc.scope.replacements) {
@@ -147,7 +184,7 @@ function readDocumentCommand(): DocumentSnapshot {
 
 // The text is sealed before anything reaches the document: a text that cannot
 // be encrypted is not inserted.
-export async function insertPortion(portion: NewPortion, envelopes: EnvelopeClient): Promise<InsertionResult> {
+export async function insertPortion(portion: NewPortion, envelopes: EnvelopeClient): Promise<WriteResult> {
   const { label } = portion;
   const [labelXml, attributes, documentLabel] = await Promise.all([
     fetchAdatp4774(label.policy, label.code),
@@ -179,7 +216,23 @@ export async function insertPortion(portion: NewPortion, envelopes: EnvelopeClie
     true,
     (result) => (typeof result === 'string' ? result : null),
   );
-  return internalId === null ? { status: 'not-inserted' } : { status: 'inserted' };
+  return internalId === null ? { status: 'not-written' } : { status: 'written' };
+}
+
+// The new text is sealed before anything reaches the document: a text that
+// cannot be encrypted changes nothing.
+export async function changePortion(change: PortionChange, envelopes: EnvelopeClient): Promise<WriteResult> {
+  const { label, portion } = change;
+  const [labelXml, attributes] = await Promise.all([fetchAdatp4774(label.policy, label.code), fetchLabelAttributes(label.policy, label.code)]);
+  const sealed = await envelopes.seal(change.text, { xml: labelXml, attributes });
+  if (sealed.status === 'failed') {
+    return { status: 'not-encrypted', reason: sealed.reason };
+  }
+  const xml = buildPortionPart({ id: portion.id, version: (portion.version ?? 1) + 1, labelCode: label.code, labelXml, envelope: sealed.envelope });
+  const changed = await runCommand(changePortionCommand, { change: { id: portion.id, xml }, portionNamespace: PORTION_NAMESPACE }, false, (result) =>
+    typeof result === 'boolean' ? result : null,
+  );
+  return changed === true ? { status: 'written' } : { status: 'not-written' };
 }
 
 // Rewrites the document label from the base label and the portions' labels.

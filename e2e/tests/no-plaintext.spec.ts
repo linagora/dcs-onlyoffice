@@ -81,8 +81,18 @@ test('no portion text reaches the Document Server, in the co-editing exchanges o
     .toEqual([bobText, null, canary]);
   // Nor does the window that shows the portion holding the cursor send its
   // text through the editor's page.
-  await pluginPanel(page).getByTestId('portion-item').filter({ hasText: aliceText }).getByRole('button').click();
+  const alicePortion = pluginPanel(page).getByTestId('portion-item').filter({ hasText: aliceText });
+  await alicePortion.getByRole('button').first().click();
   await expect(bubble(page).getByTestId('bubble-text')).toHaveText(aliceText);
+
+  // Nor does a change: its new text travels as a new envelope.
+  const changedText = markedText('Fictional French-eyes-only paragraph, changed');
+  await alicePortion.getByRole('button', { name: 'Change', exact: true }).click();
+  await alicePortion.getByRole('textbox', { name: 'Portion text' }).fill(changedText);
+  await alicePortion.getByRole('button', { name: 'Save the change' }).click();
+  await expect
+    .poll(async () => (await shownPortions(page)).map((portion) => portion.text))
+    .toEqual([bobText, changedText, canary]);
   await forceSavedDocx(page, documentId, (saved) => saved.portionParts.length === 3);
   const saved = await browserFetch(page, `/documents/${documentId}/download`);
   await bob.context().close();
@@ -92,7 +102,7 @@ test('no portion text reaches the Document Server, in the co-editing exchanges o
     (await Promise.all(frames.map((frame, index) => tracesIn(frame, `frame ${index}`, texts)))).flat();
   expect(await framesHolding([canary])).not.toEqual([]);
   expect(await tracesIn(saved.body, 'saved DOCX', [canary])).not.toEqual([]);
-  const secrets = [aliceText, bobText, PORTION_MARKER];
+  const secrets = [aliceText, changedText, bobText, PORTION_MARKER];
   expect(await framesHolding(secrets)).toEqual([]);
   const messages = await readAliceMessages();
   // The recording saw the panel ask the editor's page to open the bubble.
