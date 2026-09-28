@@ -22,6 +22,9 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The independent verifier of the document label binding's signature.
+      - name: Install xmlsec1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xmlsec1
       - run: pnpm typecheck
       - run: pnpm test
 
@@ -38,6 +41,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install xmlsec1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xmlsec1
       - name: Create the stack configuration
         run: deploy/scripts/init-env.sh
       - name: Start the stack
