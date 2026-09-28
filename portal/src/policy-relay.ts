@@ -1,21 +1,41 @@
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from './auth/routes.ts';
 import type { UserIdentity } from './auth/sessions.ts';
+import type { DocumentAccessCheck } from './document-access.ts';
+import { findDocument } from './documents.ts';
 import { sendUpstreamResponse } from './upstream-response.ts';
 
 const RELAY_PREFIX = '/api/policy';
 
+export interface PolicyRelayOptions {
+  policyInternalUrl: string;
+  documentsDirectory: string;
+  documentAccess: DocumentAccessCheck;
+}
+
+// A stored document's portion locks, which only the people who may open the
+// document take or see.
+const DOCUMENT_PATH = /^\/documents\/([^/]+)\//;
+
 // The policy service is only reachable from the Compose network. The relay
 // forwards the plugin's calls and tells the service who is asking.
-export function registerPolicyRelay(app: FastifyInstance, policyInternalUrl: string): FastifyInstance {
+export function registerPolicyRelay(app: FastifyInstance, options: PolicyRelayOptions): FastifyInstance {
   app.route({
     method: ['GET', 'POST'],
     url: `${RELAY_PREFIX}/*`,
     handler: async (request, reply) => {
       const { user } = requireSession(request);
-      const target = policyServiceUrl(request.url.slice(RELAY_PREFIX.length), policyInternalUrl);
+      const target = policyServiceUrl(request.url.slice(RELAY_PREFIX.length), options.policyInternalUrl);
       if (target === null) {
         return reply.code(400).send({ error: 'Invalid policy path' });
+      }
+      const documentId = DOCUMENT_PATH.exec(target.pathname)?.[1] ?? null;
+      if (documentId !== null) {
+        const document = await findDocument(options.documentsDirectory, decodeURIComponent(documentId));
+        const decision = document === null ? null : await options.documentAccess.decideOne(user, document);
+        if (decision === null || !decision.open) {
+          return reply.code(document === null ? 404 : 403).send({ error: document === null ? 'Document not found' : 'Access denied' });
+        }
       }
       const response = await fetch(target, {
         method: request.method,

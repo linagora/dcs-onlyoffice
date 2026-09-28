@@ -87,7 +87,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   });
 
   app.get('/api/me', async (request) => requireSession(request).user);
-  registerPolicyRelay(app, config.policyInternalUrl);
+  registerPolicyRelay(app, { policyInternalUrl: config.policyInternalUrl, documentsDirectory: config.documentsDirectory, documentAccess });
   registerClearanceAdmin(app, {
     policyInternalUrl: config.policyInternalUrl,
     portalPublicUrl: config.portalPublicUrl,
