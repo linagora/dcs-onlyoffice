@@ -30,8 +30,26 @@ export async function openDocument(page: Page, documentId: string): Promise<void
 // editor page kept open since would when it reconnects. It runs on a page the
 // portal serves: Chromium keeps a page that Playwright serves itself from
 // loading the editor's script, on the stack's private network. The page
-// records the names of the events the editor raises.
+// records the names of the events the editor raises. An editor that fails to
+// load one of its modules raises none: on a page that watchEditorLoads
+// watches, it is started once more. The editor has loaded in the test's
+// browser before, so the wait is shorter than a first load's, which leaves a
+// test the time to clean up after a failure.
 export async function openWithEarlierConfig(page: Page, config: EditorPageConfig): Promise<void> {
+  await startWithEarlierConfig(page, config);
+  await waitForEditorStart(page, earlierEditorStarted, 60_000, async () => {
+    await startWithEarlierConfig(page, config);
+  });
+}
+
+// Whether the editor that openWithEarlierConfig started has started, which it
+// tells before it raises any other event.
+async function earlierEditorStarted(page: Page): Promise<boolean> {
+  const started: unknown = await page.evaluate(() => Reflect.get(window, 'dcsEditorStarted'));
+  return started === true;
+}
+
+async function startWithEarlierConfig(page: Page, config: EditorPageConfig): Promise<void> {
   await page.goto('/');
   await page.evaluate(
     async ({ config, apiScriptUrl }) => {
@@ -57,6 +75,10 @@ export async function openWithEarlierConfig(page: Page, config: EditorPageConfig
       new docsApi.DocEditor('editor', {
         ...config,
         events: {
+          // The editor has started, before it raises any other event.
+          onAppReady: () => {
+            Reflect.set(window, 'dcsEditorStarted', true);
+          },
           onDocumentReady: record('onDocumentReady'),
           onError: record('onError'),
           onOutdatedVersion: record('onOutdatedVersion'),
@@ -102,21 +124,39 @@ export function watchEditorLoads(page: Page): void {
 }
 
 export async function waitForEditorReady(page: Page): Promise<void> {
-  if ((await editorLoadOutcome(page)) === 'failed') {
+  await waitForEditorStart(page, editorPageReady, 180_000, async () => {
     await page.reload();
-    expect(await editorLoadOutcome(page)).toBe('ready');
+  });
+}
+
+async function editorPageReady(page: Page): Promise<boolean> {
+  return (await page.locator('body').getAttribute('data-document-ready')) === 'true';
+}
+
+// Waits until the editor on a page has started, as `hasStarted` tells, and
+// loads it once more with `loadAgain` when ONLYOFFICE has failed to load one
+// of its modules, which the editor never gets past on its own.
+async function waitForEditorStart(
+  page: Page,
+  hasStarted: (page: Page) => Promise<boolean>,
+  timeout: number,
+  loadAgain: () => Promise<void>,
+): Promise<void> {
+  if ((await editorLoadOutcome(page, hasStarted, timeout)) === 'failed') {
+    await loadAgain();
+    expect(await editorLoadOutcome(page, hasStarted, timeout)).toBe('started');
   }
 }
 
-async function editorLoadOutcome(page: Page): Promise<'ready' | 'failed'> {
-  const outcome = async (): Promise<'ready' | 'failed' | 'loading'> => {
-    if ((await page.locator('body').getAttribute('data-document-ready')) === 'true') {
-      return 'ready';
+async function editorLoadOutcome(page: Page, hasStarted: (page: Page) => Promise<boolean>, timeout: number): Promise<'started' | 'failed'> {
+  const outcome = async (): Promise<'started' | 'failed' | 'loading'> => {
+    if (await hasStarted(page)) {
+      return 'started';
     }
     return failedEditorLoads.has(page) ? 'failed' : 'loading';
   };
-  await expect.poll(outcome, { timeout: 180_000 }).not.toBe('loading');
-  return (await outcome()) === 'ready' ? 'ready' : 'failed';
+  await expect.poll(outcome, { timeout }).not.toBe('loading');
+  return (await outcome()) === 'started' ? 'started' : 'failed';
 }
 
 export interface EditorPageConfig {
