@@ -1,6 +1,7 @@
 import { test as base, type Page, type TestInfo } from '@playwright/test';
 import { DEMO_ACCOUNTS, type DemoAccount, signIn } from './accounts.ts';
 import { browserFetch, CREATED_DOCUMENT, watchEditorLoads } from './documents.ts';
+import { DOCX_TYPE } from './docx.ts';
 
 export { expect } from '@playwright/test';
 
@@ -19,8 +20,6 @@ export const test = base.extend<SignedInFixtures>({
     await attachCreatedDocuments(page, baseURL ?? null, testInfo);
   },
 });
-
-const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 // Evidence for the stop report: the stored DOCX of every document the test
 // created, as the portal serves it once the test is over. A test that left the

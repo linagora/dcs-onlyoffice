@@ -1,18 +1,17 @@
 import { readFile } from 'node:fs/promises';
-import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS } from './support/accounts.ts';
 import { documentLogEntries, portalLog } from './support/deployment.ts';
 import { docxText, openedDocumentId } from './support/documents.ts';
-import { sensitivityLabelProperties } from './support/docx.ts';
+import { DOCX_TYPE, sensitivityLabelProperties } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { storedDocx, storedFile } from './support/portions.ts';
 import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { upload, type UploadedFile } from './support/uploads.ts';
 
 // A DOCX that the panel never labelled: the portal's template, as it stands
 // in the repository.
 const UNLABELLED_DOCX = new URL('../../deploy/demo/documents/exercise-northwind.docx', import.meta.url);
-const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 // An uploaded file's name, which the document keeps, accents and dash
 // included.
 const UPLOADED_NAME = 'Compte rendu de mission – été.docx';
@@ -25,37 +24,11 @@ const DIFFUSION_RESTREINTE_LABEL = '10000000-0000-4000-8000-000000000002';
 // an encrypted Office document ([MS-OFFCRYPTO] §1.3.3.4).
 const COMPOUND_FILE_SIGNATURE = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 
-interface UploadedFile {
-  name: string;
-  mimeType: string;
-  buffer: Buffer;
-}
-
 // A file as Microsoft Purview encrypts it: a compound file whose directory
 // names the rights management data space, in UTF-16.
 function purviewEncryptedFile(): UploadedFile {
   const names = ['\u0006DataSpaces', 'DRMEncryptedDataSpace', 'EncryptedPackage'].map((name) => Buffer.from(`${name}\0`, 'utf16le'));
   return { name: 'Fictional protected report.docx', mimeType: DOCX_TYPE, buffer: Buffer.concat([COMPOUND_FILE_SIGNATURE, Buffer.alloc(504), ...names]) };
-}
-
-// Uploads a file through the form of the portal's home page, with a base
-// label the form offers or, as someone altering the page could, one it does
-// not offer; gives the portal's answer.
-async function upload(page: Page, file: UploadedFile, label: { marking: string } | { code: string }): Promise<number> {
-  await page.goto('/');
-  const labels = page.getByLabel('Base label');
-  if ('code' in label) {
-    await labels.evaluate((select, code) => {
-      select.append(new Option(code, code));
-    }, label.code);
-    await labels.selectOption(label.code);
-  } else {
-    await labels.selectOption({ label: label.marking });
-  }
-  await page.getByLabel('DOCX file, up to 20 MB').setInputFiles(file);
-  const response = page.waitForResponse((candidate) => candidate.url().endsWith('/documents/upload'));
-  await page.getByRole('button', { name: 'Upload' }).click();
-  return (await response).status();
 }
 
 test('the French officer uploads an unlabelled DOCX, which opens in the editor with the base label chosen', async ({ page }) => {
