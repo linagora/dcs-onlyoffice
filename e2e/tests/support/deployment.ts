@@ -102,14 +102,15 @@ export function documentLogEntries(since: Date, message: string, documentId: str
   return portalLogEntries(since).filter((entry) => field(entry, 'msg') === message && field(entry, 'documentId') === documentId);
 }
 
-// Stores a file as the portal's document `documentId`, bypassing the portal,
-// as someone with access to its storage could.
-export async function storeDocument(documentId: string, docx: Uint8Array): Promise<void> {
+// Stores a file, a DOCX unless told otherwise, as the portal's document
+// `documentId`, bypassing the portal, as someone with access to its storage
+// could.
+export async function storeDocument(documentId: string, content: Uint8Array, extension: '.docx' | '.xlsx' = '.docx'): Promise<void> {
   const directory = await mkdtemp(path.join(tmpdir(), 'stored-document-'));
   try {
-    const file = path.join(directory, `${documentId}.docx`);
-    await writeFile(file, docx);
-    compose('cp', file, `portal:/data/documents/${documentId}.docx`);
+    const file = path.join(directory, `${documentId}${extension}`);
+    await writeFile(file, content);
+    compose('cp', file, `portal:/data/documents/${documentId}${extension}`);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

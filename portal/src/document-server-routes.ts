@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { BindingSignatures } from './binding-signature.ts';
-import { refreshBinding } from './binding.ts';
+import { withoutSignature } from './binding.ts';
 import type { PortalConfig } from './config.ts';
 import { type FileLabels, fileLabelsOf } from './document-labels.ts';
-import { DOCX_CONTENT_TYPE, findDocument, moveDocumentToNewKey, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
+import { DOCUMENT_FORMATS, findDocument, moveDocumentToNewKey, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
 import type { EditingSessions } from './editing-sessions.ts';
 import { INTERNAL_DOCUMENTS_PATH, internalDocumentUrl } from './editor-config.ts';
 import type { LabelJournal } from './label-journal.ts';
@@ -47,8 +47,8 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
       return reply.code(404).send({ error: 'Document not found' });
     }
     const content = await readFile(document.filePath);
-    services.signatures.checkAside(content, document.id, 'document-server');
-    return reply.type(DOCX_CONTENT_TYPE).send(content);
+    services.signatures.checkAside(content, document, 'document-server');
+    return reply.type(DOCUMENT_FORMATS[document.format].contentType).send(content);
   });
 
   app.post<{ Params: DocumentParams }>(`${INTERNAL_DOCUMENTS_PATH}/:id/callback`, async (request, reply) => {
@@ -161,7 +161,7 @@ async function storeCallbackFile(
     (bytes) => ({ ok: true as const, bytes }),
     (error: unknown) => ({ ok: false as const, error }),
   );
-  const content = await services.signatures.signed(await refreshBinding(new Uint8Array(await response.arrayBuffer())), documentId, stored.ok ? stored.bytes : null);
+  const content = await services.signatures.signed(await withoutSignature(new Uint8Array(await response.arrayBuffer())), document, stored.ok ? stored.bytes : null);
   // Reading the labels must not cost the save: unreadable ones skip the log.
   const [before, after] = await Promise.all([
     readLabels(log, documentId, async () => {

@@ -76,18 +76,23 @@ export function declareContentType(types: Document, partName: string, contentTyp
   return true;
 }
 
+// The names of a package's parts, without the folders a ZIP may list.
+export function partNamesOf(zip: JSZip): string[] {
+  return Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
+}
+
 // The package part of that name, as the package spells it: part names match
 // without regard to case (ECMA-376 Part 2 §6.2.2.3).
 export function partNamed(zip: JSZip, name: string): string | null {
   const wanted = name.toLowerCase();
-  return Object.keys(zip.files).find((file) => zip.files[file]?.dir === false && file.toLowerCase() === wanted) ?? null;
+  return partNamesOf(zip).find((file) => file.toLowerCase() === wanted) ?? null;
 }
 
 // A package's Custom XML Data Storage parts, whatever their names: the targets
 // of the customXml relationships of its parts, and the parts named as Office
 // and ONLYOFFICE name them.
 export async function customXmlParts(zip: JSZip): Promise<string[]> {
-  const parts = new Set(Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false && CUSTOM_XML_ITEM.test(name)));
+  const parts = new Set(partNamesOf(zip).filter((name) => CUSTOM_XML_ITEM.test(name)));
   for (const relationshipsPart of Object.keys(zip.files)) {
     const match = RELATIONSHIPS_PART.exec(relationshipsPart);
     const relationships = match === null ? null : await xmlPartOf(zip, relationshipsPart);

@@ -1,5 +1,5 @@
 import type { PortalConfig } from './config.ts';
-import type { StoredDocument } from './documents.ts';
+import { DOCUMENT_FORMATS, type DocumentFormat, type StoredDocument } from './documents.ts';
 import { signOnlyofficeToken } from './onlyoffice.ts';
 
 export interface EditorUser {
@@ -9,13 +9,15 @@ export interface EditorUser {
 
 export interface EditorConfig {
   document: {
-    fileType: 'docx';
+    fileType: DocumentFormat;
     key: string;
     title: string;
     url: string;
     permissions: { edit: boolean; download: boolean };
   };
-  documentType: 'word';
+  // The text editor for a text document, the spreadsheet editor for a
+  // workbook.
+  documentType: 'word' | 'cell';
   editorConfig: {
     callbackUrl: string;
     lang: EditorLanguage;
@@ -77,13 +79,13 @@ export function buildEditorConfig(
 ): EditorConfig {
   return {
     document: {
-      fileType: 'docx',
+      fileType: document.format,
       key: document.key,
       title: document.fileName,
       url: internalDocumentUrl(config, document.id, 'content'),
       permissions: { edit: mode === 'edit', download: true },
     },
-    documentType: 'word',
+    documentType: DOCUMENT_FORMATS[document.format].documentType,
     editorConfig: {
       callbackUrl: internalDocumentUrl(config, document.id, 'callback'),
       lang: language,

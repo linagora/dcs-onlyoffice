@@ -55,22 +55,30 @@ export interface HeaderFooter {
   blocks: HeaderFooterBlock[];
 }
 
-export interface DocxInspection {
-  bodyText: string;
+// What a package, a text document's or a workbook's, holds of the platform's
+// labels.
+export interface PackageInspection {
   // Text of every part, customXml included, to prove protected text stays out.
   allText: string;
-  contentControls: ContentControl[];
-  // The headers and footers the document's sections refer to.
-  headersAndFooters: HeaderFooter[];
   portionParts: PortionPart[];
   bindings: DocumentBinding[];
-  // Present parts that ADatP-4778.2 Tables 5-2 and 5-3 require a whole-document
-  // binding to reference.
-  bindableParts: string[];
   // The custom document properties, where the sensitivity label goes.
   customProperties: CustomProperty[];
   // The code of the base label, as the panel writes it; null without one.
   baseLabel: string | null;
+  // The code of the document label the panel last wrote beside the base
+  // label, which it rewrites when it finds it stale; null without one.
+  documentLabel: string | null;
+  // Present parts that ADatP-4778.2 Tables 5-2 and 5-3 require a whole-document
+  // binding to reference.
+  bindableParts: string[];
+}
+
+export interface DocxInspection extends PackageInspection {
+  bodyText: string;
+  contentControls: ContentControl[];
+  // The headers and footers the document's sections refer to.
+  headersAndFooters: HeaderFooter[];
 }
 
 export interface CustomProperty {
@@ -96,12 +104,22 @@ const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments|comm
 
 export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   const zip = await JSZip.loadAsync(docx);
-  const documentXml = await readPart(zip, 'word/document.xml');
-  const document = parse(documentXml);
+  const document = parse(await readPart(zip, 'word/document.xml'));
+  return {
+    ...(await inspectPackage(zip, BINDABLE_PART)),
+    bodyText: textOf(document),
+    contentControls: elements(document, WORD_NAMESPACE, 'sdt').map(readContentControl),
+    headersAndFooters: await readHeadersAndFooters(zip, document),
+  };
+}
+
+// `bindablePart` matches the parts of the tables for the package's format.
+export async function inspectPackage(zip: JSZip, bindablePart: RegExp): Promise<PackageInspection> {
   const allTexts: string[] = [];
   const portionParts: PortionPart[] = [];
   const bindings: DocumentBinding[] = [];
   let baseLabel: string | null = null;
+  let documentLabel: string | null = null;
   for (const name of Object.keys(zip.files).sort()) {
     const file = zip.files[name];
     if (file === undefined || file.dir) {
@@ -121,21 +139,20 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
       const root = parse(content);
       if (root.namespaceURI === DOCUMENT_NAMESPACE && root.localName === 'document') {
         baseLabel = root.getAttribute('base');
+        documentLabel = root.getAttribute('label');
       }
     }
   }
   return {
-    bodyText: textOf(document),
     allText: allTexts.join('\n'),
-    contentControls: elements(document, WORD_NAMESPACE, 'sdt').map(readContentControl),
-    headersAndFooters: await readHeadersAndFooters(zip, document),
     portionParts,
     bindings,
-    bindableParts: Object.keys(zip.files)
-      .filter((name) => zip.files[name]?.dir === false && BINDABLE_PART.test(name))
-      .sort(),
     customProperties: await readCustomProperties(zip),
     baseLabel,
+    documentLabel,
+    bindableParts: Object.keys(zip.files)
+      .filter((name) => zip.files[name]?.dir === false && bindablePart.test(name))
+      .sort(),
   };
 }
 
@@ -152,9 +169,11 @@ async function readCustomProperties(zip: JSZip): Promise<CustomProperty[]> {
 
 // The properties of the sensitivity label `labelId`, by attribute name
 // (MSIP_Label_<label id>_<attribute>).
-export function sensitivityLabelProperties(docx: DocxInspection, labelId: string): Record<string, string> {
+export function sensitivityLabelProperties(inspected: PackageInspection, labelId: string): Record<string, string> {
   const prefix = `MSIP_Label_${labelId}_`;
-  return Object.fromEntries(docx.customProperties.filter((property) => property.name.startsWith(prefix)).map((property) => [property.name.slice(prefix.length), property.value]));
+  return Object.fromEntries(
+    inspected.customProperties.filter((property) => property.name.startsWith(prefix)).map((property) => [property.name.slice(prefix.length), property.value]),
+  );
 }
 
 function readContentControl(sdt: Element): ContentControl {

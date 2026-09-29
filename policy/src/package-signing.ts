@@ -2,14 +2,15 @@ import type { Element } from '@xmldom/xmldom';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type JSZip from 'jszip';
 import { LABEL_NAMESPACE } from './adatp4774.ts';
-import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
+import { BINDING_NAMESPACE, bindablePartsOf } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
-import { customXmlParts, loadPackage } from './opc.ts';
+import { customXmlParts, loadPackage, partNamesOf } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 // The plugin's parts and tags (plugin/src/portions.ts).
 const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -84,21 +85,11 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // The sensitivity label goes in parts the signature covers, so it is
     // written first (ADR 0005).
     const mapped = options.sensitivityLabelOf(computed.code);
-    const { customPropertiesPart, writtenParts } =
-      mapped === null ? { customPropertiesPart: null, writtenParts: [] } : await writeSensitivityLabel(zip, mapped, options.now(), storedCustomProperties(request));
-    const references = Array.from(binding.root.getElementsByTagNameNS(BINDING_NAMESPACE, 'DataReference'))
-      .map((reference) => packPartName(reference.getAttribute('URI') ?? ''))
-      .filter((name): name is string => name !== null);
-    // The binding references the custom properties part, which ADatP-4778.2
-    // Table 5-3 lists, even when it was written just now.
-    if (customPropertiesPart !== null && !references.includes(customPropertiesPart)) {
-      references.push(customPropertiesPart);
-    }
-    const parts = await partsOf(zip, references);
-    const missing = references.filter((name) => !parts.has(name));
-    if (missing.length > 0) {
-      return reply.code(422).send({ error: `The binding references parts the package lacks: ${missing.join(', ')}` });
-    }
+    const { writtenParts } = mapped === null ? { writtenParts: [] } : await writeSensitivityLabel(zip, mapped, options.now(), storedCustomProperties(request));
+    // The binding references every part of ADatP-4778.2 Tables 5-2 and 5-3
+    // that the package holds, the custom properties part written just now
+    // included: only the saved package tells which parts exist.
+    const parts = await partsOf(zip, bindablePartsOf(partNamesOf(zip)));
     return {
       signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, options.signer, options.now()) },
       // The other parts written, which the portal stores with the binding.
@@ -143,13 +134,13 @@ async function packageOf(request: FastifyRequest, secret: string): Promise<{ ok:
     return received;
   }
   const zip = await loadPackage(received.body);
-  return zip === null ? { ok: false, status: 422, error: 'The body is no DOCX package' } : { ok: true, zip };
+  return zip === null ? { ok: false, status: 422, error: 'The body is no DOCX or XLSX package' } : { ok: true, zip };
 }
 
-// The routes that take a package read it as a DOCX body, up to a size no
-// saved document reaches.
+// The routes that take a package read it as a DOCX or an XLSX body, up to a
+// size no saved document reaches.
 export function acceptPackages(app: FastifyInstance): void {
-  app.addContentTypeParser(DOCX_TYPE, { parseAs: 'buffer', bodyLimit: PACKAGE_LIMIT_BYTES }, (_request, body, done) => {
+  app.addContentTypeParser([DOCX_TYPE, XLSX_TYPE], { parseAs: 'buffer', bodyLimit: PACKAGE_LIMIT_BYTES }, (_request, body, done) => {
     done(null, body);
   });
 }
@@ -160,7 +151,7 @@ export function packageBody(request: FastifyRequest, secret: string): { ok: true
     return { ok: false, status: 403, error: 'Only the portal may send packages to the policy service' };
   }
   if (!Buffer.isBuffer(request.body)) {
-    return { ok: false, status: 415, error: `Expected a ${DOCX_TYPE} body` };
+    return { ok: false, status: 415, error: `Expected a ${DOCX_TYPE} or ${XLSX_TYPE} body` };
   }
   return { ok: true, body: request.body };
 }
@@ -182,7 +173,7 @@ export async function bindingVerdict(zip: JSZip, labels: PackageLabels, certific
     return { status: 'unlabelled' };
   }
   const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
-  const names = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
+  const names = partNamesOf(zip);
   return verifyDocumentBinding(bindingXml, await partsOf(zip, names), certificate);
 }
 

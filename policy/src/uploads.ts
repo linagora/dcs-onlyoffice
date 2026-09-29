@@ -14,6 +14,7 @@ import {
   declareContentType,
   loadPackage,
   PACKAGE_RELATIONSHIPS_PART,
+  partNamesOf,
   RELATIONSHIPS_NAMESPACE,
   xmlPartOf,
 } from './opc.ts';
@@ -107,8 +108,8 @@ export interface UploadOptions {
 // references the parts the package holds. It also removes the Sensitivity
 // Label Information part, which Office could read instead of the label the
 // platform writes (ADR 0005). The portal then has the binding signed, as at
-// a save. Both routes refuse what cannot become a document. The DOCX body
-// parser comes from acceptPackages.
+// a save. Both routes refuse what cannot become a text document, a workbook
+// included. The body parser comes from acceptPackages.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
   app.post('/uploads/read', async (request, reply) => {
     const received = packageBody(request, options.secret);
@@ -154,7 +155,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     }
     // The platform keeps sensitivity labels in custom properties only.
     await removeLabelInformation(zip, options.labelMapping?.tenant ?? null, options.now());
-    const parts = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
+    const parts = partNamesOf(zip);
     await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
     await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts)));
     return reply.type(DOCX_TYPE).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));

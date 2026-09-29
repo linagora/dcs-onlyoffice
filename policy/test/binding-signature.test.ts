@@ -12,7 +12,9 @@ import { verifyWithXmlsec } from './xmlsec.ts';
 
 const DEMO_SPIFS = path.join(import.meta.dirname, '..', '..', 'deploy', 'spif');
 const TEMPLATE = path.join(import.meta.dirname, '..', '..', 'deploy', 'demo', 'documents', 'exercise-northwind.docx');
+const WORKBOOK_TEMPLATE = path.join(import.meta.dirname, '..', '..', 'deploy', 'demo', 'documents', 'exercise-northwind-logistics.xlsx');
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const SECRET = 'fictional-binding-signature-secret';
 const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
@@ -77,15 +79,15 @@ describe('the signature of the document label binding', () => {
     });
   }
 
-  // The demo template, labelled: its base label, and a binding that the
-  // policy service computed for `bindingLabel` over its bindable parts, which
-  // `alter` may change.
+  // A demo template, the text one unless told otherwise, labelled: its base
+  // label, and a binding that the policy service computed for `bindingLabel`
+  // over its bindable parts, which `alter` may change.
   async function labelledDocument(
     base: string,
     bindingLabel: string,
-    { extraParts = [], alter = (xml) => xml }: { extraParts?: string[]; alter?: (xml: string) => string } = {},
+    { template = TEMPLATE, extraParts = [], alter = (xml) => xml }: { template?: string; extraParts?: string[]; alter?: (xml: string) => string } = {},
   ): Promise<Uint8Array> {
-    const zip = await JSZip.loadAsync(await readFile(TEMPLATE));
+    const zip = await JSZip.loadAsync(await readFile(template));
     const computed = await server.inject({
       method: 'POST',
       url: '/policies/DEMO-FR/document-label',
@@ -102,11 +104,11 @@ describe('the signature of the document label binding', () => {
     return Object.keys(zip.files).filter((name) => BINDABLE_PART.test(name)).sort();
   }
 
-  async function sign(docx: Uint8Array, secret: string | null = SECRET): Promise<{ statusCode: number; body: unknown }> {
+  async function sign(docx: Uint8Array, secret: string | null = SECRET, type: string = DOCX_TYPE): Promise<{ statusCode: number; body: unknown }> {
     const response = await server.inject({
       method: 'POST',
       url: '/bindings/sign',
-      headers: { 'content-type': DOCX_TYPE, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
+      headers: { 'content-type': type, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
       payload: Buffer.from(docx),
     });
     return { statusCode: response.statusCode, body: response.json() };
@@ -121,11 +123,11 @@ describe('the signature of the document label binding', () => {
   }
 
   // A package whose binding `signer` signed, as the portal stores it.
-  async function signedPackage(docx: Uint8Array, signer: FastifyInstance = server): Promise<Uint8Array> {
+  async function signedPackage(docx: Uint8Array, signer: FastifyInstance = server, type: string = DOCX_TYPE): Promise<Uint8Array> {
     const response = await signer.inject({
       method: 'POST',
       url: '/bindings/sign',
-      headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` },
+      headers: { 'content-type': type, authorization: `Bearer ${SECRET}` },
       payload: Buffer.from(docx),
     });
     const signed = signedOf(response.json());
@@ -141,12 +143,21 @@ describe('the signature of the document label binding', () => {
     return zip.generateAsync({ type: 'uint8array' });
   }
 
+  // A package with parts added, by name.
+  async function withParts(docx: Uint8Array, parts: Record<string, string>): Promise<Uint8Array> {
+    const zip = await JSZip.loadAsync(docx);
+    for (const [name, content] of Object.entries(parts)) {
+      zip.file(name, content);
+    }
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
   // The policy service's verdict on a package.
-  async function verdictOf(docx: Uint8Array, secret: string | null = SECRET): Promise<{ statusCode: number; body: unknown }> {
+  async function verdictOf(docx: Uint8Array, secret: string | null = SECRET, type: string = DOCX_TYPE): Promise<{ statusCode: number; body: unknown }> {
     const response = await server.inject({
       method: 'POST',
       url: '/bindings/verify',
-      headers: { 'content-type': DOCX_TYPE, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
+      headers: { 'content-type': type, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
       payload: Buffer.from(docx),
     });
     return { statusCode: response.statusCode, body: response.json() };
@@ -259,13 +270,74 @@ describe('the signature of the document label binding', () => {
     assert.deepEqual(body, { error: 'The package holds several document label bindings, where ADatP-4778.2 allows one' });
   });
 
-  it('refuses a binding that references a part the package lacks', async () => {
+  it('references the parts the package holds, whatever parts the binding it received named', async () => {
     const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE, { extraParts: ['word/media/image9.png'] });
 
-    const { statusCode, body } = await sign(docx);
+    const signed = signedOf((await sign(docx)).body);
 
-    assert.equal(statusCode, 422);
-    assert.deepEqual(body, { error: 'The binding references parts the package lacks: word/media/image9.png' });
+    const verification = await verifyWithXmlsec(docx, signed.xml, certificate);
+    const present = bindableParts(await JSZip.loadAsync(docx));
+    assert.deepEqual([...verification.references].sort(), [...present].sort());
+    assert.equal(verification.manifest, `${present.length}/${present.length}`);
+  });
+
+  it('references the Tables 5-2 and 5-3 parts a workbook holds, chart styles under both names, as xmlsec1 verifies', async () => {
+    const labelled = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE, { template: WORKBOOK_TEMPLATE });
+    const xlsx = await withParts(labelled, {
+      'xl/worksheets/sheet2.xml': '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/charts/chart1.xml': '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>',
+      'xl/charts/colors1.xml': '<cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle"/>',
+      // The chart style part as Microsoft Excel and ONLYOFFICE name it, and
+      // as the table does.
+      'xl/charts/style1.xml': '<cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle"/>',
+      'xl/charts/styles2.xml': '<cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle"/>',
+      'xl/pivotTables/pivotTable1.xml': '<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/comments1.xml': '<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/media/image1.png': 'Fictional picture',
+      'docProps/custom.xml': '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"/>',
+      // Parts the tables leave out.
+      'xl/theme/theme1.xml': '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>',
+      'xl/drawings/drawing1.xml': '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"/>',
+      'xl/threadedComments/threadedComment1.xml': '<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"/>',
+      'xl/pivotCache/pivotCacheDefinition1.xml': '<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/tables/table1.xml': '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/chartsheets/sheet1.xml': '<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+    });
+
+    const { statusCode, body } = await sign(xlsx, SECRET, XLSX_TYPE);
+
+    assert.equal(statusCode, 200);
+    const verification = await verifyWithXmlsec(xlsx, signedOf(body).xml, certificate);
+    assert.deepEqual([...verification.references].sort(), [
+      'docProps/app.xml',
+      'docProps/core.xml',
+      'docProps/custom.xml',
+      'xl/charts/chart1.xml',
+      'xl/charts/colors1.xml',
+      'xl/charts/style1.xml',
+      'xl/charts/styles2.xml',
+      'xl/comments1.xml',
+      'xl/media/image1.png',
+      'xl/pivotTables/pivotTable1.xml',
+      'xl/sharedStrings.xml',
+      'xl/styles.xml',
+      'xl/workbook.xml',
+      'xl/worksheets/sheet1.xml',
+      'xl/worksheets/sheet2.xml',
+    ]);
+    assert.deepEqual([verification.status, verification.manifest], [0, '15/15']);
+  });
+
+  it('finds a workbook whose binding it signed valid, and names its parts changed since signing', async () => {
+    const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE, { template: WORKBOOK_TEMPLATE }), server, XLSX_TYPE);
+
+    const changed = await withChangedPart(signed, 'xl/worksheets/sheet1.xml', (xml) => `${xml}<!-- changed after signing -->`);
+
+    assert.deepEqual(await verdictOf(signed, SECRET, XLSX_TYPE), { statusCode: 200, body: { status: 'valid', labelInformationPart: null } });
+    assert.deepEqual(await verdictOf(changed, SECRET, XLSX_TYPE), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'Parts changed since signing', changedParts: ['xl/worksheets/sheet1.xml'], labelInformationPart: null },
+    });
   });
 
   it('leaves a document without a binding unsigned', async () => {

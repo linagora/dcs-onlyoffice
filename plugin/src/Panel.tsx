@@ -17,7 +17,7 @@ import {
 import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
-import { callEditorMethod, type PluginInfo } from './onlyoffice.ts';
+import { callEditorMethod, type EditorType, editorTypeOf, type PluginInfo } from './onlyoffice.ts';
 import {
   type DocumentLabelRequest,
   fetchAllowedLabels,
@@ -30,7 +30,7 @@ import {
 import { documentIdOf, reportBaseLabelChange } from './portal.ts';
 import { PortionDeletionForm, PortionForm } from './PortionForm.tsx';
 import { PortionList, shownLabelOf } from './PortionList.tsx';
-import { insertPortion, type StoredPortion, writeDocumentLabel, type WriteResult } from './portions.ts';
+import { EDITORS, insertPortion, type StoredPortion, writeDocumentLabel, type WriteResult } from './portions.ts';
 import { type PortionReading, PortionReader } from './readings.ts';
 
 // One empty list, so that the portions' readings do not restart on every render.
@@ -56,12 +56,14 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   );
   const { state: documentState, activePortionId, rereadProblem, refresh } = useDocumentState(pluginReady);
   const [insertionRequested, setInsertionRequested] = useState(false);
-  const editor = useLoadable<{ documentId: string | null; userId: string | null }>(async () => {
+  const editorInfo = useLoadable<{ type: EditorType; documentId: string | null; userId: string | null }>(async () => {
     const info = await pluginReady;
-    return { documentId: documentIdOf(info), userId: typeof info.userId === 'string' ? info.userId : null };
+    return { type: editorTypeOf(info), documentId: documentIdOf(info), userId: typeof info.userId === 'string' ? info.userId : null };
   }, [pluginReady]);
-  const documentId = editor.status === 'loaded' ? editor.value.documentId : null;
-  const userId = editor.status === 'loaded' ? editor.value.userId : null;
+  const editorType = editorInfo.status === 'loaded' ? editorInfo.value.type : null;
+  const documentId = editorInfo.status === 'loaded' ? editorInfo.value.documentId : null;
+  const userId = editorInfo.status === 'loaded' ? editorInfo.value.userId : null;
+  const offersPortions = !readOnly && editorType !== null && EDITORS[editorType].offersPortions;
   const othersLocks = usePortionLocks(documentId, userId);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
@@ -99,13 +101,13 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
         : { policy, baseLabelCode, portionLabelCodes: documentState.portions.map((portion) => portion.labelCode) },
     [policy, baseLabelCode, documentState],
   );
-  const documentLabel = useDocumentLabel(labelRequest, documentState, !readOnly);
+  const documentLabel = useDocumentLabel(labelRequest, documentState, !readOnly, editorType);
 
   const requestInsertion = useCallback((): void => {
     setInsertionRequested(true);
   }, []);
   // The editor's menus only offer an insertion the panel can carry out.
-  useInsertionEntryPoints(pluginReady, !readOnly && offeredLabels !== null && offeredLabels.length > 0, requestInsertion);
+  useInsertionEntryPoints(pluginReady, offersPortions && offeredLabels !== null && offeredLabels.length > 0, requestInsertion);
 
   const selectPortion = (portion: StoredPortion): void => {
     callEditorMethod('SelectContentControl', [portion.internalId]).catch((error: unknown) => {
@@ -138,11 +140,10 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       return false;
     }
     const current = await refresh();
-    const applied = await writeDocumentLabel({
-      policy,
-      baseLabelCode: code,
-      portionLabelCodes: current.portions.map((portion) => portion.labelCode),
-    });
+    const applied = await writeDocumentLabel(
+      { policy, baseLabelCode: code, portionLabelCodes: current.portions.map((portion) => portion.labelCode) },
+      editorTypeOf(await pluginReady),
+    );
     await refresh();
     const documentId = documentIdOf(await pluginReady);
     if (applied && documentId !== null) {
@@ -187,7 +188,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
             readOnly={readOnly}
             onBaseLabelChange={changeBaseLabel}
           />
-          {!readOnly && (
+          {offersPortions && (
             <section aria-labelledby="new-portion-title">
               <h2 id="new-portion-title">{messages.newPortionTitle}</h2>
               {allowedLabels.status === 'failed' && <p class="error">{messages.allowedLabelsFailed(allowedLabels.reason)}</p>}

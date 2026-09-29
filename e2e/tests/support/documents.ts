@@ -229,6 +229,7 @@ export async function readDocumentText(page: Page): Promise<string> {
 
 interface BrowserResponse {
   status: number;
+  contentType: string | null;
   body: Buffer;
 }
 
@@ -248,11 +249,11 @@ export async function browserFetch(page: Page, url: string, method: 'GET' | 'POS
       for (let offset = 0; offset < bytes.length; offset += 0x8000) {
         binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
       }
-      return { status: response.status, base64: btoa(binary) };
+      return { status: response.status, contentType: response.headers.get('content-type'), base64: btoa(binary) };
     },
     { url, method, json: body === null ? null : JSON.stringify(body) },
   );
-  return { status: result.status, body: Buffer.from(result.base64, 'base64') };
+  return { status: result.status, contentType: result.contentType, body: Buffer.from(result.base64, 'base64') };
 }
 
 export async function requestForceSave(page: Page, documentId: string): Promise<number> {
