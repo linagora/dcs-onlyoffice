@@ -19,10 +19,11 @@ export interface PortionLabels {
   tag: string | null;
 }
 
-// The labels in clear a package holds: its base label, and each portion's
-// labels by portion id.
+// The labels in clear a package holds: its base label, the document label
+// the panel last wrote beside it, and each portion's labels by portion id.
 export interface FileLabels {
   base: string | null;
+  label: string | null;
   portions: Map<string, PortionLabels>;
 }
 
@@ -43,10 +44,12 @@ export async function fileLabelsOf(file: Uint8Array): Promise<FileLabels> {
     return labels;
   };
   let base: string | null = null;
+  let label: string | null = null;
   for (const { document } of await customXmlParts(zip)) {
     const root = document.documentElement;
     if (root?.namespaceURI === DOCUMENT_NAMESPACE && root.localName === 'document') {
       base = root.getAttribute('base') || null;
+      label = root.getAttribute('label') || null;
     }
     const id = root?.getAttribute('id') ?? null;
     if (root?.namespaceURI === PORTION_NAMESPACE && root.localName === 'portion' && id !== null) {
@@ -67,7 +70,7 @@ export async function fileLabelsOf(file: Uint8Array): Promise<FileLabels> {
       labels.tag = labels.part;
     }
   }
-  return { base, portions };
+  return { base, label, portions };
 }
 
 // The documents of a package's XML parts whose names match.
@@ -117,21 +120,24 @@ function portionTagOf(tag: string | null): { id: string; label: string } | null 
   }
 }
 
-// Reads the base label of each stored document once per version of its file.
-// A file that cannot be read fails, so that its document stays closed.
-export class BaseLabels {
-  #known = new Map<string, { version: string; code: string | null }>();
+// The labels a stored file names, its base label and its document label,
+// read once for each version of the file. A file that cannot be read fails,
+// so that its document stays closed.
+export class StoredLabels {
+  #known = new Map<string, { version: string } & Pick<FileLabels, 'base' | 'label'>>();
 
-  async of(document: StoredDocument): Promise<string | null> {
+  // The base label, and the document label the panel last wrote beside it;
+  // null for a label the file does not name.
+  async of(document: StoredDocument): Promise<Pick<FileLabels, 'base' | 'label'>> {
     const { mtimeMs, size } = await stat(document.filePath);
     const version = `${mtimeMs}:${size}`;
     const known = this.#known.get(document.id);
     if (known?.version === version) {
-      return known.code;
+      return known;
     }
-    const code = (await fileLabelsOf(await readFile(document.filePath))).base;
-    this.#known.set(document.id, { version, code });
-    return code;
+    const { base, label } = await fileLabelsOf(await readFile(document.filePath));
+    this.#known.set(document.id, { version, base, label });
+    return { base, label };
   }
 
   // Forgets the documents that are no longer stored.
