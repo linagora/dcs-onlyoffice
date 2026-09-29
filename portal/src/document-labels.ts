@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import { DOMParser } from '@xmldom/xmldom';
+import { type Document, DOMParser } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 import { customXmlParts } from './binding.ts';
 import type { StoredDocument } from './documents.ts';
@@ -11,7 +11,9 @@ const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
 const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 
 // A portion's label in clear, in its part and in its placeholder's tag;
-// null where the file holds none.
+// null where the file holds none. A workbook's placeholder, a user protected
+// range titled with the portion's id, holds no label: while it is there, its
+// portion's part gives the label of both.
 export interface PortionLabels {
   part: string | null;
   tag: string | null;
@@ -27,6 +29,10 @@ export interface FileLabels {
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 // The parts where the plugin's placeholders may be.
 const PLACEHOLDER_PART = /^word\/(document|header\d*|footer\d*)\.xml$/;
+const SPREADSHEET_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const WORKSHEET_PART = /^xl\/worksheets\/sheet\d+\.xml$/;
+// The extension in which ONLYOFFICE writes a sheet's user protected ranges.
+const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}';
 
 export async function fileLabelsOf(file: Uint8Array): Promise<FileLabels> {
   const zip = await JSZip.loadAsync(file);
@@ -47,17 +53,48 @@ export async function fileLabelsOf(file: Uint8Array): Promise<FileLabels> {
       labelsOf(id).part = root.getAttribute('label');
     }
   }
-  for (const name of Object.keys(zip.files).filter((file) => PLACEHOLDER_PART.test(file))) {
-    const xml = await zip.file(name)?.async('string');
-    const tags = xml === undefined ? [] : Array.from(new DOMParser().parseFromString(xml, 'text/xml').getElementsByTagNameNS(WORD_NAMESPACE, 'tag'));
-    for (const tag of tags) {
+  for (const part of await xmlPartsMatching(zip, PLACEHOLDER_PART)) {
+    for (const tag of Array.from(part.getElementsByTagNameNS(WORD_NAMESPACE, 'tag'))) {
       const portion = portionTagOf(tag.getAttributeNS(WORD_NAMESPACE, 'val'));
       if (portion !== null) {
         labelsOf(portion.id).tag = portion.label;
       }
     }
   }
+  for (const id of await userProtectedRangeTitles(zip)) {
+    const labels = portions.get(id);
+    if (labels !== undefined) {
+      labels.tag = labels.part;
+    }
+  }
   return { base, portions };
+}
+
+// The documents of a package's XML parts whose names match.
+async function xmlPartsMatching(zip: JSZip, name: RegExp): Promise<Document[]> {
+  const parts: Document[] = [];
+  for (const part of Object.keys(zip.files).filter((file) => name.test(file))) {
+    const xml = await zip.file(part)?.async('string');
+    if (xml !== undefined) {
+      parts.push(new DOMParser().parseFromString(xml, 'text/xml'));
+    }
+  }
+  return parts;
+}
+
+// The titles of a workbook's user protected ranges, as ONLYOFFICE saves them
+// in each worksheet.
+async function userProtectedRangeTitles(zip: JSZip): Promise<Set<string>> {
+  const titles = new Set<string>();
+  for (const sheet of await xmlPartsMatching(zip, WORKSHEET_PART)) {
+    const extensions = Array.from(sheet.getElementsByTagNameNS(SPREADSHEET_NAMESPACE, 'ext'));
+    for (const extension of extensions.filter((candidate) => candidate.getAttribute('uri') === USER_PROTECTED_RANGES_EXTENSION)) {
+      for (const range of Array.from(extension.getElementsByTagNameNS(SPREADSHEET_NAMESPACE, 'userProtectedRange'))) {
+        titles.add(range.getAttribute('name') ?? '');
+      }
+    }
+  }
+  return titles;
 }
 
 // A placeholder's tag names its portion and its label.
