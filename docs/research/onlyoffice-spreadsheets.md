@@ -842,8 +842,10 @@ end-to-end test an answer names guards it; the other answers were checked once, 
   long shows it, bold and in its label's colour, centred in the header and the footer of the first page, of the even
   page and of the odd one, beside the template's left and right sections
   ([workbook-page-marking.spec.ts](../../e2e/tests/workbook-page-marking.spec.ts) guards the strings the preview draws
-  from). Whether Microsoft Excel opens a header longer than 255 characters, and keeps the protected ranges, is left to a
-  check in Excel.
+  from). On A4 in portrait, the long marking of a workbook that holds a more restrictive portion ran into the template's
+  left header and right footer; in landscape, where the template now prints, it leaves them clear (checked in the print
+  preview of the demo's replay). Whether Microsoft Excel opens a header longer than 255 characters, and keeps the
+  protected ranges, is left to a check in Excel.
 - **13. No-plaintext check.** The search of the Document Server's working files opens every ZIP archive by its
   signature, XLSX files and the spreadsheet editor's change archives included; after the workbook tests, it found no
   portion text ([search-document-server.ts](../../e2e/scripts/search-document-server.ts)).
