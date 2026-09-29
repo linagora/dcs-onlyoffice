@@ -38,10 +38,31 @@ const WORDPROCESSING_BINDABLE_PARTS: readonly RegExp[] = [
   /^docProps\/custom\.xml$/,
 ];
 
+// ADatP-4778.2 Tables 5-2 and 5-3 for SpreadsheetML, in reference order. The
+// table names chart styles styles<N>; Microsoft Excel and ONLYOFFICE write
+// style<N>: both names count.
+const SPREADSHEET_BINDABLE_PARTS: readonly RegExp[] = [
+  /^xl\/workbook\.xml$/,
+  /^xl\/styles\.xml$/,
+  /^xl\/sharedStrings\.xml$/,
+  /^xl\/worksheets\/sheet\d+\.xml$/,
+  /^xl\/charts\/chart\d+\.xml$/,
+  /^xl\/charts\/colors\d+\.xml$/,
+  /^xl\/charts\/styles?\d+\.xml$/,
+  /^xl\/pivotTables\/pivotTable\d+\.xml$/,
+  /^xl\/comments\d+\.xml$/,
+  /^xl\/media\/.+$/,
+  /^docProps\/core\.xml$/,
+  /^docProps\/app\.xml$/,
+  /^docProps\/custom\.xml$/,
+];
+
 // The parts of a package, given by name, that its whole-document binding
-// references.
+// references: those of a workbook when the package holds a workbook part,
+// else those of a text document.
 export function bindablePartsOf(parts: readonly string[]): string[] {
-  return WORDPROCESSING_BINDABLE_PARTS.flatMap((pattern) => parts.filter((part) => pattern.test(part)).sort());
+  const table = parts.includes('xl/workbook.xml') ? SPREADSHEET_BINDABLE_PARTS : WORDPROCESSING_BINDABLE_PARTS;
+  return table.flatMap((pattern) => parts.filter((part) => pattern.test(part)).sort());
 }
 
 const MEDIA_TYPES: Readonly<Record<string, string>> = {

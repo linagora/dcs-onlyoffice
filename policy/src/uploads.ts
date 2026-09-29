@@ -107,8 +107,8 @@ export interface UploadOptions {
 // references the parts the package holds. It also removes the Sensitivity
 // Label Information part, which Office could read instead of the label the
 // platform writes (ADR 0005). The portal then has the binding signed, as at
-// a save. Both routes refuse what cannot become a document. The DOCX body
-// parser comes from acceptPackages.
+// a save. Both routes refuse what cannot become a text document, a workbook
+// included. The body parser comes from acceptPackages.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
   app.post('/uploads/read', async (request, reply) => {
     const received = packageBody(request, options.secret);

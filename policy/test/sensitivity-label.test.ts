@@ -13,7 +13,9 @@ import { verifyWithXmlsec } from './xmlsec.ts';
 const DEMO_SPIFS = path.join(import.meta.dirname, '..', '..', 'deploy', 'spif');
 const DEMO_LABEL_MAPPING = path.join(DEMO_SPIFS, 'demo-fr.label-mapping.json');
 const TEMPLATE = path.join(import.meta.dirname, '..', '..', 'deploy', 'demo', 'documents', 'exercise-northwind.docx');
+const WORKBOOK_TEMPLATE = path.join(import.meta.dirname, '..', '..', 'deploy', 'demo', 'documents', 'exercise-northwind-logistics.xlsx');
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const SECRET = 'fictional-binding-signature-secret';
 const NOW = new Date('2026-09-28T09:00:00.000Z');
 const CUSTOM_PROPERTIES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties';
@@ -83,14 +85,16 @@ describe('the sensitivity label of a stored document', () => {
     return file;
   }
 
-  // The demo template with a base label, a placeholder for each portion
-  // label, and the binding the panel writes.
+  // A demo template, the text one unless told otherwise, with a base label,
+  // a placeholder for each portion label, and the binding the panel writes.
   async function labelledDocument(base: string, portions: string[] = [], template: Uint8Array | null = null): Promise<Uint8Array> {
     const zip = await JSZip.loadAsync(template ?? (await readFile(TEMPLATE)));
-    const placeholders = portions
-      .map((label, index) => `<w:sdt><w:sdtPr><w:tag w:val="${JSON.stringify({ v: 1, id: `portion-${index}`, label }).replaceAll('"', '&quot;')}"/></w:sdtPr><w:sdtContent><w:p/></w:sdtContent></w:sdt>`)
-      .join('');
-    zip.file('word/document.xml', ((await zip.file('word/document.xml')?.async('string')) ?? '').replace('<w:body>', `<w:body>${placeholders}`));
+    if (portions.length > 0) {
+      const placeholders = portions
+        .map((label, index) => `<w:sdt><w:sdtPr><w:tag w:val="${JSON.stringify({ v: 1, id: `portion-${index}`, label }).replaceAll('"', '&quot;')}"/></w:sdtPr><w:sdtContent><w:p/></w:sdtContent></w:sdt>`)
+        .join('');
+      zip.file('word/document.xml', ((await zip.file('word/document.xml')?.async('string')) ?? '').replace('<w:body>', `<w:body>${placeholders}`));
+    }
     const computed = await server.inject({
       method: 'POST',
       url: '/policies/DEMO-FR/document-label',
@@ -105,14 +109,14 @@ describe('the sensitivity label of a stored document', () => {
   // What the policy service answers when the portal has a package signed.
   // `stored` is the package as stored before this save, whose custom
   // properties the portal sends along.
-  async function signingAnswer(docx: Uint8Array, signer: FastifyInstance = server, stored: Uint8Array | null = null): Promise<SigningAnswer> {
+  async function signingAnswer(docx: Uint8Array, signer: FastifyInstance = server, stored: Uint8Array | null = null, type: string = DOCX_TYPE): Promise<SigningAnswer> {
     // As the portal sends them: empty when the stored file has none.
     const storedProperties = stored === null ? null : ((await (await JSZip.loadAsync(stored)).file('docProps/custom.xml')?.async('string')) ?? '');
     const response = await signer.inject({
       method: 'POST',
       url: '/bindings/sign',
       headers: {
-        'content-type': DOCX_TYPE,
+        'content-type': type,
         authorization: `Bearer ${SECRET}`,
         ...(storedProperties === null ? {} : { 'x-stored-custom-properties': Buffer.from(storedProperties).toString('base64') }),
       },
@@ -124,8 +128,13 @@ describe('the sensitivity label of a stored document', () => {
 
   // A package as the portal stores it, with every part the policy service
   // wrote when it signed, and that answer.
-  async function signedAndStored(docx: Uint8Array, signer: FastifyInstance = server, previous: Uint8Array | null = null): Promise<{ answer: SigningAnswer; stored: Uint8Array }> {
-    const answer = await signingAnswer(docx, signer, previous);
+  async function signedAndStored(
+    docx: Uint8Array,
+    signer: FastifyInstance = server,
+    previous: Uint8Array | null = null,
+    type: string = DOCX_TYPE,
+  ): Promise<{ answer: SigningAnswer; stored: Uint8Array }> {
+    const answer = await signingAnswer(docx, signer, previous, type);
     const zip = await JSZip.loadAsync(docx);
     for (const written of [...answer.parts, answer.signed]) {
       zip.file(written.part, written.xml);
@@ -381,6 +390,19 @@ describe('the sensitivity label of a stored document', () => {
       assert.ok(verification.references.includes('docProps/custom.xml'));
       assert.deepEqual([verification.status, verification.manifest], [0, `${bindable.length}/${bindable.length}`]);
     }
+  });
+
+  it('gives a DIFFUSION RESTREINTE workbook the sensitivity label that the mapping pairs with it, which the binding covers', async () => {
+    const xlsx = await labelledDocument(DIFFUSION_RESTREINTE, [], await readFile(WORKBOOK_TEMPLATE));
+
+    const { answer, stored } = await signedAndStored(xlsx, server, null, XLSX_TYPE);
+
+    const { ActionId, ...others } = labelProperties(await customProperties(stored), DIFFUSION_RESTREINTE_SENSITIVITY_LABEL);
+    assert.deepEqual(others, { Enabled: 'true', SetDate: '2026-09-28T09:00:00Z', Method: 'Privileged', Name: 'DCS-Diffusion-Restreinte-Standard', SiteId: DEMO_TENANT, ContentBits: '0' });
+    assert.match(ActionId ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    const verification = await verifyWithXmlsec(stored, answer.signed.xml, certificate);
+    assert.ok(verification.references.includes('docProps/custom.xml'));
+    assert.equal(verification.status, 0);
   });
 
   for (const [problem, mapping, message] of [

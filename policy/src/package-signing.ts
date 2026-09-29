@@ -10,6 +10,7 @@ import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLa
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 // The plugin's parts and tags (plugin/src/portions.ts).
 const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -133,13 +134,13 @@ async function packageOf(request: FastifyRequest, secret: string): Promise<{ ok:
     return received;
   }
   const zip = await loadPackage(received.body);
-  return zip === null ? { ok: false, status: 422, error: 'The body is no DOCX package' } : { ok: true, zip };
+  return zip === null ? { ok: false, status: 422, error: 'The body is no DOCX or XLSX package' } : { ok: true, zip };
 }
 
-// The routes that take a package read it as a DOCX body, up to a size no
-// saved document reaches.
+// The routes that take a package read it as a DOCX or an XLSX body, up to a
+// size no saved document reaches.
 export function acceptPackages(app: FastifyInstance): void {
-  app.addContentTypeParser(DOCX_TYPE, { parseAs: 'buffer', bodyLimit: PACKAGE_LIMIT_BYTES }, (_request, body, done) => {
+  app.addContentTypeParser([DOCX_TYPE, XLSX_TYPE], { parseAs: 'buffer', bodyLimit: PACKAGE_LIMIT_BYTES }, (_request, body, done) => {
     done(null, body);
   });
 }
@@ -150,7 +151,7 @@ export function packageBody(request: FastifyRequest, secret: string): { ok: true
     return { ok: false, status: 403, error: 'Only the portal may send packages to the policy service' };
   }
   if (!Buffer.isBuffer(request.body)) {
-    return { ok: false, status: 415, error: `Expected a ${DOCX_TYPE} body` };
+    return { ok: false, status: 415, error: `Expected a ${DOCX_TYPE} or ${XLSX_TYPE} body` };
   }
   return { ok: true, body: request.body };
 }
