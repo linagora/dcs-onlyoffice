@@ -1,4 +1,4 @@
-import type { CommandScope, DocumentSnapshot, PortionBlockScope, WriteOutcome } from './commands.ts';
+import type { CommandScope, DocumentSnapshot, PortionBlockScope, SelectionScope, WriteOutcome } from './commands.ts';
 import type { ApiRange, ApiWorksheet, InternalUserProtectedRange, SpreadsheetApi } from './office-api.ts';
 
 // The commands the panel runs in the spreadsheet editor. As those of the
@@ -6,7 +6,7 @@ import type { ApiRange, ApiWorksheet, InternalUserProtectedRange, SpreadsheetApi
 // sandbox, where it may only use `Api` and `Asc.scope`.
 
 declare const Api: SpreadsheetApi;
-declare const Asc: { scope: CommandScope };
+declare const Asc: { scope: CommandScope & SelectionScope };
 
 // What a workbook holds of the panel's parts, its user protected ranges, on
 // every sheet, which the portions' placeholders are, and the centre section
@@ -207,4 +207,26 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
     headerFooter.setDifferentOddEven(true);
   }
   return 'written';
+}
+
+// The title of the user protected range, a portion's placeholder, that holds
+// the active sheet's active cell; null when none does.
+export function placeholderAtActiveCellCommand(): string | null {
+  const worksheet = Api.GetActiveSheet().worksheet;
+  const { row, col } = worksheet.selectionRange.activeCell;
+  return (worksheet.userProtectedRanges ?? []).find((range) => range.contains(col, row))?.name ?? null;
+}
+
+// Selects a portion's placeholder, on whichever sheet it is, which becomes
+// the active one; false when no sheet holds it.
+export function selectPlaceholderCommand(): boolean {
+  for (const sheet of Api.GetSheets()) {
+    const range = (sheet.worksheet.userProtectedRanges ?? []).find((candidate) => candidate.name === Asc.scope.rangeTitle);
+    if (range !== undefined) {
+      sheet.SetActive();
+      sheet.GetRange(range.ref.getName()).Select();
+      return true;
+    }
+  }
+  return false;
 }

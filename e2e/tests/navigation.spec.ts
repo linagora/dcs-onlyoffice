@@ -1,7 +1,7 @@
 import { openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
-import { executeEditorMethod, pluginFrame, pluginPanel } from './support/plugin.ts';
+import { executeEditorMethod, highlightedPortion, pluginFrame, pluginPanel } from './support/plugin.ts';
 import { insertPortion } from './support/portions.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -61,7 +61,6 @@ test('the panel highlights the portion whose block holds the cursor', async ({ p
   await openNewDocument(page, 'exercise-northwind.docx');
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional first portion') });
   await insertPortion(page, { marking: RELEASABLE_TO_NATO, text: markedText('Fictional second portion') });
-  const panel = pluginPanel(page);
   const frame = await pluginFrame(page);
   // The page marking has content controls of its own, in headers and footers.
   const blocks = contentControlsOf(await executeEditorMethod(frame, 'GetAllContentControls', [])).filter((control) => portionIdOf(control) !== null);
@@ -69,7 +68,7 @@ test('the panel highlights the portion whose block holds the cursor', async ({ p
 
   for (const block of blocks) {
     await executeEditorMethod(frame, 'MoveCursorToContentControl', [block.InternalId, true]);
-    await expect(panel.locator('[data-testid="portion-item"][aria-current="true"]')).toHaveAttribute(
+    await expect(highlightedPortion(page)).toHaveAttribute(
       'data-portion-id',
       portionIdOf(block) ?? 'missing',
     );

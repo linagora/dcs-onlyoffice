@@ -83,6 +83,7 @@ export function editorTypeOf(info: PluginInfo): EditorType {
 
 let ready: Promise<PluginInfo> | null = null;
 let buttonHandler: ButtonHandler = () => {};
+let reinitHandler: () => void = () => {};
 
 // Must run before the editor answers the plugin's handshake, hence at module
 // load: a late `init` handler would never be called.
@@ -93,8 +94,16 @@ export function whenPluginReady(): Promise<PluginInfo> {
       return Promise.reject(new Error('The ONLYOFFICE plugin runtime is not loaded'));
     }
     ready = new Promise((resolve) => {
+      let started = false;
+      // The editor calls init again at each change of the selection, in
+      // either editor (config.json, initOnSelectionChanged).
       plugin.init = () => {
-        resolve(plugin.info ?? {});
+        if (started) {
+          reinitHandler();
+        } else {
+          started = true;
+          resolve(plugin.info ?? {});
+        }
       };
       // The panel has no buttons, but its windows do.
       plugin.button = (id, windowId) => {
@@ -107,6 +116,11 @@ export function whenPluginReady(): Promise<PluginInfo> {
 
 export function onPluginButton(handler: ButtonHandler): void {
   buttonHandler = handler;
+}
+
+// Called at each change of the selection, once the plugin has started.
+export function onSelectionChange(handler: () => void): void {
+  reinitHandler = handler;
 }
 
 export function offEditorEvent(name: string): void {

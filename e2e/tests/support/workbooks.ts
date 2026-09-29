@@ -31,7 +31,12 @@ interface SpreadsheetEditorWindow {
     editor: {
       asc_addWorksheet(name: string): void;
       asc_findCell(reference: string): void;
-      wbModel: { getActiveWs(): { getRange2(reference: string): { getValue(): string } } };
+      wbModel: {
+        getActiveWs(): {
+          getRange2(reference: string): { getValue(): string };
+          selectionRange: { activeCell: { row: number; col: number } };
+        };
+      };
     };
   };
 }
@@ -56,6 +61,18 @@ export async function cellValue(page: Page, reference: string): Promise<string> 
     (cell) => (window as unknown as SpreadsheetEditorWindow).Asc.editor.wbModel.getActiveWs().getRange2(cell).getValue(), // SAFETY: the spreadsheet editor's frame
     reference,
   );
+}
+
+// The active cell of the active sheet, by its A1 reference, such as F4.
+export async function activeCell(page: Page): Promise<string> {
+  const { row, col } = await editorFrame(page).evaluate(
+    () => (window as unknown as SpreadsheetEditorWindow).Asc.editor.wbModel.getActiveWs().selectionRange.activeCell, // SAFETY: the spreadsheet editor's frame
+  );
+  let column = '';
+  for (let rest = col + 1; rest > 0; rest = Math.floor((rest - 1) / 26)) {
+    column = String.fromCharCode('A'.charCodeAt(0) + ((rest - 1) % 26)) + column;
+  }
+  return `${column}${row + 1}`;
 }
 
 // Types into a cell through the editor's grid, and closes the warnings the

@@ -17,7 +17,7 @@ import {
 import { type Identity, resolveIdentity } from './identity.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
-import { callEditorMethod, type EditorType, editorTypeOf, type PluginInfo } from './onlyoffice.ts';
+import { type EditorType, editorTypeOf, type PluginInfo } from './onlyoffice.ts';
 import {
   type DocumentLabelRequest,
   fetchAllowedLabels,
@@ -54,7 +54,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
         : new PortionReader(envelopes.status === 'loaded' ? envelopes.value : unavailableOpener(envelopes.reason), fetchLabelOfAdatp4774),
     [envelopes],
   );
-  const { state: documentState, activePortionId, rereadProblem, refresh } = useDocumentState(pluginReady);
+  const { state: documentState, activePortionId, selectionChanges, rereadProblem, refresh } = useDocumentState(pluginReady);
   const [insertionRequested, setInsertionRequested] = useState(false);
   const editorInfo = useLoadable<{ type: EditorType; documentId: string | null; userId: string | null }>(async () => {
     const info = await pluginReady;
@@ -95,7 +95,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const readings = usePortionReadings(portions, reader);
 
   const activePortion = portions.find((portion) => portion.id === activePortionId) ?? null;
-  usePortionBubble(pluginReady, activePortion === null ? null : bubbleContentOf(activePortion, readings.get(activePortion.id) ?? null, labelList));
+  usePortionBubble(pluginReady, activePortion === null ? null : bubbleContentOf(activePortion, readings.get(activePortion.id) ?? null, labelList), selectionChanges);
 
   const labelRequest = useMemo(
     (): DocumentLabelRequest | null =>
@@ -113,10 +113,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   useInsertionEntryPoints(pluginReady, offersPortions && offeredLabels !== null && offeredLabels.length > 0, requestInsertion);
 
   const selectPortion = (portion: StoredPortion): void => {
-    if (editor === null || !editor.selectsPortions) {
-      return;
-    }
-    callEditorMethod('SelectContentControl', [portion.internalId]).catch((error: unknown) => {
+    editor?.selectPlaceholder(portion).catch((error: unknown) => {
       logProblem('Selecting a portion', error);
     });
   };

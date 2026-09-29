@@ -1,4 +1,4 @@
-import { expect, type Frame, type FrameLocator, type Page } from '@playwright/test';
+import { expect, type Frame, type FrameLocator, type Locator, type Page } from '@playwright/test';
 import { PORTION_NAMESPACE } from './docx.ts';
 
 export interface PluginInfoIdentity {
@@ -66,6 +66,12 @@ const BUBBLE_PAGE = '/plugin/bubble.html';
 
 export function pluginPanel(page: Page): FrameLocator {
   return page.frameLocator('iframe[name="frameEditor"]').frameLocator(`iframe[src*="${PLUGIN_PAGE}"]`);
+}
+
+// The portion the panel highlights, whose placeholder holds the cursor or
+// the selection.
+export function highlightedPortion(page: Page): Locator {
+  return pluginPanel(page).locator('[data-testid="portion-item"][aria-current="true"]');
 }
 
 // The bubble: the window the panel opens next to the cursor when it shows a

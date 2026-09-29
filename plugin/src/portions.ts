@@ -5,20 +5,22 @@ import type {
   HeaderFooterSnapshot,
   PortionBlockScope,
   PortionWriteScope,
+  SelectionScope,
   SheetSnapshot,
   WriteOutcome,
 } from './commands.ts';
 import { readDocumentCommand, writeLabellingCommand } from './document-commands.ts';
 import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
-import { type EditorType, runCommand } from './onlyoffice.ts';
+import { callEditorMethod, type EditorType, runCommand } from './onlyoffice.ts';
 import { type DocumentLabel, type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, fetchLabelAttributes, type LabelView } from './policy.ts';
-import { readWorkbookCommand, writeWorkbookLabellingCommand } from './workbook-commands.ts';
+import { placeholderAtActiveCellCommand, readWorkbookCommand, selectPlaceholderCommand, writeWorkbookLabellingCommand } from './workbook-commands.ts';
 
 // What the panel does in each editor: the commands that read the labels and
-// write them, what the page marking the document shows is, and whether it
-// inserts protected portions, changes and deletes them and selects them from
-// the panel, which workbooks do not all have yet.
+// write them, what the page marking the document shows is, whether it inserts
+// protected portions and changes and deletes them, how it selects a portion's
+// placeholder and learns which one holds the selection, and what the editor
+// does to the panel as the document loads.
 export const EDITORS: Readonly<
   Record<
     EditorType,
@@ -28,7 +30,11 @@ export const EDITORS: Readonly<
       pageMarkingOf: (snapshot: DocumentSnapshot) => ShownPageMarking | null;
       insertsPortions: boolean;
       editsPortions: boolean;
-      selectsPortions: boolean;
+      selectPlaceholder: (portion: StoredPortion) => Promise<void>;
+      // Reads which portion's placeholder holds the selection, at each change
+      // of the selection, where the editor tells it through no event of its
+      // own; null where it does.
+      readActivePortion: (() => Promise<string | null>) | null;
       // Whether the editor puts its own settings in the panel's place once the
       // document is loaded.
       hidesPanelOnLoad: boolean;
@@ -42,7 +48,10 @@ export const EDITORS: Readonly<
     pageMarkingOf: (snapshot) => textPageMarkingOf(snapshot.headersAndFooters),
     insertsPortions: true,
     editsPortions: true,
-    selectsPortions: true,
+    selectPlaceholder: async (portion) => {
+      await callEditorMethod('SelectContentControl', [portion.internalId]);
+    },
+    readActivePortion: null,
     hidesPanelOnLoad: false,
     insertionHint: messages.insertionHint,
   },
@@ -52,7 +61,14 @@ export const EDITORS: Readonly<
     pageMarkingOf: (snapshot) => sheetPageMarkingOf(snapshot.sheets),
     insertsPortions: true,
     editsPortions: true,
-    selectsPortions: false,
+    selectPlaceholder: async (portion) => {
+      const scope = { rangeTitle: portion.id } satisfies SelectionScope;
+      const selected = await runCommand(selectPlaceholderCommand, scope, false, (result) => (typeof result === 'boolean' ? result : null));
+      if (selected !== true) {
+        throw new Error('No sheet holds the portion\'s placeholder');
+      }
+    },
+    readActivePortion: async () => runCommand(placeholderAtActiveCellCommand, {}, false, (result) => (typeof result === 'string' ? result : null)),
     // The spreadsheet editor shows the cell settings at the first selection
     // after its side menu opened, once the panel had opened it: often as the
     // workbook loads, always once the browser remembers the menu open.
