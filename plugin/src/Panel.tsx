@@ -63,7 +63,10 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   const editorType = editorInfo.status === 'loaded' ? editorInfo.value.type : null;
   const documentId = editorInfo.status === 'loaded' ? editorInfo.value.documentId : null;
   const userId = editorInfo.status === 'loaded' ? editorInfo.value.userId : null;
-  const offersPortions = !readOnly && editorType !== null && EDITORS[editorType].offersPortions;
+  const editor = editorType === null ? null : EDITORS[editorType];
+  // The hint the insertion form gives, null when the panel offers none.
+  const insertionHint = !readOnly && editor !== null && editor.insertsPortions ? editor.insertionHint : null;
+  const offersPortions = insertionHint !== null;
   const othersLocks = usePortionLocks(documentId, userId);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
@@ -75,7 +78,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // Until the author picks one, the base label is the least restrictive.
   const storedBaseLabelCode = documentState?.baseLabelCode ?? null;
   const baseLabelCode = storedBaseLabelCode ?? labelList[0]?.code ?? null;
-  const edit = usePortionEdit(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh, baseLabelCode);
+  const edit = usePortionEdit(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh, baseLabelCode, editorType);
   // Lowering the base label is reserved to administrators cleared for it.
   // Until the choices for the current label are known, only it is offered.
   const documentLoaded = documentState !== null;
@@ -110,6 +113,9 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   useInsertionEntryPoints(pluginReady, offersPortions && offeredLabels !== null && offeredLabels.length > 0, requestInsertion);
 
   const selectPortion = (portion: StoredPortion): void => {
+    if (editor === null || !editor.selectsPortions) {
+      return;
+    }
     callEditorMethod('SelectContentControl', [portion.internalId]).catch((error: unknown) => {
       logProblem('Selecting a portion', error);
     });
@@ -127,6 +133,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       { label, text },
       { baseLabelCode, portionLabelCodes: current.portions.map((portion) => portion.labelCode) },
       envelopes.value,
+      editorTypeOf(await pluginReady),
     );
     await refresh();
     if (result.status === 'written') {
@@ -188,7 +195,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
             readOnly={readOnly}
             onBaseLabelChange={changeBaseLabel}
           />
-          {offersPortions && (
+          {insertionHint !== null && (
             <section aria-labelledby="new-portion-title">
               <h2 id="new-portion-title">{messages.newPortionTitle}</h2>
               {allowedLabels.status === 'failed' && <p class="error">{messages.allowedLabelsFailed(allowedLabels.reason)}</p>}
@@ -198,7 +205,11 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
                 </p>
               )}
               {offeredLabels !== null && offeredLabels.length > 0 && (
-                <PortionForm labels={offeredLabels} purpose={{ kind: 'insertion', requested: insertionRequested }} onSubmit={insert} />
+                <PortionForm
+                  labels={offeredLabels}
+                  purpose={{ kind: 'insertion', requested: insertionRequested, hint: insertionHint }}
+                  onSubmit={insert}
+                />
               )}
             </section>
           )}
@@ -212,7 +223,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
         onSelect={selectPortion}
         notices={portionNotices(othersLocks, edit.notice)}
         lockedByOthers={new Set(othersLocks.keys())}
-        onEditRequest={readOnly || edit.underWay !== null ? null : edit.start}
+        onEditRequest={readOnly || edit.underWay !== null || editor === null || !editor.editsPortions ? null : edit.start}
         editForm={
           edit.underWay === null
             ? null

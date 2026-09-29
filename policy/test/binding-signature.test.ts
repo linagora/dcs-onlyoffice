@@ -31,6 +31,14 @@ const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments)\.xm
 // Codes of the demo SPIF's labels.
 const NON_PROTEGE = 'DEMO-FR:1';
 const DIFFUSION_RESTREINTE = 'DEMO-FR:2';
+const SPECIAL_FRANCE = 'DEMO-FR:2/1.1';
+// DIFFUSION RESTREINTE with the informative category MORE RESTRICTIVE
+// PORTIONS, the document label of a DIFFUSION RESTREINTE document that holds
+// more restrictive portions.
+const WITH_MORE_RESTRICTIVE_PORTIONS = 'DEMO-FR:2/3.1';
+const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
+// The extension in which ONLYOFFICE writes a sheet's user protected ranges.
+const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}';
 
 interface Signed {
   part: string;
@@ -326,6 +334,45 @@ describe('the signature of the document label binding', () => {
       'xl/worksheets/sheet2.xml',
     ]);
     assert.deepEqual([verification.status, verification.manifest], [0, '15/15']);
+  });
+
+  // A DIFFUSION RESTREINTE workbook holding SPECIAL FRANCE portion parts, and
+  // a user protected range for each id in `ranges`, as ONLYOFFICE saves them.
+  async function workbookWithPortions(ids: string[], ranges: string[]): Promise<Uint8Array> {
+    const zip = await JSZip.loadAsync(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE, { template: WORKBOOK_TEMPLATE }));
+    for (const [index, id] of ids.entries()) {
+      zip.file(
+        `customXml/item${index + 3}.xml`,
+        `<dcs:portion xmlns:dcs="${PORTION_NAMESPACE}" id="${id}" version="1" label="${SPECIAL_FRANCE}"><dcs:label/><dcs:content encoding="ztdf">RmljdGlvbmFs</dcs:content></dcs:portion>`,
+      );
+    }
+    const userProtectedRanges = ranges.map((id, index) => `<userProtectedRange name="${id}" sqref="F${4 + 3 * index}:G${5 + 3 * index}"></userProtectedRange>`).join('');
+    const sheet = (await zip.file('xl/worksheets/sheet1.xml')?.async('string')) ?? '';
+    zip.file(
+      'xl/worksheets/sheet1.xml',
+      sheet.replace('</worksheet>', `<extLst><ext uri="${USER_PROTECTED_RANGES_EXTENSION}"><userProtectedRanges>${userProtectedRanges}</userProtectedRanges></ext></extLst></worksheet>`),
+    );
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  it("counts a workbook's portion parts that have a user protected range in its document label", async () => {
+    const xlsx = await workbookWithPortions(['portion-with-range', 'portion-without-range'], ['portion-with-range']);
+
+    const { statusCode, body } = await sign(xlsx, SECRET, XLSX_TYPE);
+
+    assert.equal(statusCode, 200);
+    assert.deepEqual(replacementOf(body), { before: DIFFUSION_RESTREINTE, after: WITH_MORE_RESTRICTIVE_PORTIONS });
+    assert.match(signedOf(body).xml, /MORE RESTRICTIVE PORTIONS/);
+  });
+
+  it("leaves a workbook's portion part without a user protected range out of its document label", async () => {
+    const xlsx = await workbookWithPortions(['portion-without-range'], ['a-range-without-part']);
+
+    const { statusCode, body } = await sign(xlsx, SECRET, XLSX_TYPE);
+
+    assert.equal(statusCode, 200);
+    assert.equal(replacementOf(body), null);
+    assert.doesNotMatch(signedOf(body).xml, /MORE RESTRICTIVE PORTIONS/);
   });
 
   it('finds a workbook whose binding it signed valid, and names its parts changed since signing', async () => {

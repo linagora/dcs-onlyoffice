@@ -17,7 +17,7 @@ export interface PortionBlockScope {
 // A portion the command writes, with its part: a new one, or a new version
 // of one the document holds; or one it deletes.
 export type PortionWriteScope =
-  | { kind: 'insertion'; alias: string; block: PortionBlockScope; xml: string }
+  | { kind: 'insertion'; id: string; alias: string; block: PortionBlockScope; xml: string }
   | { kind: 'change'; id: string; block: PortionBlockScope; xml: string }
   | { kind: 'deletion'; id: string };
 
@@ -57,9 +57,18 @@ export interface HeaderFooterSnapshot {
   blocks: (ControlSnapshot | null)[] | null;
 }
 
+// What reading a document gives: its placeholders, a text document's content
+// controls or a workbook's user protected ranges, the plugin's parts, and
+// the headers and footers where the page marking goes.
 export interface DocumentSnapshot {
   controls: { tag: string; internalId: string }[];
+  ranges: { title: string; reference: string }[];
   portionParts: string[];
   documentParts: string[];
   headersAndFooters: HeaderFooterSnapshot[];
 }
+
+// What a command that writes gives: whether it wrote, or, in a workbook,
+// that it refused selected cells that hold a value, a formula, a merge or a
+// portion.
+export type WriteOutcome = 'written' | 'not-written' | 'cells-occupied';

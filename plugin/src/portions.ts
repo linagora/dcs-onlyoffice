@@ -1,19 +1,47 @@
-import type { ControlSnapshot, DocumentLabelScope, DocumentSnapshot, HeaderFooterSnapshot, PortionBlockScope, PortionWriteScope } from './commands.ts';
+import type { ControlSnapshot, DocumentLabelScope, DocumentSnapshot, HeaderFooterSnapshot, PortionBlockScope, PortionWriteScope, WriteOutcome } from './commands.ts';
 import { readDocumentCommand, writeLabellingCommand } from './document-commands.ts';
 import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
 import { type EditorType, runCommand } from './onlyoffice.ts';
 import { type DocumentLabel, type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, fetchLabelAttributes, type LabelView } from './policy.ts';
-import { readWorkbookCommand, writeWorkbookLabelCommand } from './workbook-commands.ts';
+import { readWorkbookCommand, writeWorkbookLabellingCommand } from './workbook-commands.ts';
 
 // What the panel does in each editor: the commands that read the labels and
-// write the document label, and whether it offers protected portions and
-// reads the page marking, which workbooks do not have yet.
+// write them, and whether it inserts protected portions, changes and deletes
+// them, selects them from the panel and reads the page marking, which
+// workbooks do not all have yet.
 export const EDITORS: Readonly<
-  Record<EditorType, { read: () => DocumentSnapshot; writeLabel: () => boolean; offersPortions: boolean; readsPageMarking: boolean }>
+  Record<
+    EditorType,
+    {
+      read: () => DocumentSnapshot;
+      write: () => WriteOutcome;
+      insertsPortions: boolean;
+      editsPortions: boolean;
+      selectsPortions: boolean;
+      readsPageMarking: boolean;
+      insertionHint: string;
+    }
+  >
 > = {
-  word: { read: readDocumentCommand, writeLabel: writeLabellingCommand, offersPortions: true, readsPageMarking: true },
-  cell: { read: readWorkbookCommand, writeLabel: writeWorkbookLabelCommand, offersPortions: false, readsPageMarking: false },
+  word: {
+    read: readDocumentCommand,
+    write: writeLabellingCommand,
+    insertsPortions: true,
+    editsPortions: true,
+    selectsPortions: true,
+    readsPageMarking: true,
+    insertionHint: messages.insertionHint,
+  },
+  cell: {
+    read: readWorkbookCommand,
+    write: writeWorkbookLabellingCommand,
+    insertsPortions: true,
+    editsPortions: false,
+    selectsPortions: false,
+    readsPageMarking: false,
+    insertionHint: messages.cellInsertionHint,
+  },
 };
 
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
@@ -39,14 +67,17 @@ export type PortionContent = { encoding: 'ztdf'; envelope: string } | { encoding
 
 export interface StoredPortion {
   id: string;
-  // The label in clear: the code in the content control's tag, and the code
-  // and ADatP-4774 XML in the portion's part, null without a part.
+  // The label in clear: the code in the content control's tag, or in a
+  // workbook in the part, and the code and ADatP-4774 XML in the portion's
+  // part, null without a part.
   labelCode: string;
   partLabelCode: string | null;
   partLabelXml: string | null;
   version: number | null;
   // null when the part is missing or unreadable.
   content: PortionContent | null;
+  // The editor's handle on its placeholder: a content control's internal id,
+  // or the reference of a workbook's range.
   internalId: string;
 }
 
@@ -93,6 +124,7 @@ export type WriteResult =
   | { status: 'written' }
   | { status: 'not-encrypted'; reason: string }
   | { status: 'changed-meanwhile' }
+  | { status: 'cells-occupied' }
   | { status: 'not-written' };
 
 // A new text for a portion the author holds the lock of, under the label it
@@ -105,34 +137,35 @@ export interface PortionChange {
 
 // The text is sealed before anything reaches the document: a text that cannot
 // be encrypted is not inserted.
-export async function insertPortion(portion: NewPortion, others: OtherLabels, envelopes: EnvelopeClient): Promise<WriteResult> {
+export async function insertPortion(portion: NewPortion, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<WriteResult> {
   const sealed = await sealPortion(portion.label, portion.text, others, envelopes);
   if (sealed.status === 'not-encrypted') {
     return sealed;
   }
   const id = crypto.randomUUID();
   const xml = buildPortionPart({ id, version: 1, labelCode: portion.label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
-  return writeLabelling({ kind: 'insertion', alias: messages.portionAlias, block: portionBlockScope(id, portion.label), xml }, sealed.documentLabel, others);
+  const insertion: PortionWriteScope = { kind: 'insertion', id, alias: messages.portionAlias, block: portionBlockScope(id, portion.label), xml };
+  return writeLabelling(insertion, sealed.documentLabel, others, editor);
 }
 
 // The new text is sealed before anything reaches the document: a text that
 // cannot be encrypted changes nothing. Under a new label, the placeholder,
 // the document label and the page marking change with it.
-export async function changePortion(change: PortionChange, others: OtherLabels, envelopes: EnvelopeClient): Promise<WriteResult> {
+export async function changePortion(change: PortionChange, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<WriteResult> {
   const { label, portion } = change;
   const sealed = await sealPortion(label, change.text, others, envelopes);
   if (sealed.status === 'not-encrypted') {
     return sealed;
   }
   const xml = buildPortionPart({ id: portion.id, version: nextVersion(portion), labelCode: label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
-  return writeLabelling({ kind: 'change', id: portion.id, block: portionBlockScope(portion.id, label), xml }, sealed.documentLabel, others);
+  return writeLabelling({ kind: 'change', id: portion.id, block: portionBlockScope(portion.id, label), xml }, sealed.documentLabel, others, editor);
 }
 
 // Deletes a portion and its part, with the document label and the page
 // marking that the document's other labels give.
-export async function deletePortion(portion: StoredPortion, policy: string, others: OtherLabels): Promise<WriteResult> {
+export async function deletePortion(portion: StoredPortion, policy: string, others: OtherLabels, editor: EditorType): Promise<WriteResult> {
   const documentLabel = await fetchDocumentLabel({ policy, ...others });
-  return writeLabelling({ kind: 'deletion', id: portion.id }, documentLabel, others);
+  return writeLabelling({ kind: 'deletion', id: portion.id }, documentLabel, others, editor);
 }
 
 // The version a change of the portion writes.
@@ -161,14 +194,18 @@ function portionBlockScope(id: string, label: LabelView): PortionBlockScope {
   return { tag: JSON.stringify(tag), color: label.marking.color, placeholder: messages.portionPlaceholder(label.marking.text) };
 }
 
-async function writeLabelling(portion: PortionWriteScope, documentLabel: DocumentLabel, others: OtherLabels): Promise<WriteResult> {
+async function writeLabelling(portion: PortionWriteScope, documentLabel: DocumentLabel, others: OtherLabels, editor: EditorType): Promise<WriteResult> {
   const written = await runCommand(
-    writeLabellingCommand,
+    EDITORS[editor].write,
     { portion, portionNamespace: PORTION_NAMESPACE, ...documentLabelScope(documentLabel, others.baseLabelCode) },
     true,
-    (result) => (typeof result === 'boolean' ? result : null),
+    parseWriteOutcome,
   );
-  return written === true ? { status: 'written' } : { status: 'not-written' };
+  return written === 'written' || written === 'cells-occupied' ? { status: written } : { status: 'not-written' };
+}
+
+function parseWriteOutcome(result: unknown): WriteOutcome | null {
+  return result === 'written' || result === 'not-written' || result === 'cells-occupied' ? result : null;
 }
 
 // Rewrites the document label, and in a text document its page marking, from
@@ -176,15 +213,18 @@ async function writeLabelling(portion: PortionWriteScope, documentLabel: Documen
 export async function writeDocumentLabel(request: DocumentLabelRequest, editor: EditorType): Promise<boolean> {
   const documentLabel = await fetchDocumentLabel(request);
   const done = await runCommand(
-    EDITORS[editor].writeLabel,
+    EDITORS[editor].write,
     { portion: null, ...documentLabelScope(documentLabel, request.baseLabelCode) },
     true,
-    (result) => (result === true ? true : null),
+    parseWriteOutcome,
   );
-  return done === true;
+  return done === 'written';
 }
 
-// Portions in document order, each joined with the content of its part.
+// Portions in document order, each joined with the content of its part. A
+// text document's portion is its placeholder, whose tag holds its label; a
+// workbook's counts when both its placeholder, a user protected range titled
+// with its id, and its part, which holds its label, are there (ADR 0006).
 export async function readDocumentState(editor: EditorType): Promise<DocumentState> {
   const snapshot = await runCommand(
     EDITORS[editor].read,
@@ -202,23 +242,27 @@ export async function readDocumentState(editor: EditorType): Promise<DocumentSta
       contents.set(content.id, content);
     }
   }
-  const portions = snapshot.controls.flatMap((control) => {
-    const tag = parsePortionTag(control.tag);
-    if (tag === null) {
-      return [];
-    }
-    const content = contents.get(tag.id) ?? null;
-    return [
-      {
-        id: tag.id,
-        labelCode: tag.label,
-        partLabelCode: content?.labelCode ?? null,
-        partLabelXml: content?.labelXml ?? null,
-        version: content?.version ?? null,
-        content: content?.content ?? null,
-        internalId: control.internalId,
-      },
-    ];
+  const placeholders = [
+    ...snapshot.controls.flatMap((control) => {
+      const tag = parsePortionTag(control.tag);
+      return tag === null ? [] : [{ id: tag.id, labelCode: tag.label, internalId: control.internalId }];
+    }),
+    ...snapshot.ranges.flatMap((range) => {
+      const labelCode = contents.get(range.title)?.labelCode ?? null;
+      return labelCode === null ? [] : [{ id: range.title, labelCode, internalId: range.reference }];
+    }),
+  ];
+  const portions = placeholders.map(({ id, labelCode, internalId }) => {
+    const content = contents.get(id) ?? null;
+    return {
+      id,
+      labelCode,
+      partLabelCode: content?.labelCode ?? null,
+      partLabelXml: content?.labelXml ?? null,
+      version: content?.version ?? null,
+      content: content?.content ?? null,
+      internalId,
+    };
   });
   const documentPart = snapshot.documentParts.map(parseDocumentPart).find((part) => part !== null) ?? null;
   return {
@@ -386,8 +430,8 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
   if (typeof result !== 'object' || result === null) {
     return null;
   }
-  const { controls, portionParts, documentParts, headersAndFooters } = result as Record<string, unknown>; // SAFETY: object checked above
-  if (!Array.isArray(controls) || !Array.isArray(portionParts) || !Array.isArray(documentParts) || !Array.isArray(headersAndFooters)) {
+  const { controls, ranges, portionParts, documentParts, headersAndFooters } = result as Record<string, unknown>; // SAFETY: object checked above
+  if (!Array.isArray(controls) || !Array.isArray(ranges) || !Array.isArray(portionParts) || !Array.isArray(documentParts) || !Array.isArray(headersAndFooters)) {
     return null;
   }
   const isString = (value: unknown): value is string => typeof value === 'string';
@@ -400,6 +444,15 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
         typeof control.tag === 'string' &&
         'internalId' in control &&
         typeof control.internalId === 'string',
+    ),
+    ranges: ranges.filter(
+      (range): range is { title: string; reference: string } =>
+        typeof range === 'object' &&
+        range !== null &&
+        'title' in range &&
+        typeof range.title === 'string' &&
+        'reference' in range &&
+        typeof range.reference === 'string',
     ),
     portionParts: portionParts.filter(isString),
     documentParts: documentParts.filter(isString),
