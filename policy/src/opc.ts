@@ -18,6 +18,17 @@ const CUSTOM_XML_RELATIONSHIPS: readonly string[] = [
   'http://purl.oclc.org/ooxml/officeDocument/relationships/customXml',
 ];
 const RELATIONSHIPS_PART = /^(?:(.*)\/)?_rels\/([^/]+)\.rels$/;
+const OFFICE_DOCUMENT_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
+
+// What a package holds, as its main part tells: a text document or a
+// workbook.
+export type PackageKind = 'text-document' | 'workbook';
+
+// The kind of package that a main part's content type makes.
+const MAIN_PART_KINDS: ReadonlyMap<string, PackageKind> = new Map([
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml', 'text-document'],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', 'workbook'],
+]);
 
 // The package a body holds, null when it is no ZIP package.
 export async function loadPackage(body: Buffer): Promise<JSZip | null> {
@@ -81,10 +92,28 @@ export function partNamesOf(zip: JSZip): string[] {
   return Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
 }
 
-// Whether a package, given by its part names, holds a workbook, whose part
-// SpreadsheetML names so, as ONLYOFFICE and Microsoft Excel write it.
-export function holdsWorkbook(partNames: readonly string[]): boolean {
-  return partNames.includes('xl/workbook.xml');
+// A package's main part, the target of its officeDocument relationship, with
+// the kind its content type makes; null when it is neither a text document
+// nor a workbook. The main part, never the name of another part, tells a
+// workbook from a text document: anyone able to write the file could add a
+// part of any name.
+export async function mainPartOf(zip: JSZip): Promise<{ part: string; kind: PackageKind } | null> {
+  const relationships = await xmlPartOf(zip, PACKAGE_RELATIONSHIPS_PART);
+  const target =
+    Array.from(relationships?.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship') ?? [])
+      .find((relationship) => relationship.getAttribute('Type') === OFFICE_DOCUMENT_RELATIONSHIP)
+      ?.getAttribute('Target')
+      ?.replace(/^\//, '') ?? null;
+  if (target === null || zip.file(target) === null) {
+    return null;
+  }
+  const types = await xmlPartOf(zip, CONTENT_TYPES_PART);
+  const contentType =
+    Array.from(types?.getElementsByTagNameNS(CONTENT_TYPES_NAMESPACE, 'Override') ?? [])
+      .find((override) => override.getAttribute('PartName') === `/${target}`)
+      ?.getAttribute('ContentType') ?? null;
+  const kind = contentType === null ? null : (MAIN_PART_KINDS.get(contentType) ?? null);
+  return kind === null ? null : { part: target, kind };
 }
 
 // The package part of that name, as the package spells it: part names match

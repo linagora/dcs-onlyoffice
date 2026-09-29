@@ -1,5 +1,5 @@
 import { escapeXml } from './adatp4774.ts';
-import { holdsWorkbook } from './opc.ts';
+import type { PackageKind } from './opc.ts';
 
 export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 
@@ -61,8 +61,8 @@ const SPREADSHEET_BINDABLE_PARTS: readonly RegExp[] = [
 // The parts of a package, given by name, that its whole-document binding
 // references: those of a workbook when the package holds a workbook part,
 // else those of a text document.
-export function bindablePartsOf(parts: readonly string[]): string[] {
-  const table = holdsWorkbook(parts) ? SPREADSHEET_BINDABLE_PARTS : WORDPROCESSING_BINDABLE_PARTS;
+export function bindablePartsOf(parts: readonly string[], kind: PackageKind): string[] {
+  const table = kind === 'workbook' ? SPREADSHEET_BINDABLE_PARTS : WORDPROCESSING_BINDABLE_PARTS;
   return table.flatMap((pattern) => parts.filter((part) => pattern.test(part)).sort());
 }
 

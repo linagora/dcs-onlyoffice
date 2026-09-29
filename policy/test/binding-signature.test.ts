@@ -355,6 +355,25 @@ describe('the signature of the document label binding', () => {
     return zip.generateAsync({ type: 'uint8array' });
   }
 
+  // Anyone able to write the file could add a part named as a workbook's to a
+  // text document: its main part, a Word document, decides how it is read.
+  it("reads a text document that holds a part named as a workbook's as a text document: its portions count, and its Word parts are bound", async () => {
+    const tag = JSON.stringify({ id: 'p1', label: SPECIAL_FRANCE }).replaceAll('"', '&quot;');
+    const labelled = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
+    const withPortion = await withChangedPart(labelled, 'word/document.xml', (xml) =>
+      xml.replace('<w:body>', `<w:body><w:sdt><w:sdtPr><w:tag w:val="${tag}"/></w:sdtPr><w:sdtContent><w:p/></w:sdtContent></w:sdt>`),
+    );
+    const docx = await withParts(withPortion, { 'xl/workbook.xml': '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>' });
+
+    const { statusCode, body } = await sign(docx);
+
+    assert.equal(statusCode, 200);
+    assert.deepEqual(replacementOf(body), { before: DIFFUSION_RESTREINTE, after: WITH_MORE_RESTRICTIVE_PORTIONS });
+    const verification = await verifyWithXmlsec(docx, signedOf(body).xml, certificate);
+    assert.ok(verification.references.includes('word/document.xml'));
+    assert.ok(!verification.references.includes('xl/workbook.xml'));
+  });
+
   it("counts a workbook's portion parts that have a user protected range in its document label", async () => {
     const xlsx = await workbookWithPortions(['portion-with-range', 'portion-without-range'], ['portion-with-range']);
 

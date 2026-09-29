@@ -6,33 +6,15 @@ import type JSZip from 'jszip';
 import { escapeXml } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf, serializeDocumentBinding } from './adatp4778.ts';
 import { type LabelMapping, labelOfSensitivityLabel } from './label-mapping.ts';
-import {
-  appendRelationship,
-  CONTENT_TYPES_NAMESPACE,
-  CONTENT_TYPES_PART,
-  customXmlParts,
-  declareContentType,
-  loadPackage,
-  PACKAGE_RELATIONSHIPS_PART,
-  partNamesOf,
-  RELATIONSHIPS_NAMESPACE,
-  xmlPartOf,
-} from './opc.ts';
-import { bindingLabelXml, bindingVerdict, type DocumentLabelOf, type PackageLabels, packageBody, readPackageLabels } from './package-signing.ts';
+import { appendRelationship, CONTENT_TYPES_PART, customXmlParts, declareContentType, loadPackage, mainPartOf, type PackageKind, partNamesOf, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
+import { bindingLabelXml, bindingVerdict, DOCX_TYPE, type DocumentLabelOf, type PackageLabels, packageBody, readPackageLabels, XLSX_TYPE } from './package-signing.ts';
 import { removeLabelInformation } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
-const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-// The content type of the main part of a package an upload may hold, a text
-// document's or a workbook's, and the media type of that package.
-const PACKAGE_TYPES: ReadonlyMap<string, string> = new Map([
-  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml', DOCX_TYPE],
-  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', XLSX_TYPE],
-]);
+// The media type of a prepared package of each kind.
+const PACKAGE_TYPES: Readonly<Record<PackageKind, string>> = { 'text-document': DOCX_TYPE, workbook: XLSX_TYPE };
 const CUSTOM_XML_PROPERTIES_TYPE = 'application/vnd.openxmlformats-officedocument.customXmlProperties+xml';
 const DATASTORE_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/customXml';
-const OFFICE_DOCUMENT_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
 const CUSTOM_XML_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml';
 const CUSTOM_XML_PROPERTIES_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps';
 // The plugin's part for the base label (plugin/src/portions.ts).
@@ -150,7 +132,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     if (!uploaded.ok) {
       return refuse(reply, uploaded.refusal);
     }
-    const { zip, mainPart, packageType, labels } = uploaded;
+    const { zip, mainPart, kind, labels } = uploaded;
     const base = options.readLabelCode(requested);
     if (!base.ok) {
       return refuse(reply, 'unknown-label');
@@ -163,8 +145,8 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     await removeLabelInformation(zip, options.labelMapping?.tenant ?? null, options.now());
     const parts = partNamesOf(zip);
     await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
-    await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts)));
-    return reply.type(packageType).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+    await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts, kind)));
+    return reply.type(PACKAGE_TYPES[kind]).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
   });
 }
 
@@ -173,7 +155,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
 // signing can replace.
 async function uploadedPackage(
   body: Buffer,
-): Promise<{ ok: true; zip: JSZip; mainPart: string; packageType: string; labels: PackageLabels } | { ok: false; refusal: UploadRefusal }> {
+): Promise<{ ok: true; zip: JSZip; mainPart: string; kind: PackageKind; labels: PackageLabels } | { ok: false; refusal: UploadRefusal }> {
   const opened = await openUpload(body);
   if (!opened.ok) {
     return opened;
@@ -231,10 +213,10 @@ function refuse(reply: FastifyReply, refusal: UploadRefusal): FastifyReply {
 }
 
 // The package of an uploaded text document or workbook, with its main part
-// and its media type, or why it is none. An encrypted file is a compound file
-// whose directory names its data spaces and streams in UTF-16
+// and its kind, or why it is none. An encrypted file is a compound file whose
+// directory names its data spaces and streams in UTF-16
 // ([MS-OFFCRYPTO] §2.2, §2.3).
-async function openUpload(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPart: string; packageType: string } | { ok: false; refusal: UploadRefusal }> {
+async function openUpload(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPart: string; kind: PackageKind } | { ok: false; refusal: UploadRefusal }> {
   if (body.subarray(0, COMPOUND_FILE_SIGNATURE.length).equals(COMPOUND_FILE_SIGNATURE)) {
     const names = (name: string): boolean => body.includes(Buffer.from(name, 'utf16le'));
     if (names('DRMEncryptedDataSpace')) {
@@ -247,24 +229,7 @@ async function openUpload(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPar
     return { ok: false, refusal: 'not-a-package' };
   }
   const main = await mainPartOf(zip);
-  return main === null ? { ok: false, refusal: 'not-a-document' } : { ok: true, zip, mainPart: main.part, packageType: main.packageType };
-}
-
-// The main part of a text document or a workbook, the target of the package's
-// officeDocument relationship, with the media type its content type gives the
-// package.
-async function mainPartOf(zip: JSZip): Promise<{ part: string; packageType: string } | null> {
-  const relationships = await xmlPartOf(zip, PACKAGE_RELATIONSHIPS_PART);
-  const target = Array.from(relationships?.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship') ?? [])
-    .find((relationship) => relationship.getAttribute('Type') === OFFICE_DOCUMENT_RELATIONSHIP)
-    ?.getAttribute('Target')
-    ?.replace(/^\//, '');
-  const types = await xmlPartOf(zip, CONTENT_TYPES_PART);
-  const contentType = Array.from(types?.getElementsByTagNameNS(CONTENT_TYPES_NAMESPACE, 'Override') ?? [])
-    .find((override) => override.getAttribute('PartName') === `/${target}`)
-    ?.getAttribute('ContentType');
-  const packageType = contentType === undefined || contentType === null ? undefined : PACKAGE_TYPES.get(contentType);
-  return target !== undefined && packageType !== undefined && zip.file(target) !== null ? { part: target, packageType } : null;
+  return main === null ? { ok: false, refusal: 'not-a-document' } : { ok: true, zip, mainPart: main.part, kind: main.kind };
 }
 
 // Writes the Custom XML part of a namespace: again when the package holds
