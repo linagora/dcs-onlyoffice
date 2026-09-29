@@ -69,6 +69,8 @@ export interface DocxInspection {
   bindableParts: string[];
   // The custom document properties, where the sensitivity label goes.
   customProperties: CustomProperty[];
+  // The code of the base label, as the panel writes it; null without one.
+  baseLabel: string | null;
 }
 
 export interface CustomProperty {
@@ -83,6 +85,7 @@ const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/
 const RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const PACKAGE_RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/relationships';
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
+const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
 const CUSTOM_PROPERTIES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties';
 const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
 export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
@@ -97,6 +100,7 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   const allTexts: string[] = [];
   const portionParts: PortionPart[] = [];
   const bindings: DocumentBinding[] = [];
+  let baseLabel: string | null = null;
   for (const name of Object.keys(zip.files).sort()) {
     const file = zip.files[name];
     if (file === undefined || file.dir) {
@@ -113,6 +117,10 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
       if (binding !== null) {
         bindings.push(binding);
       }
+      const root = parse(content);
+      if (root.namespaceURI === DOCUMENT_NAMESPACE && root.localName === 'document') {
+        baseLabel = root.getAttribute('base');
+      }
     }
   }
   return {
@@ -126,6 +134,7 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
       .filter((name) => zip.files[name]?.dir === false && BINDABLE_PART.test(name))
       .sort(),
     customProperties: await readCustomProperties(zip),
+    baseLabel,
   };
 }
 
