@@ -106,6 +106,22 @@ test('a workbook labelled in the panel gets a journal entry, and is stored with 
   expect(SetDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 });
 
+// The spreadsheet editor puts its cell settings in the panel's place at the
+// first selection after its side menu opened, which a browser that
+// remembers the menu open makes certain.
+test('an author whose browser remembers the side menu open finds the panel shown once a workbook opens', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('sse-hide-right-settings', '0');
+  });
+
+  await openNewDocument(page, WORKBOOK_TEMPLATE);
+
+  await expect(pluginPanel(page).getByLabel('Base label')).toBeVisible();
+  // Still shown once the editor has settled.
+  await page.waitForTimeout(5_000);
+  await expect(pluginPanel(page).getByLabel('Base label')).toBeVisible();
+});
+
 test('a workbook beyond a clearance is listed with its marking only, and does not open', async ({ page, browser }) => {
   const chloe = await signedInPage(browser, DEMO_ACCOUNTS.chloe);
   try {

@@ -29,6 +29,9 @@ export const EDITORS: Readonly<
       insertsPortions: boolean;
       editsPortions: boolean;
       selectsPortions: boolean;
+      // Whether the editor puts its own settings in the panel's place once the
+      // document is loaded.
+      hidesPanelOnLoad: boolean;
       insertionHint: string;
     }
   >
@@ -40,6 +43,7 @@ export const EDITORS: Readonly<
     insertsPortions: true,
     editsPortions: true,
     selectsPortions: true,
+    hidesPanelOnLoad: false,
     insertionHint: messages.insertionHint,
   },
   cell: {
@@ -49,6 +53,10 @@ export const EDITORS: Readonly<
     insertsPortions: true,
     editsPortions: false,
     selectsPortions: false,
+    // The spreadsheet editor shows the cell settings at the first selection
+    // after its side menu opened, once the panel had opened it: often as the
+    // workbook loads, always once the browser remembers the menu open.
+    hidesPanelOnLoad: true,
     insertionHint: messages.cellInsertionHint,
   },
 };

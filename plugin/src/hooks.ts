@@ -3,7 +3,7 @@ import type { BubbleContent } from './bubble-channel.ts';
 import { PortionBubble } from './bubble.ts';
 import { describeError, logProblem } from './log.ts';
 import { messages } from './messages.ts';
-import { addInsertTabButton, type EditorType, editorTypeOf, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
+import { addInsertTabButton, type EditorType, editorTypeOf, offerContextMenu, onEditorEvent, type PluginInfo, showPanel } from './onlyoffice.ts';
 import type { EnvelopeClient } from './envelopes.ts';
 import {
   type DocumentLabelRequest,
@@ -22,6 +22,7 @@ import {
   changePortion,
   deletePortion,
   type DocumentState,
+  EDITORS,
   nextVersion,
   type OtherLabels,
   parsePortionTag,
@@ -59,6 +60,8 @@ export function useLoadable<T>(load: () => Promise<T>, dependencies: readonly un
 }
 
 const REFRESH_INTERVAL_MS = 3_000;
+// When the panel shows itself again after a workbook loaded.
+const PANEL_SHOW_DELAYS_MS = [0, 1_000, 3_000];
 
 export interface DocumentStateView {
   state: DocumentState | null;
@@ -87,6 +90,7 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
+    const showTimers: ReturnType<typeof setTimeout>[] = [];
     const refreshInBackground = (): void => {
       refresh().catch((error: unknown) => {
         logProblem('Rereading the document', error);
@@ -117,6 +121,19 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
       // panel also rereads the document regularly.
       timer = setInterval(refreshInBackground, REFRESH_INTERVAL_MS);
       await refresh();
+      if (EDITORS[editorTypeOf(await pluginReady)].hidesPanelOnLoad) {
+        // The panel shows itself again once the editor has put its settings
+        // in its place, which it does soon after the workbook loaded.
+        for (const delay of PANEL_SHOW_DELAYS_MS) {
+          showTimers.push(
+            setTimeout(() => {
+              showPanel().catch((error: unknown) => {
+                logProblem('Showing the panel', error);
+              });
+            }, delay),
+          );
+        }
+      }
     };
     start().catch((error: unknown) => {
       logProblem('Reading the document', error);
@@ -128,6 +145,9 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
       cancelled = true;
       if (timer !== null) {
         clearInterval(timer);
+      }
+      for (const showTimer of showTimers) {
+        clearTimeout(showTimer);
       }
     };
   }, [pluginReady, refresh]);
