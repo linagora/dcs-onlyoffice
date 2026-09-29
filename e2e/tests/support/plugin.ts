@@ -36,7 +36,19 @@ interface SandboxBlock {
   SetLock(lock: string): unknown;
 }
 
+// A workbook's user protected range in the spreadsheet editor's internal
+// model, which a command reaches through the active sheet.
+interface SandboxUserProtectedRange {
+  isUserCanEdit(userId: string): boolean;
+}
+
 interface SandboxApi {
+  GetActiveSheet(): {
+    worksheet: {
+      getUserProtectedRangeByName(name: string): { obj: SandboxUserProtectedRange } | null;
+      editUserProtectedRanges(from: SandboxUserProtectedRange, to: null, addToHistory: true): unknown;
+    };
+  };
   GetDocument(): {
     InsertContent(content: SandboxBlock[]): unknown;
     GetAllContentControls(): (SandboxBlock & { GetTag(): string; Delete(keepContent: boolean): unknown })[];
@@ -471,4 +483,49 @@ export async function labelXmlOf(frame: Frame, policy: string, code: string): Pr
     throw new Error(`The policy service gave no XML for label ${code}`);
   }
   return xml;
+}
+
+// Removes a workbook portion's user protected range, bypassing the panel, as
+// a co-author could through the editor's internal model: its lock lifted in
+// this browser, for the command only.
+export async function removeUserProtectedRange(frame: Frame, title: string): Promise<void> {
+  await whilePanelCommandsHeld(frame, async () =>
+    frame.evaluate(
+      async (rangeTitle) =>
+        new Promise<void>((resolve, reject) => {
+          const runtime = window.Asc;
+          const callCommand = window.dcsWorkingCallCommand;
+          if (runtime === undefined || callCommand === undefined) {
+            reject(new Error('The plugin runtime has no callCommand'));
+            return;
+          }
+          runtime.scope = rangeTitle;
+          callCommand.call(
+            runtime.plugin,
+            () => {
+              // Runs in the editor's sandbox, with Api and Asc.scope only.
+              const name = Asc.scope as string; // SAFETY: the scope set just above
+              const worksheet = Api.GetActiveSheet().worksheet;
+              const found = worksheet.getUserProtectedRangeByName(name);
+              if (found === null) {
+                return false;
+              }
+              Reflect.set(found.obj, 'isUserCanEdit', () => true);
+              try {
+                worksheet.editUserProtectedRanges(found.obj, null, true);
+              } finally {
+                Reflect.deleteProperty(found.obj, 'isUserCanEdit');
+              }
+              return true;
+            },
+            false,
+            true,
+            () => {
+              resolve();
+            },
+          );
+        }),
+      title,
+    ),
+  );
 }
