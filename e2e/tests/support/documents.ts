@@ -167,6 +167,7 @@ async function editorLoadOutcome(page: Page, hasStarted: (page: Page) => Promise
 }
 
 export interface EditorPageConfig {
+  documentType: string;
   document: { key: string; permissions: { edit: boolean } };
   editorConfig: { mode: string; user: { id: string; name: string } };
 }
@@ -184,11 +185,12 @@ export async function editorDocumentKey(page: Page): Promise<string> {
 }
 
 function isEditorPageConfig(value: unknown): value is EditorPageConfig {
-  if (typeof value !== 'object' || value === null || !('document' in value) || !('editorConfig' in value)) {
+  if (typeof value !== 'object' || value === null || !('documentType' in value) || !('document' in value) || !('editorConfig' in value)) {
     return false;
   }
-  const { document, editorConfig } = value;
+  const { documentType, document, editorConfig } = value;
   return (
+    typeof documentType === 'string' &&
     typeof document === 'object' &&
     document !== null &&
     'key' in document &&

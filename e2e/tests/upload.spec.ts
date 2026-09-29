@@ -91,12 +91,12 @@ test('a file that Microsoft Purview encrypted is refused, and says what to do', 
   await expect(page.getByText('Microsoft Purview encrypted the file: remove its protection first')).toBeVisible();
 });
 
-test('a file that is not a DOCX is refused', async ({ page }) => {
+test('a file that is neither a DOCX nor an XLSX is refused', async ({ page }) => {
   const notes = { name: 'Fictional notes.docx', mimeType: DOCX_TYPE, buffer: Buffer.from('Fictional notes, not a document') };
 
   expect(await upload(page, notes, { marking: DIFFUSION_RESTREINTE })).toBe(422);
 
-  await expect(page.getByText('The file is no DOCX package')).toBeVisible();
+  await expect(page.getByText('The file is no DOCX or XLSX package')).toBeVisible();
 });
 
 test.describe('someone cleared for NON PROTÉGÉ only', () => {
