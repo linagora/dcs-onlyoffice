@@ -116,6 +116,8 @@ export interface InternalUserProtectedRange {
   name: string;
   asc_getRef(): string | null;
   ref: { getName(): string };
+  // Whether it holds a cell, given from 0.
+  contains(column: number, row: number): boolean;
   // The model asks it before any edit of the range's cells, and before any
   // change of the range itself.
   isUserCanEdit(userId: string): boolean;
@@ -148,6 +150,8 @@ export interface InternalHeaderFooter {
 
 export interface InternalWorksheet {
   userProtectedRanges: InternalUserProtectedRange[] | null;
+  // The cell the selection starts from, from 0.
+  selectionRange: { activeCell: { row: number; col: number } };
   // Changes a range, or removes it without `to`, in the editor's history.
   editUserProtectedRanges(from: InternalUserProtectedRange, to: null, addToHistory: true): unknown;
   headerFooter: InternalHeaderFooter;
@@ -181,6 +185,8 @@ export interface ApiRange {
   SetFontColor(color: ApiColor): unknown;
   SetBorders(edge: 'Top' | 'Bottom' | 'Left' | 'Right', style: 'Medium', color: ApiColor): boolean;
   GetAddress(rowAbsolute: boolean, columnAbsolute: boolean, style: 'xlA1', external: boolean): string | null;
+  // Selects it, on the active sheet.
+  Select(): unknown;
   range: InternalRange;
 }
 
@@ -190,6 +196,7 @@ export interface ApiWorksheet {
   GetName(): string;
   GetSelection(): ApiRange;
   GetRange(address: string): ApiRange;
+  SetActive(): unknown;
   // The current user becomes the range's only editor.
   AddProtectedRange(title: string, reference: string): ApiProtectedRange;
   worksheet: InternalWorksheet;

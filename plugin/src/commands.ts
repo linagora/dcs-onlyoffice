@@ -81,6 +81,12 @@ export interface DocumentSnapshot {
   sheets: SheetSnapshot[];
 }
 
+// What selecting a workbook's placeholder takes: its range's title, the
+// portion's id.
+export interface SelectionScope {
+  rangeTitle: string;
+}
+
 // What a command that writes gives: whether it wrote, or, in a workbook,
 // that it refused selected cells that hold a value, a formula, a merge or a
 // portion.

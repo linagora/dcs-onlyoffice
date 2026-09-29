@@ -43,6 +43,7 @@
       "initDataType": "none",
       "initData": "",
       "isUpdateOleOnResize": false,
+      "initOnSelectionChanged": true,
       "buttons": [],
       "events": [
         "onDocumentContentReady",

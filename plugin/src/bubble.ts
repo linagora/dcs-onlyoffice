@@ -151,7 +151,7 @@ export class PortionBubble {
       isVisual: true,
       isModal: false,
       isViewer: true,
-      EditorsSupport: ['word'],
+      EditorsSupport: ['word', 'cell'],
       buttons: [],
       size: [WINDOW_WIDTH, heightFor(content)],
       isCustomWindow: true,

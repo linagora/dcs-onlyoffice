@@ -3,7 +3,16 @@ import type { BubbleContent } from './bubble-channel.ts';
 import { PortionBubble } from './bubble.ts';
 import { describeError, logProblem } from './log.ts';
 import { messages } from './messages.ts';
-import { addInsertTabButton, type EditorType, editorTypeOf, offerContextMenu, onEditorEvent, type PluginInfo, showPanel } from './onlyoffice.ts';
+import {
+  addInsertTabButton,
+  type EditorType,
+  editorTypeOf,
+  offerContextMenu,
+  onEditorEvent,
+  onSelectionChange,
+  type PluginInfo,
+  showPanel,
+} from './onlyoffice.ts';
 import type { EnvelopeClient } from './envelopes.ts';
 import {
   type DocumentLabelRequest,
@@ -66,6 +75,9 @@ const PANEL_SHOW_DELAYS_MS = [0, 1_000, 3_000];
 export interface DocumentStateView {
   state: DocumentState | null;
   activePortionId: string | null;
+  // How many times the selection changed, where the panel follows it
+  // through the editor's calls rather than its events.
+  selectionChanges: number;
   // Why the last background reread failed, until a reread succeeds.
   rereadProblem: string | null;
   // Rereads the document at once and returns what it holds.
@@ -77,6 +89,7 @@ export interface DocumentStateView {
 export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStateView {
   const [state, setState] = useState<DocumentState | null>(null);
   const [activePortionId, setActivePortionId] = useState<string | null>(null);
+  const [selectionChanges, setSelectionChanges] = useState(0);
   const [rereadProblem, setRereadProblem] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<DocumentState> => {
@@ -121,7 +134,26 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
       // panel also rereads the document regularly.
       timer = setInterval(refreshInBackground, REFRESH_INTERVAL_MS);
       await refresh();
-      if (EDITORS[editorTypeOf(await pluginReady)].hidesPanelOnLoad) {
+      if (cancelled) {
+        return;
+      }
+      const editor = EDITORS[editorTypeOf(await pluginReady)];
+      const { readActivePortion } = editor;
+      if (readActivePortion !== null) {
+        const followSelection = async (): Promise<void> => {
+          const portionId = await readActivePortion();
+          if (!cancelled) {
+            setActivePortionId(portionId);
+            setSelectionChanges((count) => count + 1);
+          }
+        };
+        onSelectionChange(() => {
+          followSelection().catch((error: unknown) => {
+            logProblem('Reading the selection', error);
+          });
+        });
+      }
+      if (editor.hidesPanelOnLoad) {
         // The panel shows itself again once the editor has put its settings
         // in its place, which it does soon after the workbook loaded.
         for (const delay of PANEL_SHOW_DELAYS_MS) {
@@ -149,10 +181,11 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
       for (const showTimer of showTimers) {
         clearTimeout(showTimer);
       }
+      onSelectionChange(() => {});
     };
   }, [pluginReady, refresh]);
 
-  return { state, activePortionId, rereadProblem, refresh };
+  return { state, activePortionId, selectionChanges, rereadProblem, refresh };
 }
 
 // The document label computed from the document's content. Two authors
@@ -295,9 +328,11 @@ function needsRetry(reading: PortionReading): boolean {
 
 // The bubble: the text of the portion that holds the cursor, shown next to
 // it. The window only changes when what it shows changes, not at every
-// reading of the document. The hook only drives the editor, hence no return
-// value.
-export function usePortionBubble(pluginReady: Promise<PluginInfo>, content: BubbleContent | null): void {
+// reading of the document, or when the selection changes, where the panel
+// follows it through the editor's calls: selecting a placeholder again brings
+// back a window that Escape closed, as a click in a text document's portion
+// does. The hook only drives the editor, hence no return value.
+export function usePortionBubble(pluginReady: Promise<PluginInfo>, content: BubbleContent | null, selectionChanges: number): void {
   const [bubble, setBubble] = useState<PortionBubble | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -331,7 +366,7 @@ export function usePortionBubble(pluginReady: Promise<PluginInfo>, content: Bubb
       bubble.show(content);
     }
     // contentKey stands for content, compared by value.
-  }, [bubble, contentKey]);
+  }, [bubble, contentKey, selectionChanges]);
 }
 
 // Who else holds the lock of each portion of the document, by portion id,
