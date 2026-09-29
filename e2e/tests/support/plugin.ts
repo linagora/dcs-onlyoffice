@@ -51,12 +51,32 @@ interface SandboxApi {
     GetRange(reference: string): { Merge(across: boolean): unknown; AddComment(text: string, author: string): unknown };
   };
   GetDocument(): {
+    GetElement(index: number): SandboxParagraph;
+    GetRange(start: number, end: number): SandboxRange;
+    AddFootnote(): { GetElement(index: number): SandboxParagraph } | null;
+    AddElement(index: number, element: unknown): unknown;
+    SetTrackRevisions(track: boolean): unknown;
     InsertContent(content: SandboxBlock[]): unknown;
     GetAllContentControls(): (SandboxBlock & { GetTag(): string; Delete(keepContent: boolean): unknown })[];
     GetCustomXmlParts(): { Add(xml: string): unknown; GetByNamespace(namespace: string): { GetXml(): string; Delete(): unknown }[] };
     GetSections(): { GetHeader(type: 'default', create: false): { GetElement(index: number): SandboxBlock | null } | null }[];
   };
   CreateBlockLvlSdt(): SandboxBlock;
+  CreateTable(columns: number, rows: number): { GetCell(row: number, cell: number): { GetContent(): { GetElement(index: number): SandboxParagraph } } };
+}
+
+// A paragraph of a text document, and the range of its text.
+interface SandboxParagraph {
+  AddText(text: string): unknown;
+  // Its whole text, or its characters from `start` to `end`.
+  GetRange(start?: number, end?: number): SandboxRange;
+}
+
+interface SandboxRange {
+  ExpandTo(range: SandboxRange): SandboxRange;
+  GetStartPos(): number;
+  Select(): unknown;
+  AddComment(text: string, author: string): unknown;
 }
 
 declare const Api: SandboxApi;
@@ -483,6 +503,110 @@ async function changeCells(frame: Frame, change: { reference: string; comment: s
           );
         }),
       change,
+    ),
+  );
+}
+
+// Selects whole paragraphs of a text document's body, from the first to the
+// last, by their position among the body's elements.
+export async function selectParagraphs(frame: Frame, first: number, last: number): Promise<void> {
+  await actOnTextDocument(frame, { kind: 'selection', first, last });
+}
+
+// Selects a text document's body from the start of a paragraph to the start
+// of a later one, which the selection then only touches.
+export async function selectUntilParagraph(frame: Frame, first: number, next: number): Promise<void> {
+  await actOnTextDocument(frame, { kind: 'selection-until', first, next });
+}
+
+// Adds a footnote after the first word of a paragraph of a text document's
+// body, bypassing the panel, as a co-author does in the editor.
+export async function addFootnote(frame: Frame, position: number, text: string): Promise<void> {
+  await actOnTextDocument(frame, { kind: 'footnote', position, text });
+}
+
+// Inserts a table of fictional cells among a text document's body elements,
+// bypassing the panel, as a co-author does in the editor.
+export async function insertTable(frame: Frame, position: number): Promise<void> {
+  await actOnTextDocument(frame, { kind: 'table', position });
+}
+
+// Adds text at the end of a paragraph of a text document's body, bypassing
+// the panel, as a co-author typing in it does.
+export async function addToParagraph(frame: Frame, position: number, text: string): Promise<void> {
+  await actOnTextDocument(frame, { kind: 'addition', position, text });
+}
+
+// Comments on a paragraph of a text document's body, bypassing the panel, as
+// a co-author does in the editor.
+export async function commentOnParagraph(frame: Frame, position: number, comment: string): Promise<void> {
+  await actOnTextDocument(frame, { kind: 'comment', position, comment });
+}
+
+// Starts or stops tracking the changes of a text document, as a co-author
+// does in the editor's Collaboration tab.
+export async function trackChanges(frame: Frame, track: boolean): Promise<void> {
+  await actOnTextDocument(frame, { kind: 'tracking', track });
+}
+
+type TextDocumentAction =
+  | { kind: 'selection'; first: number; last: number }
+  | { kind: 'selection-until'; first: number; next: number }
+  | { kind: 'footnote'; position: number; text: string }
+  | { kind: 'table'; position: number }
+  | { kind: 'addition'; position: number; text: string }
+  | { kind: 'comment'; position: number; comment: string }
+  | { kind: 'tracking'; track: boolean };
+
+async function actOnTextDocument(frame: Frame, action: TextDocumentAction): Promise<void> {
+  await whilePanelCommandsHeld(frame, async () =>
+    frame.evaluate(
+      async (scope) =>
+        new Promise<void>((resolve, reject) => {
+          const runtime = window.Asc;
+          const callCommand = window.dcsWorkingCallCommand;
+          if (runtime === undefined || callCommand === undefined) {
+            reject(new Error('The plugin runtime has no callCommand'));
+            return;
+          }
+          runtime.scope = scope;
+          callCommand.call(
+            runtime.plugin,
+            () => {
+              // Runs in the editor's sandbox, with Api and Asc.scope only.
+              const requested = Asc.scope as TextDocumentAction; // SAFETY: the scope set just above
+              const document = Api.GetDocument();
+              if (requested.kind === 'selection') {
+                document.GetElement(requested.first).GetRange().ExpandTo(document.GetElement(requested.last).GetRange()).Select();
+              } else if (requested.kind === 'selection-until') {
+                const start = document.GetElement(requested.first).GetRange().GetStartPos();
+                document.GetRange(start, document.GetElement(requested.next).GetRange().GetStartPos()).Select();
+              } else if (requested.kind === 'footnote') {
+                // The note goes after the selection, which a whole paragraph's
+                // range would end in the next one.
+                document.GetElement(requested.position).GetRange(0, 1).Select();
+                document.AddFootnote()?.GetElement(0).AddText(requested.text);
+              } else if (requested.kind === 'table') {
+                const table = Api.CreateTable(2, 2);
+                table.GetCell(0, 0).GetContent().GetElement(0).AddText('Fictional cell');
+                document.AddElement(requested.position, table);
+              } else if (requested.kind === 'addition') {
+                document.GetElement(requested.position).AddText(requested.text);
+              } else if (requested.kind === 'comment') {
+                document.GetElement(requested.position).GetRange().AddComment(requested.comment, 'Fictional co-author');
+              } else {
+                document.SetTrackRevisions(requested.track);
+              }
+              return true;
+            },
+            false,
+            true,
+            () => {
+              resolve();
+            },
+          );
+        }),
+      action,
     ),
   );
 }
