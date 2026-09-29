@@ -5,7 +5,7 @@ import type {
   HeaderFooterSnapshot,
   PortionBlockScope,
   PortionWriteScope,
-  SelectedCells,
+  SelectedContent,
   SelectionReading,
   SelectionReadingScope,
   SelectionRefusal,
@@ -13,7 +13,7 @@ import type {
   SheetSnapshot,
   WriteOutcome,
 } from './commands.ts';
-import { readDocumentCommand, writeLabellingCommand } from './document-commands.ts';
+import { readDocumentCommand, readParagraphsCommand, writeLabellingCommand } from './document-commands.ts';
 import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
 import { callEditorMethod, type EditorType, runCommand } from './onlyoffice.ts';
@@ -42,8 +42,8 @@ export const EDITORS: Readonly<
       pageMarkingOf: (snapshot: DocumentSnapshot) => ShownPageMarking | null;
       insertsPortions: boolean;
       editsPortions: boolean;
-      // null where the panel protects no selected content.
-      readSelection: (() => SelectionReading) | null;
+      // Reads the selected content the panel protects.
+      readSelection: () => SelectionReading;
       selectPlaceholder: (portion: StoredPortion) => Promise<void>;
       // Reads which portion's placeholder holds the selection, at each change
       // of the selection, where the editor tells it through no event of its
@@ -62,7 +62,7 @@ export const EDITORS: Readonly<
     pageMarkingOf: (snapshot) => textPageMarkingOf(snapshot.headersAndFooters),
     insertsPortions: true,
     editsPortions: true,
-    readSelection: null,
+    readSelection: readParagraphsCommand,
     selectPlaceholder: async (portion) => {
       await callEditorMethod('SelectContentControl', [portion.internalId]);
     },
@@ -168,7 +168,7 @@ export interface NewPortion {
 // Selected content to protect as a new portion, under a label.
 export interface SelectionToProtect {
   label: LabelView;
-  cells: SelectedCells;
+  content: SelectedContent;
 }
 
 // What writing a new portion gave, with the portion's id and first state.
@@ -217,7 +217,7 @@ export interface PortionChange {
 // The text is sealed before anything reaches the document: a text that cannot
 // be encrypted is not inserted.
 export async function insertPortion(portion: NewPortion, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<WriteResult> {
-  const { result } = await writeNewPortion(portion, others, envelopes, editor, (fields) => ({ kind: 'insertion', alias: messages.portionAlias, ...fields }));
+  const { result } = await writeNewPortion(portion, others, envelopes, editor, (fields) => ({ kind: 'insertion', ...fields }));
   return result;
 }
 
@@ -235,42 +235,41 @@ export async function changePortion(change: PortionChange, others: OtherLabels, 
 }
 
 // Reads the selected content the panel protects, or why it refuses it; null
-// in an editor where it protects none, or when the editor did not answer as
-// expected.
+// when the editor did not answer as expected.
 export async function readSelection(editor: EditorType): Promise<SelectionReading | null> {
   const command = EDITORS[editor].readSelection;
-  if (command === null) {
-    return null;
-  }
   // Each cell but the first adds a separator to the text: more cells than a
   // portion's text holds characters would not fit.
   const scope = { cellLimit: PORTION_TEXT_LIMIT } satisfies SelectionReadingScope;
   const reading = await runCommand(command, scope, false, parseSelectionReading);
-  return reading?.status === 'read' && exceedsPortionTextLimit(textOfCells(reading.cells)) ? { status: 'refused', reason: 'too-large' } : reading;
+  return reading?.status === 'read' && exceedsPortionTextLimit(textOfSelection(reading.content)) ? { status: 'refused', reason: 'too-large' } : reading;
 }
 
-// The text of selected cells, as their portion holds it: rows of cells
-// separated by tabs, as a copy from the grid gives them, and as spreadsheets
-// read them back: a cell that holds a tab, a line break or a quote is quoted,
-// its quotes doubled.
-export function textOfCells(cells: SelectedCells): string {
+// The text of selected content, as its portion holds it. Paragraphs are
+// separated by line breaks. Cells go in rows separated by tabs, as a copy
+// from the grid gives them, and as spreadsheets read them back: a cell that
+// holds a tab, a line break or a quote is quoted, its quotes doubled.
+export function textOfSelection(content: SelectedContent): string {
+  if (content.kind === 'paragraphs') {
+    return content.texts.join('\n');
+  }
   const field = (value: string): string => (/[\t\n\r"]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value);
-  return cells.texts.map((row) => row.map(field).join('\t')).join('\n');
+  return content.texts.map((row) => row.map(field).join('\t')).join('\n');
 }
 
-// The content of the selected cells is sealed under the label as the text of
-// a new portion, whose placeholder takes their place: nothing reaches the
-// document when it cannot be encrypted, nor when the cells no longer show
-// what the panel read. What the cells held went through ONLYOFFICE in clear
-// before: the panel warned the author before they confirmed.
+// The selected content is sealed under the label as the text of a new
+// portion, whose placeholder takes its place: nothing reaches the document
+// when it cannot be encrypted, nor when the content changed since the panel
+// read it. The content went through ONLYOFFICE in clear before: the panel
+// warned the author before they confirmed.
 export async function protectSelection(
   protection: SelectionToProtect,
   others: OtherLabels,
   envelopes: EnvelopeClient,
   editor: EditorType,
 ): Promise<NewPortionWrite> {
-  const { label, cells } = protection;
-  return writeNewPortion({ label, text: textOfCells(cells) }, others, envelopes, editor, (fields) => ({ kind: 'protection', cells, ...fields }));
+  const { label, content } = protection;
+  return writeNewPortion({ label, text: textOfSelection(content) }, others, envelopes, editor, (fields) => ({ kind: 'protection', content, ...fields }));
 }
 
 // A new portion's first version, which `placed` puts where it goes.
@@ -279,7 +278,7 @@ async function writeNewPortion(
   others: OtherLabels,
   envelopes: EnvelopeClient,
   editor: EditorType,
-  placed: (fields: { id: string; block: PortionBlockScope; xml: string }) => PortionWriteScope,
+  placed: (fields: { id: string; alias: string; block: PortionBlockScope; xml: string }) => PortionWriteScope,
 ): Promise<NewPortionWrite> {
   const portionId = crypto.randomUUID();
   const state = { label: portion.label.code, version: 1 };
@@ -288,7 +287,7 @@ async function writeNewPortion(
     return { portionId, state, result: sealed };
   }
   const xml = buildPortionPart({ id: portionId, version: state.version, labelCode: state.label, labelXml: sealed.labelXml, envelope: sealed.envelope });
-  const scope = placed({ id: portionId, block: portionBlockScope(portionId, portion.label), xml });
+  const scope = placed({ id: portionId, alias: messages.portionAlias, block: portionBlockScope(portionId, portion.label), xml });
   return { portionId, state, result: await writeLabelling(scope, sealed.documentLabel, others, editor) };
 }
 
@@ -650,9 +649,16 @@ const SELECTION_REFUSALS = [
   'several-areas',
   'too-large',
   'merge-portion-or-table',
-  'comment',
+  'commented-cells',
   'formula',
-  'empty',
+  'empty-cells',
+  'outside-body',
+  'table',
+  'drawing',
+  'content-control',
+  'commented-paragraphs',
+  'noted-paragraphs',
+  'empty-paragraphs',
 ] as const satisfies readonly SelectionRefusal[];
 
 function parseSelectionReading(result: unknown): SelectionReading | null {
@@ -663,13 +669,16 @@ function parseSelectionReading(result: unknown): SelectionReading | null {
     const reason = SELECTION_REFUSALS.find((refusal) => 'reason' in result && result.reason === refusal);
     return reason === undefined ? null : { status: 'refused', reason };
   }
-  if (result.status !== 'read' || !('cells' in result) || typeof result.cells !== 'object' || result.cells === null) {
+  if (result.status !== 'read' || !('content' in result) || typeof result.content !== 'object' || result.content === null) {
     return null;
   }
-  const { sheet, address, texts } = result.cells as Record<string, unknown>; // SAFETY: object checked above
-  const isRow = (row: unknown): row is string[] => Array.isArray(row) && row.every((value) => typeof value === 'string');
-  return typeof sheet === 'string' && typeof address === 'string' && Array.isArray(texts) && texts.every(isRow)
-    ? { status: 'read', cells: { sheet, address, texts } }
+  const { kind, sheet, address, position, texts } = result.content as Record<string, unknown>; // SAFETY: object checked above
+  const isTexts = (values: unknown): values is string[] => Array.isArray(values) && values.every((value) => typeof value === 'string');
+  if (kind === 'paragraphs') {
+    return typeof position === 'number' && Number.isInteger(position) && isTexts(texts) ? { status: 'read', content: { kind, position, texts } } : null;
+  }
+  return kind === 'cells' && typeof sheet === 'string' && typeof address === 'string' && Array.isArray(texts) && texts.every(isTexts)
+    ? { status: 'read', content: { kind, sheet, address, texts } }
     : null;
 }
 

@@ -1,16 +1,16 @@
 import type { JSX, RefObject } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { SelectedCells, SelectionReading, SelectionRefusal } from './commands.ts';
+import type { SelectedContent, SelectionReading, SelectionRefusal } from './commands.ts';
 import { logProblem } from './log.ts';
 import { messages } from './messages.ts';
 import type { LabelView } from './policy.ts';
-import { exceedsPortionTextLimit, PORTION_TEXT_LIMIT, textOfCells, type WriteResult } from './portions.ts';
+import { exceedsPortionTextLimit, PORTION_TEXT_LIMIT, textOfSelection, type WriteResult } from './portions.ts';
 
 // A new portion, which the editor's menus may have asked for, typed in the
 // form or, where the panel protects selected content, taken from it; or a
 // change of a portion, starting from its label and text.
 export type PortionFormPurpose =
-  | { kind: 'insertion'; requested: boolean; hint: string; protection: ProtectionOffer | null }
+  | { kind: 'insertion'; requested: boolean; hint: string; protection: ProtectionOffer }
   | { kind: 'change'; labelCode: string; text: string; onCancel: () => void };
 
 export interface PortionFormProps {
@@ -115,7 +115,7 @@ export function PortionForm({ labels, purpose, onSubmit }: PortionFormProps): JS
           </p>
         )}
       </form>
-      {purpose.kind === 'insertion' && purpose.protection !== null && <SelectionProtection label={selected} {...purpose.protection} />}
+      {purpose.kind === 'insertion' && <SelectionProtection label={selected} {...purpose.protection} />}
     </>
   );
 }
@@ -174,7 +174,7 @@ export function PortionDeletionForm({ onConfirm, onCancel }: PortionDeletionForm
 export interface ProtectionOffer {
   requests: number;
   onRead: () => Promise<SelectionReading | null>;
-  onProtect: (label: LabelView, cells: SelectedCells) => Promise<WriteResult>;
+  onProtect: (label: LabelView, content: SelectedContent) => Promise<WriteResult>;
 }
 
 interface SelectionProtectionProps extends ProtectionOffer {
@@ -186,21 +186,21 @@ interface SelectionProtectionProps extends ProtectionOffer {
 // it, with the warning that it went through ONLYOFFICE in clear, and
 // confirmed. The panel reads the selection when the author asks, in the panel
 // or in the editor's context menu, and protects what it read under the label
-// picked above, where the cells must still show it.
+// picked above, where the document must still hold it.
 function SelectionProtection({ label, requests, onRead, onProtect }: SelectionProtectionProps): JSX.Element {
-  const [cells, setCells] = useState<SelectedCells | null>(null);
+  const [content, setContent] = useState<SelectedContent | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   // Requests made before the form showed are not the author's latest wish.
   const handledRequests = useRef(requests);
-  const confirmation = useShownForm(cells);
+  const confirmation = useShownForm(content);
 
   // The selection's content shows for confirmation, or why the panel refuses
   // it; a selection that cannot be read shows as unreadable.
   const read = (): void => {
     setBusy(true);
     setFailure(null);
-    setCells(null);
+    setContent(null);
     const show = async (): Promise<void> => {
       const reading = await onRead();
       setBusy(false);
@@ -209,7 +209,7 @@ function SelectionProtection({ label, requests, onRead, onProtect }: SelectionPr
       } else if (reading.status === 'refused') {
         setFailure(refusalOf(reading.reason));
       } else {
-        setCells(reading.cells);
+        setContent(reading.content);
       }
     };
     show().catch((error: unknown) => {
@@ -228,39 +228,39 @@ function SelectionProtection({ label, requests, onRead, onProtect }: SelectionPr
 
   const confirm = async (event: Event): Promise<void> => {
     event.preventDefault();
-    if (cells === null || label === null) {
+    if (content === null || label === null) {
       return;
     }
     setBusy(true);
     setFailure(null);
-    const result = await onProtect(label, cells).catch((error: unknown): WriteResult => {
+    const result = await onProtect(label, content).catch((error: unknown): WriteResult => {
       logProblem('Protecting the selection', error);
       return { status: 'not-written' };
     });
     setBusy(false);
     setFailure(writeFailureOf('protection', result));
-    // The cells the author confirmed became the portion, or no longer show
+    // The content the author confirmed became the portion, or is no longer
     // what they confirmed.
     if (result.status === 'written' || result.status === 'selection-changed') {
-      setCells(null);
+      setContent(null);
     }
   };
 
   return (
     <div class="selection-protection">
       <div class="form-actions">
-        <button type="button" disabled={busy || cells !== null} onClick={read}>
+        <button type="button" disabled={busy || content !== null} onClick={read}>
           {messages.protectSelectionButton}
         </button>
       </div>
-      {cells !== null && (
+      {content !== null && (
         <form ref={confirmation} class="portion-form" data-testid="protection-confirmation" onSubmit={confirm}>
           <p>{messages.protectionQuestion}</p>
           <p class="warning" data-testid="protection-warning">
             {messages.protectionWarning}
           </p>
           <pre class="protection-preview" data-testid="protection-preview">
-            {textOfCells(cells)}
+            {textOfSelection(content)}
           </pre>
           {label === null && <p class="hint">{messages.protectionLabelMissing}</p>}
           <div class="form-actions">
@@ -271,7 +271,7 @@ function SelectionProtection({ label, requests, onRead, onProtect }: SelectionPr
               type="button"
               disabled={busy}
               onClick={() => {
-                setCells(null);
+                setContent(null);
                 setFailure(null);
               }}
             >
@@ -299,12 +299,26 @@ function refusalOf(reason: SelectionRefusal): string {
       return messages.selectionTooLarge(PORTION_TEXT_LIMIT);
     case 'merge-portion-or-table':
       return messages.selectionHoldsMergePortionOrTable;
-    case 'comment':
-      return messages.selectionHoldsComment;
+    case 'commented-cells':
+      return messages.cellsHoldComment;
     case 'formula':
       return messages.selectionHoldsFormula;
-    case 'empty':
-      return messages.selectionEmpty;
+    case 'empty-cells':
+      return messages.cellsEmpty;
+    case 'outside-body':
+      return messages.selectionOutsideBody;
+    case 'table':
+      return messages.selectionHoldsTable;
+    case 'drawing':
+      return messages.selectionHoldsDrawing;
+    case 'content-control':
+      return messages.selectionHoldsContentControl;
+    case 'commented-paragraphs':
+      return messages.paragraphsHoldComment;
+    case 'noted-paragraphs':
+      return messages.paragraphsHoldNote;
+    case 'empty-paragraphs':
+      return messages.paragraphsEmpty;
   }
 }
 
