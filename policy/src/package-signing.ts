@@ -1,10 +1,11 @@
 import type { Element } from '@xmldom/xmldom';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import JSZip from 'jszip';
+import type JSZip from 'jszip';
 import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
+import { CUSTOM_XML_ITEM, loadPackage } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
@@ -39,7 +40,7 @@ interface PackageBinding {
   root: Element;
 }
 
-interface PackageLabels {
+export interface PackageLabels {
   bindings: PackageBinding[];
   // Parts in the binding's namespace that are no well-formed XML without a
   // DTD.
@@ -56,10 +57,6 @@ interface PackageLabels {
 // referenced, so that nothing written in it by hand gets signed. It reports a
 // label that differed, then signs.
 export function registerPackageSignatures(app: FastifyInstance, options: PackageSignatureOptions): void {
-  app.addContentTypeParser(DOCX_TYPE, { parseAs: 'buffer', bodyLimit: PACKAGE_LIMIT_BYTES }, (_request, body, done) => {
-    done(null, body);
-  });
-
   app.post('/bindings/sign', async (request, reply) => {
     const received = await packageOf(request, options.secret);
     if (!received.ok) {
@@ -151,14 +148,31 @@ function storedCustomProperties(request: FastifyRequest): string | null {
 
 // The package a request from the portal carries, or why it is refused.
 async function packageOf(request: FastifyRequest, secret: string): Promise<{ ok: true; zip: JSZip } | { ok: false; status: 403 | 415 | 422; error: string }> {
+  const received = packageBody(request, secret);
+  if (!received.ok) {
+    return received;
+  }
+  const zip = await loadPackage(received.body);
+  return zip === null ? { ok: false, status: 422, error: 'The body is no DOCX package' } : { ok: true, zip };
+}
+
+// The routes that take a package read it as a DOCX body, up to a size no
+// saved document reaches.
+export function acceptPackages(app: FastifyInstance): void {
+  app.addContentTypeParser(DOCX_TYPE, { parseAs: 'buffer', bodyLimit: PACKAGE_LIMIT_BYTES }, (_request, body, done) => {
+    done(null, body);
+  });
+}
+
+// The body of a request that only the portal may send, which holds a package.
+export function packageBody(request: FastifyRequest, secret: string): { ok: true; body: Buffer } | { ok: false; status: 403 | 415; error: string } {
   if (!holdsSecret(request, secret)) {
-    return { ok: false, status: 403, error: 'Only the portal may have bindings signed or verified' };
+    return { ok: false, status: 403, error: 'Only the portal may send packages to the policy service' };
   }
   if (!Buffer.isBuffer(request.body)) {
     return { ok: false, status: 415, error: `Expected a ${DOCX_TYPE} body` };
   }
-  const zip = await loadPackage(request.body);
-  return zip === null ? { ok: false, status: 422, error: 'The body is no DOCX package' } : { ok: true, zip };
+  return { ok: true, body: request.body };
 }
 
 // The package's one binding, null when it holds neither a binding nor a base
@@ -177,25 +191,14 @@ function soleBinding(labels: PackageLabels): { ok: true; binding: PackageBinding
   return { ok: true, binding: binding ?? null };
 }
 
-async function loadPackage(body: Buffer): Promise<JSZip | null> {
-  try {
-    return await JSZip.loadAsync(body);
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      return null;
-    }
-    throw error;
-  }
-}
-
 // The bindings, the base label and the portion labels in clear of a package:
 // the placeholders' tags hold the portion labels the panel computes the
 // document label from.
-async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
+export async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
   const bindings: PackageBinding[] = [];
   const unreadableBindings: string[] = [];
   let baseCode: string | null = null;
-  for (const part of Object.keys(zip.files).filter((file) => /^customXml\/item\d+\.xml$/.test(file)).sort()) {
+  for (const part of Object.keys(zip.files).filter((file) => CUSTOM_XML_ITEM.test(file)).sort()) {
     const xml = (await zip.file(part)?.async('string')) ?? '';
     const parsed = parseXml(xml);
     const root = parsed.ok ? parsed.root : null;

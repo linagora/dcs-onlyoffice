@@ -21,13 +21,14 @@ import { loadLabelMapping, mappedSensitivityLabel } from './label-mapping.ts';
 import { type Marking, renderMarking } from './marking.ts';
 import { isStringList, readTextField, unknownArray } from './guards.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
-import { registerPackageSignatures } from './package-signing.ts';
+import { acceptPackages, type DocumentLabelOf, registerPackageSignatures } from './package-signing.ts';
 import { computeDocumentLabel, type DocumentLabelResult, isMoreRestrictive, type RollupRule } from './rollup.ts';
 import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
 import { PortionLocks, registerPortionLocks } from './portion-locks.ts';
 import type { MappedSensitivityLabel } from './sensitivity-label.ts';
 import { loadPolicies } from './spif/reader.ts';
+import { registerUploads } from './uploads.ts';
 
 const DEFAULT_PORTION_LOCK_LEASE_MS = 5 * 60 * 1000;
 
@@ -446,6 +447,18 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
 
   const { bindingSignature } = options;
   if (bindingSignature !== undefined) {
+    // A document without a base label counts as the least restrictive label
+    // of the first policy, as the panel shows it. The signed label names no
+    // originator: the policy service computed it.
+    const documentLabelOf: DocumentLabelOf = (baseCode, portionCodes) => {
+      const base = baseCode === null ? leastRestrictiveLabel() : labelOfCode(baseCode);
+      if (base === null) {
+        return { ok: false, error: 'The base label designates no valid label' };
+      }
+      const result = documentLabelUnder(base.policy, base.label, portionCodes);
+      return result.ok ? { ok: true, code: labelCode(base.policy, result.label), labelXml: originatorLabelXml(base.policy, result.label, null) } : result;
+    };
+    acceptPackages(app);
     registerPackageSignatures(app, {
       ...bindingSignature,
       now,
@@ -455,18 +468,15 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
         const found = designated === null ? null : designatedLabel(designated);
         return found?.ok === true ? labelCode(found.policy, found.label) : null;
       },
-      // A document without a base label counts as the least restrictive
-      // label of the first policy, as the panel shows it. The signed label
-      // names no originator: the policy service computed it.
-      documentLabelOf: (baseCode, portionCodes) => {
-        const base = baseCode === null ? leastRestrictiveLabel() : labelOfCode(baseCode);
-        if (base === null) {
-          return { ok: false, error: 'The base label designates no valid label' };
-        }
-        const result = documentLabelUnder(base.policy, base.label, portionCodes);
-        return result.ok
-          ? { ok: true, code: labelCode(base.policy, result.label), labelXml: originatorLabelXml(base.policy, result.label, null) }
-          : result;
+      documentLabelOf,
+    });
+    // Uploads share the portal's secret, and end signed as a save.
+    registerUploads(app, {
+      secret: bindingSignature.secret,
+      documentLabelOf,
+      canonicalLabelCode: (code) => {
+        const found = labelOfCode(code);
+        return found === null ? null : labelCode(found.policy, found.label);
       },
     });
   }

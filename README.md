@@ -58,12 +58,13 @@ The stack runs with Docker Compose: ONLYOFFICE Docs Community Edition, the OpenT
 
 - **Clearance administration.** Members of the `dcs-maquette-admin` group see and edit every clearance on a portal page, among the choices the security policy offers. OpenTDF applies a change, a revocation for instance, at the next key request.
 - **Lowering a label.** Only administrators whose clearance allows the current base label, or the current portion label, are offered lower ones.
-- **Journal of label changes.** The portal logs every change of a base label or a portion and every deletion of a portion made in the panel, with the person who made it, the labels and, for a portion, its versions; and every save that lowers a label in clear or removes a portion, with the people who held a configuration for the editing session. The journal never holds a portion's text: `docker compose logs portal | grep -E 'Base label|Portion'`.
+- **Journal of label changes.** The portal logs every change of a base label or a portion and every deletion of a portion made in the panel, with the person who made it, the labels and, for a portion, its versions; every upload, with the person, the document and the base label chosen; and every save that lowers a label in clear or removes a portion, with the people who held a configuration for the editing session. The journal never holds a document's text: `docker compose logs portal | grep -E 'Base label|Portion|Document uploaded'`.
 
 ### Portal
 
 - **Single sign-on.** OpenID Connect, with the authorization code flow and PKCE. Tokens stay on the server: the browser only holds a session cookie.
-- **Documents.** A document list, new documents from templates, editing and read-only sessions, and saving through the Document Server's callbacks.
+- **Documents.** A document list, new documents from templates or uploaded files, editing and read-only sessions, and saving through the Document Server's callbacks.
+- **Uploads.** A person brings a DOCX of up to 20 MB into the portal and gives it a base label among those their clearance allows. The policy service refuses a file that Microsoft Purview or a password encrypted, a legacy Office document and anything else that holds no Word document, each with its reason; otherwise it writes the base label's part and the binding, and signs it as at a save, sensitivity label included. The new document keeps the uploaded file's name, and opens like the others.
 - **Document access.** The portal opens a document only for people whose clearance allows its base label, which covers its content in clear; a document without one counts as the least restrictive label. The others see it listed as a restricted document, with its marking but not its name.
 - **Editing sessions.** The portal decides again for whoever joins a document's editing session as an editor, and disconnects the people the base label excludes. When a new base label excludes someone who holds an editor configuration for the session, it ends the session for everyone, so that the Document Server refuses the earlier configurations.
 

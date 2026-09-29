@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { copyFile, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { copyFile, link, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export interface StoredDocument {
@@ -21,6 +21,8 @@ export const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.
 interface DocumentMetadata {
   epoch: string;
   version: number;
+  // The name of the file an upload brought, which the portal shows.
+  name?: string;
 }
 
 const DOCX_EXTENSION = '.docx';
@@ -44,7 +46,7 @@ export async function findDocument(directory: string, id: string): Promise<Store
     return null;
   }
   const metadata = await readOrCreateMetadata(directory, id);
-  return { id, fileName: `${id}${DOCX_EXTENSION}`, filePath, key: documentKey(id, metadata) };
+  return { id, fileName: metadata.name ?? `${id}${DOCX_EXTENSION}`, filePath, key: documentKey(id, metadata) };
 }
 
 export async function listTemplates(directory: string): Promise<DocumentTemplate[]> {
@@ -60,9 +62,54 @@ export async function createDocumentFromTemplate(
   if (!DOCUMENT_ID_PATTERN.test(templateId) || !(await fileExists(docxPath(templatesDirectory, templateId)))) {
     return null;
   }
-  const id = `${templateId.slice(0, 80)}-${randomBytes(4).toString('hex')}`;
+  const id = newDocumentId(templateId);
   await copyFile(docxPath(templatesDirectory, templateId), docxPath(documentsDirectory, id));
   return findDocument(documentsDirectory, id);
+}
+
+// A new document's identifier: the name it comes from, in the characters an
+// identifier allows, with a random suffix.
+export function newDocumentId(name: string): string {
+  const stem = name
+    .replace(/\.docx$/i, '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .slice(0, 80)
+    .replace(/^-+|-+$/g, '');
+  return `${stem === '' ? 'document' : stem}-${randomBytes(4).toString('hex')}`;
+}
+
+// Stores a new document under an identifier that names no stored document,
+// with the name of the file it comes from: the file appears whole, and with
+// its name, or not at all.
+export async function storeNewDocument(directory: string, id: string, content: Uint8Array, name: string): Promise<StoredDocument> {
+  if (!DOCUMENT_ID_PATTERN.test(id)) {
+    throw new Error(`Invalid document identifier ${id}`);
+  }
+  const shown = shownName(name);
+  await writeMetadata(directory, id, { epoch: randomBytes(4).toString('hex'), version: 1, ...(shown === null ? {} : { name: shown }) });
+  const filePath = docxPath(directory, id);
+  const temporaryPath = `${filePath}.${randomBytes(4).toString('hex')}.tmp`;
+  await writeFile(temporaryPath, content);
+  try {
+    await link(temporaryPath, filePath);
+  } finally {
+    await unlink(temporaryPath);
+  }
+  const stored = await findDocument(directory, id);
+  if (stored === null) {
+    throw new Error(`Document ${id} vanished once stored`);
+  }
+  return stored;
+}
+
+// A file name as the portal shows it: its last segment, without control
+// characters; null when nothing is left.
+function shownName(name: string): string | null {
+  const shown = (name.split(/[\\/]/).at(-1) ?? '').replace(/\p{Cc}/gu, '').trim().slice(0, 200);
+  return shown === '' ? null : shown;
 }
 
 // A forced save keeps the editing session open, so the key must not change:
@@ -152,7 +199,8 @@ function isDocumentMetadata(value: unknown): value is DocumentMetadata {
     'epoch' in value &&
     typeof value.epoch === 'string' &&
     'version' in value &&
-    typeof value.version === 'number'
+    typeof value.version === 'number' &&
+    (!('name' in value) || typeof value.name === 'string')
   );
 }
 

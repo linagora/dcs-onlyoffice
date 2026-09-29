@@ -102,6 +102,12 @@ function policyDecisionOf(value: unknown): PolicyDecision {
 
 function markingOf(decision: unknown): Marking | null {
   const label: unknown = typeof decision === 'object' && decision !== null && 'label' in decision ? decision.label : null;
+  return markingOfLabel(label);
+}
+
+// The marking of a label as the policy service shows it, null when it shows
+// none.
+export function markingOfLabel(label: unknown): Marking | null {
   const marking: unknown = typeof label === 'object' && label !== null && 'marking' in label ? label.marking : null;
   if (typeof marking !== 'object' || marking === null || !('text' in marking) || typeof marking.text !== 'string') {
     return null;

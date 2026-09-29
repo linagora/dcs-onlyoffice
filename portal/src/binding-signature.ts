@@ -43,8 +43,10 @@ export type ServedTo = 'document-server' | 'download';
 // portal is about to store (ADR 0004), and check it whenever the portal
 // serves a stored file. The policy service first computes the document label
 // again from the labels in clear, and replaces a different one, which the
-// portal logs. A file whose binding cannot be signed is stored unsigned, and
-// the failure logged: a save is never lost.
+// portal logs. A save whose binding cannot be signed is stored unsigned, and
+// the failure logged: a save is never lost. An uploaded file, which the
+// policy service prepares first, is refused instead: its uploader still has
+// it.
 export class BindingSignatures {
   #policyUrl: string;
   #secret: string;
@@ -61,18 +63,50 @@ export class BindingSignatures {
   // action id come from the stored file's custom properties.
   async signed(docx: Uint8Array, documentId: string, stored: Uint8Array | null): Promise<Uint8Array> {
     const headers = await this.#storedPropertiesHeader(stored, documentId);
+    return (await this.#signedOrNull(docx, documentId, headers, 'The binding of a save could not be signed')) ?? docx;
+  }
+
+  // An uploaded file with the platform's parts, which the policy service
+  // writes as the panel does, or why it refuses the file.
+  async preparedUpload(docx: Uint8Array, base: string): Promise<{ ok: true; docx: Uint8Array } | { ok: false; status: 422 | 503; message: string }> {
+    try {
+      const response = await this.#post(`/uploads/prepare?base=${encodeURIComponent(base)}`, docx);
+      if (response.ok) {
+        return { ok: true, docx: new Uint8Array(await response.arrayBuffer()) };
+      }
+      const body: unknown = await response.json();
+      const message: unknown = typeof body === 'object' && body !== null && 'error' in body ? body.error : null;
+      if (response.status === 422 && typeof message === 'string') {
+        return { ok: false, status: 422, message: `${message}.` };
+      }
+      throw new Error(`The policy service answered ${response.status}`);
+    } catch (error: unknown) {
+      this.#log.error({ err: error }, 'An uploaded file could not be prepared');
+      return { ok: false, status: 503, message: 'The policy service could not prepare the document. Try again later.' };
+    }
+  }
+
+  // A prepared upload with its binding signed; null when the policy service
+  // could not sign it.
+  async signedUpload(docx: Uint8Array, documentId: string): Promise<Uint8Array | null> {
+    return this.#signedOrNull(docx, documentId, {}, 'The binding of an upload could not be signed');
+  }
+
+  // The file with the parts the policy service wrote, its signed binding
+  // among them; null when it signed none, the failure then logged.
+  async #signedOrNull(docx: Uint8Array, documentId: string, headers: Record<string, string>, failure: string): Promise<Uint8Array | null> {
     let answer: SignatureAnswer;
     try {
       answer = await this.#ask('/bindings/sign', docx, readSignatureAnswer, headers);
     } catch (error: unknown) {
-      this.#log.error({ documentId, err: error }, 'The binding of a save could not be signed');
-      return docx;
+      this.#log.error({ documentId, err: error }, failure);
+      return null;
     }
     if (answer.replacement !== null) {
       this.#log.warn({ documentId, ...answer.replacement }, 'Document label replaced at save');
     }
     if (answer.signed === null) {
-      return docx;
+      return null;
     }
     const zip = await JSZip.loadAsync(docx);
     for (const written of [...answer.parts, answer.signed]) {
@@ -128,12 +162,7 @@ export class BindingSignatures {
   }
 
   async #ask<T>(route: string, docx: Uint8Array, read: (body: unknown) => T | null, headers: Record<string, string> = {}): Promise<T> {
-    const response = await fetch(new URL(route, this.#policyUrl), {
-      method: 'POST',
-      headers: { ...headers, authorization: `Bearer ${this.#secret}`, 'content-type': DOCX_CONTENT_TYPE },
-      body: docx,
-      signal: AbortSignal.timeout(SIGNATURE_TIMEOUT_MS),
-    });
+    const response = await this.#post(route, docx, headers);
     const body: unknown = await response.json();
     const answer = response.ok ? read(body) : null;
     if (answer === null) {
@@ -141,6 +170,17 @@ export class BindingSignatures {
       throw new Error(`The policy service answered ${response.status}: ${reason}`);
     }
     return answer;
+  }
+
+  // Sends a package to a route of the policy service that only the portal
+  // may call.
+  async #post(route: string, docx: Uint8Array, headers: Record<string, string> = {}): Promise<Response> {
+    return fetch(new URL(route, this.#policyUrl), {
+      method: 'POST',
+      headers: { ...headers, authorization: `Bearer ${this.#secret}`, 'content-type': DOCX_CONTENT_TYPE },
+      body: docx,
+      signal: AbortSignal.timeout(SIGNATURE_TIMEOUT_MS),
+    });
   }
 }
 
