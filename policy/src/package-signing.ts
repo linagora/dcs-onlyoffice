@@ -4,7 +4,7 @@ import type JSZip from 'jszip';
 import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
-import { type AlterationReason, bindingAltered, type BindingSigner, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
+import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
 import { customXmlParts, loadPackage } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
@@ -35,7 +35,7 @@ export interface PackageSignatureOptions {
   now: () => Date;
 }
 
-interface PackageBinding {
+export interface PackageBinding {
   part: string;
   root: Element;
 }
@@ -79,8 +79,8 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     if (!computed.ok) {
       return reply.code(422).send({ error: computed.error });
     }
-    const current = binding.root.getElementsByTagNameNS(LABEL_NAMESPACE, 'originatorConfidentialityLabel')[0] ?? null;
-    const before = current === null ? null : options.codeOfLabelXml(current.toString());
+    const current = bindingLabelXml(binding);
+    const before = current === null ? null : options.codeOfLabelXml(current);
     // The sensitivity label goes in parts the signature covers, so it is
     // written first (ADR 0005).
     const mapped = options.sensitivityLabelOf(computed.code);
@@ -119,17 +119,7 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // A Sensitivity Label Information part could change the label Word shows,
     // and the signature does not cover it: the verdict names it.
     const labelInformationPart = await labelInformationPartOf(zip);
-    const reporting = <T extends object>(verdict: T): T & { labelInformationPart: string | null } => ({ ...verdict, labelInformationPart });
-    const sole = soleBinding(await readPackageLabels(zip));
-    if (!sole.ok) {
-      return reporting(bindingAltered(sole.reason));
-    }
-    if (sole.binding === null) {
-      return reporting({ status: 'unlabelled' });
-    }
-    const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
-    const names = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
-    return reporting(verifyDocumentBinding(bindingXml, await partsOf(zip, names), options.signer.certificate));
+    return { ...(await bindingVerdict(zip, await readPackageLabels(zip), options.signer.certificate)), labelInformationPart };
   });
 }
 
@@ -173,6 +163,27 @@ export function packageBody(request: FastifyRequest, secret: string): { ok: true
     return { ok: false, status: 415, error: `Expected a ${DOCX_TYPE} body` };
   }
   return { ok: true, body: request.body };
+}
+
+// The document label a binding holds, as the ADatP-4774 originator label
+// element it wrote; null when it holds none.
+export function bindingLabelXml(binding: PackageBinding): string | null {
+  return binding.root.getElementsByTagNameNS(LABEL_NAMESPACE, 'originatorConfidentialityLabel')[0]?.toString() ?? null;
+}
+
+// What a package's binding signature says against the certificate: valid,
+// altered, unsigned, or no labels at all.
+export async function bindingVerdict(zip: JSZip, labels: PackageLabels, certificate: string): Promise<BindingVerification | { status: 'unlabelled' }> {
+  const sole = soleBinding(labels);
+  if (!sole.ok) {
+    return bindingAltered(sole.reason);
+  }
+  if (sole.binding === null) {
+    return { status: 'unlabelled' };
+  }
+  const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
+  const names = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
+  return verifyDocumentBinding(bindingXml, await partsOf(zip, names), certificate);
 }
 
 // The package's one binding, null when it holds neither a binding nor a base
