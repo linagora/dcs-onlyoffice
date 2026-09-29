@@ -8,10 +8,27 @@ import type { SpreadsheetApi } from './office-api.ts';
 declare const Api: SpreadsheetApi;
 declare const Asc: { scope: CommandScope };
 
-// What a workbook holds of the panel's parts, and its user protected ranges,
-// on every sheet, which the portions' placeholders are: a workbook has no
-// page marking the panel reads.
+// What a workbook holds of the panel's parts, its user protected ranges, on
+// every sheet, which the portions' placeholders are, and the centre section
+// of every sheet's six headers and footers, where the page marking goes.
 export function readWorkbookCommand(): DocumentSnapshot {
+  // A header or footer string's sections. Codes are "&" and one character,
+  // "&&" an ampersand; text before any section code is centred. The write
+  // command holds the same function, since a command can share none.
+  const sectionsOf = (value: string): { L: string; C: string; R: string } => {
+    const sections = { L: '', C: '', R: '' };
+    let section: 'L' | 'C' | 'R' = 'C';
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value[index] === '&' ? (value[index + 1] ?? '') : null;
+      if (code === 'L' || code === 'C' || code === 'R') {
+        section = code;
+      } else {
+        sections[section] += code === null ? (value[index] ?? '') : `&${code}`;
+      }
+      index += code === null ? 0 : 1;
+    }
+    return sections;
+  };
   const parts = Api.GetActiveSheet().GetCustomXmlParts();
   return {
     controls: [],
@@ -21,17 +38,33 @@ export function readWorkbookCommand(): DocumentSnapshot {
     portionParts: parts.GetByNamespace(Asc.scope.portionNamespace).map((part) => part.GetXml()),
     documentParts: parts.GetByNamespace(Asc.scope.documentNamespace).map((part) => part.GetXml()),
     headersAndFooters: [],
+    sheets: Api.GetSheets().map((sheet) => {
+      const headerFooter = sheet.worksheet.headerFooter;
+      const strings = [
+        headerFooter.getOddHeader(),
+        headerFooter.getOddFooter(),
+        headerFooter.getEvenHeader(),
+        headerFooter.getEvenFooter(),
+        headerFooter.getFirstHeader(),
+        headerFooter.getFirstFooter(),
+      ];
+      return {
+        centres: strings.map((data) => (data === null ? null : sectionsOf(data.getStr()).C)),
+        differentFirst: headerFooter.getDifferentFirst() === true,
+        differentOddEven: headerFooter.getDifferentOddEven() === true,
+      };
+    }),
   };
 }
 
 // One command writes a new portion into the selected cells, if there is one,
-// with the document label's parts, so that a single undo reverts all of
-// them. The placeholder merges the cells, shows the portion's marking in its
-// label's colour, bold and bordered, and is a user protected range titled
-// with the portion's id, which no one may edit through the editor (ADR
-// 0006). Selected cells that hold a value, a formula, a merge or another
-// portion are refused, and nothing is written. Changes and deletions of a
-// workbook's portions are not written.
+// with the document label's parts and the page marking of every sheet, so
+// that a single undo reverts all of them. The placeholder merges the cells,
+// shows the portion's marking in its label's colour, bold and bordered, and
+// is a user protected range titled with the portion's id, which no one may
+// edit through the editor (ADR 0006). Selected cells that hold a value, a
+// formula, a merge or another portion are refused, and nothing is written.
+// Changes and deletions of a workbook's portions are not written.
 export function writeWorkbookLabellingCommand(): WriteOutcome {
   const scope = Asc.scope;
   const sheet = Api.GetActiveSheet();
@@ -77,6 +110,48 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
       existing.Delete();
     }
     parts.Add(replacement.xml);
+  }
+  // The page marking goes in the centre of each sheet's six headers and
+  // footers, which Microsoft Excel allows up to 255 characters each, codes
+  // included: the left and right sections stay as long as they fit, the
+  // right one giving way first. A marking too long to fit on its own is
+  // written whole. Even and first pages that printed the odd pages' strings
+  // start from them; those that had their own keep theirs, empty or not.
+  const sectionsOf = (value: string): { L: string; C: string; R: string } => {
+    const sections = { L: '', C: '', R: '' };
+    let section: 'L' | 'C' | 'R' = 'C';
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value[index] === '&' ? (value[index + 1] ?? '') : null;
+      if (code === 'L' || code === 'C' || code === 'R') {
+        section = code;
+      } else {
+        sections[section] += code === null ? (value[index] ?? '') : `&${code}`;
+      }
+      index += code === null ? 0 : 1;
+    }
+    return sections;
+  };
+  const centre = scope.pageMarking.headerFooterCentre;
+  const marked = (current: string): string => {
+    const { L, R } = sectionsOf(current);
+    const compose = (left: string, right: string): string => `${left === '' ? '' : `&L${left}`}&C${centre}${right === '' ? '' : `&R${right}`}`;
+    const candidates = [compose(L, R), compose(L, ''), compose('', R), compose('', '')];
+    return candidates.find((candidate) => candidate.length <= 255) ?? compose('', '');
+  };
+  for (const sheet of Api.GetSheets()) {
+    const headerFooter = sheet.worksheet.headerFooter;
+    const oddHeader = headerFooter.getOddHeader()?.getStr() ?? '';
+    const oddFooter = headerFooter.getOddFooter()?.getStr() ?? '';
+    const ownEven = headerFooter.getDifferentOddEven() === true;
+    const ownFirst = headerFooter.getDifferentFirst() === true;
+    headerFooter.setOddHeader(marked(oddHeader));
+    headerFooter.setOddFooter(marked(oddFooter));
+    headerFooter.setEvenHeader(marked(ownEven ? (headerFooter.getEvenHeader()?.getStr() ?? '') : oddHeader));
+    headerFooter.setEvenFooter(marked(ownEven ? (headerFooter.getEvenFooter()?.getStr() ?? '') : oddFooter));
+    headerFooter.setFirstHeader(marked(ownFirst ? (headerFooter.getFirstHeader()?.getStr() ?? '') : oddHeader));
+    headerFooter.setFirstFooter(marked(ownFirst ? (headerFooter.getFirstFooter()?.getStr() ?? '') : oddFooter));
+    headerFooter.setDifferentFirst(true);
+    headerFooter.setDifferentOddEven(true);
   }
   return 'written';
 }

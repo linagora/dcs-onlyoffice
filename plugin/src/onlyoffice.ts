@@ -213,6 +213,17 @@ export function callEditorMethod(name: string, parameters: unknown[]): Promise<u
   });
 }
 
+// Brings the panel to the front of the editor's side menu, where the editor
+// may have shown something else in its place.
+export async function showPanel(): Promise<void> {
+  const guid = window.Asc?.plugin?.guid;
+  if (guid === undefined) {
+    throw new Error('The plugin runtime has no guid');
+  }
+  // The editor looks the panel up by the plugin's guid.
+  await callEditorMethod('ActivateWindow', [guid, false]);
+}
+
 export interface MenuEntry {
   id: string;
   text: string;

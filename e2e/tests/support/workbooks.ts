@@ -7,10 +7,18 @@ import type { NewPortion } from './portions.ts';
 interface SpreadsheetEditorWindow {
   Asc: {
     editor: {
+      asc_addWorksheet(name: string): void;
       asc_findCell(reference: string): void;
       wbModel: { getActiveWs(): { getRange2(reference: string): { getValue(): string } } };
     };
   };
+}
+
+// Adds a sheet, as the editor's "+" button does.
+export async function addSheet(page: Page, name: string): Promise<void> {
+  await editorFrame(page).evaluate((sheet) => {
+    (window as unknown as SpreadsheetEditorWindow).Asc.editor.asc_addWorksheet(sheet); // SAFETY: the spreadsheet editor's frame
+  }, name);
 }
 
 // Selects a cell or a range, as the name box does.

@@ -267,5 +267,6 @@ export function readDocumentCommand(): DocumentSnapshot {
     portionParts: parts.GetByNamespace(Asc.scope.portionNamespace).map((part) => part.GetXml()),
     documentParts: parts.GetByNamespace(Asc.scope.documentNamespace).map((part) => part.GetXml()),
     headersAndFooters,
+    sheets: [],
   };
 }

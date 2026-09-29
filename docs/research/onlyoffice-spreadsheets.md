@@ -811,6 +811,12 @@ end-to-end tests named here guard each answer, but the last but one.
 - **8. Undo, in part.** For one author, undoing and redoing a lifted change and a range's removal work. In co-editing,
   undoing a change worked, but redoing it, and undoing a removal, did nothing. A throwaway test found it; nothing
   guards it yet.
+- **12. Headers, in part.** Once the panel has written the page marking, the print preview of a workbook three pages
+  long shows it, bold and in its label's colour, centred in the header and the footer of the first page, of the even
+  page and of the odd one, beside the template's left and right sections
+  ([workbook-page-marking.spec.ts](../../e2e/tests/workbook-page-marking.spec.ts) guards the strings the preview draws
+  from). Whether Microsoft Excel opens a header longer than 255 characters, and keeps the protected ranges, is left to a
+  check in Excel.
 - **13. No-plaintext check.** The search of the Document Server's working files opens every ZIP archive by its
   signature, XLSX files and the spreadsheet editor's change archives included; after the workbook tests, it found no
   portion text ([search-document-server.ts](../../e2e/scripts/search-document-server.ts)).

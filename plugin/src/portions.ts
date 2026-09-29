@@ -1,4 +1,13 @@
-import type { ControlSnapshot, DocumentLabelScope, DocumentSnapshot, HeaderFooterSnapshot, PortionBlockScope, PortionWriteScope, WriteOutcome } from './commands.ts';
+import type {
+  ControlSnapshot,
+  DocumentLabelScope,
+  DocumentSnapshot,
+  HeaderFooterSnapshot,
+  PortionBlockScope,
+  PortionWriteScope,
+  SheetSnapshot,
+  WriteOutcome,
+} from './commands.ts';
 import { readDocumentCommand, writeLabellingCommand } from './document-commands.ts';
 import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
@@ -7,19 +16,22 @@ import { type DocumentLabel, type DocumentLabelRequest, fetchAdatp4774, fetchDoc
 import { readWorkbookCommand, writeWorkbookLabellingCommand } from './workbook-commands.ts';
 
 // What the panel does in each editor: the commands that read the labels and
-// write them, and whether it inserts protected portions, changes and deletes
-// them, selects them from the panel and reads the page marking, which
-// workbooks do not all have yet.
+// write them, what the page marking the document shows is, and whether it
+// inserts protected portions, changes and deletes them and selects them from
+// the panel, which workbooks do not all have yet.
 export const EDITORS: Readonly<
   Record<
     EditorType,
     {
       read: () => DocumentSnapshot;
       write: () => WriteOutcome;
+      pageMarkingOf: (snapshot: DocumentSnapshot) => ShownPageMarking | null;
       insertsPortions: boolean;
       editsPortions: boolean;
       selectsPortions: boolean;
-      readsPageMarking: boolean;
+      // Whether the editor puts its own settings in the panel's place once the
+      // document is loaded.
+      hidesPanelOnLoad: boolean;
       insertionHint: string;
     }
   >
@@ -27,19 +39,24 @@ export const EDITORS: Readonly<
   word: {
     read: readDocumentCommand,
     write: writeLabellingCommand,
+    pageMarkingOf: (snapshot) => textPageMarkingOf(snapshot.headersAndFooters),
     insertsPortions: true,
     editsPortions: true,
     selectsPortions: true,
-    readsPageMarking: true,
+    hidesPanelOnLoad: false,
     insertionHint: messages.insertionHint,
   },
   cell: {
     read: readWorkbookCommand,
     write: writeWorkbookLabellingCommand,
+    pageMarkingOf: (snapshot) => sheetPageMarkingOf(snapshot.sheets),
     insertsPortions: true,
     editsPortions: false,
     selectsPortions: false,
-    readsPageMarking: false,
+    // The spreadsheet editor shows the cell settings at the first selection
+    // after its side menu opened, once the panel had opened it: often as the
+    // workbook loads, always once the browser remembers the menu open.
+    hidesPanelOnLoad: true,
     insertionHint: messages.cellInsertionHint,
   },
 };
@@ -87,13 +104,16 @@ export interface DocumentState {
   // Code of the document label last written with the ADatP-4778.2 part.
   documentLabelCode: string | null;
   // What the page marking shows in every header and footer, each holding one
-  // locked page marking in its place; null when one of them does not.
+  // page marking in its place; null when one of them does not.
   pageMarking: ShownPageMarking | null;
 }
 
+// A text document's page marking names its label in its tag, and its colour
+// is the label's; a workbook's shows the text and the colour only.
 export interface ShownPageMarking {
-  labelCode: string;
+  labelCode: string | null;
   text: string;
+  color: string | null;
 }
 
 export interface NewPortion {
@@ -269,7 +289,7 @@ export async function readDocumentState(editor: EditorType): Promise<DocumentSta
     portions,
     baseLabelCode: documentPart?.base ?? null,
     documentLabelCode: documentPart?.label ?? null,
-    pageMarking: pageMarkingOf(snapshot.headersAndFooters),
+    pageMarking: EDITORS[editor].pageMarkingOf(snapshot),
   };
 }
 
@@ -284,13 +304,42 @@ function documentLabelScope(documentLabel: DocumentLabel, baseLabelCode: string)
       { namespace: BINDING_NAMESPACE, xml: documentLabel.xml },
       { namespace: DOCUMENT_NAMESPACE, xml: buildDocumentPart(baseLabelCode, label.code) },
     ],
-    pageMarking: { tag: JSON.stringify(tag), alias: messages.pageMarkingAlias, text: label.marking.text, color: label.marking.color },
+    pageMarking: {
+      tag: JSON.stringify(tag),
+      alias: messages.pageMarkingAlias,
+      text: label.marking.text,
+      color: label.marking.color,
+      headerFooterCentre: `${HEADER_FOOTER_MARKING_CODES}${markingColorOf(label).slice(1)}${label.marking.text.replaceAll('&', '&&')}`,
+    },
   };
+}
+
+// A workbook's page marking, in a header or footer string's centre section:
+// bold, then the colour, as RRGGBB, then the marking, whose ampersands are
+// doubled.
+const HEADER_FOOTER_MARKING_CODES = '&"-,Bold"&K';
+const HEADER_FOOTER_MARKING = /^&"-,Bold"&K([0-9A-Fa-f]{6})((?:[^&]|&&)*)$/;
+
+// The colour of a label's marking, as a workbook's header shows it: black
+// for a label without one.
+function markingColorOf(label: LabelView): string {
+  return (label.marking.color ?? '#000000').toUpperCase();
+}
+
+// Whether the document shows the page marking of a label: a text document's
+// names the label in its tag, a workbook's shows its text in its colour.
+export function showsPageMarkingOf(shown: ShownPageMarking | null, label: LabelView): boolean {
+  return (
+    shown !== null &&
+    (shown.labelCode === null || shown.labelCode === label.code) &&
+    shown.text === label.marking.text &&
+    (shown.color === null || shown.color === markingColorOf(label))
+  );
 }
 
 // What every header and footer shows, each in one locked page marking in its
 // place; null when one of them does not.
-function pageMarkingOf(headersAndFooters: HeaderFooterSnapshot[]): ShownPageMarking | null {
+function textPageMarkingOf(headersAndFooters: HeaderFooterSnapshot[]): ShownPageMarking | null {
   const shown = headersAndFooters.map(({ kind, blocks }): ShownPageMarking | null => {
     if (blocks === null) {
       return null;
@@ -303,10 +352,23 @@ function pageMarkingOf(headersAndFooters: HeaderFooterSnapshot[]): ShownPageMark
     if (marking === undefined || others.length > 0 || marking.position !== place || marking.block.lock !== 'sdtContentLocked' || marking.block.text === null) {
       return null;
     }
-    return { labelCode: marking.labelCode, text: marking.block.text };
+    return { labelCode: marking.labelCode, text: marking.block.text, color: null };
   });
   const [first] = shown;
   return first !== undefined && first !== null && shown.every((one) => one?.labelCode === first.labelCode && one.text === first.text) ? first : null;
+}
+
+// What every sheet's six headers and footers show in their centre section,
+// with the flags that make even and first pages use their own: the page
+// marking, bold and in its label's colour; null when one of them does not.
+function sheetPageMarkingOf(sheets: SheetSnapshot[]): ShownPageMarking | null {
+  const centres = sheets.flatMap((sheet) => (sheet.differentFirst && sheet.differentOddEven ? sheet.centres : [null]));
+  const [first] = centres;
+  const match = first === undefined || first === null ? null : HEADER_FOOTER_MARKING.exec(first);
+  if (match === null || centres.some((centre) => centre !== first)) {
+    return null;
+  }
+  return { labelCode: null, text: (match[2] ?? '').replaceAll('&&', '&'), color: `#${(match[1] ?? '').toUpperCase()}` };
 }
 
 // The envelope, a ZTDF archive, is stored base64-encoded. The portion label
@@ -430,8 +492,15 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
   if (typeof result !== 'object' || result === null) {
     return null;
   }
-  const { controls, ranges, portionParts, documentParts, headersAndFooters } = result as Record<string, unknown>; // SAFETY: object checked above
-  if (!Array.isArray(controls) || !Array.isArray(ranges) || !Array.isArray(portionParts) || !Array.isArray(documentParts) || !Array.isArray(headersAndFooters)) {
+  const { controls, ranges, portionParts, documentParts, headersAndFooters, sheets } = result as Record<string, unknown>; // SAFETY: object checked above
+  if (
+    !Array.isArray(controls) ||
+    !Array.isArray(ranges) ||
+    !Array.isArray(portionParts) ||
+    !Array.isArray(documentParts) ||
+    !Array.isArray(headersAndFooters) ||
+    !Array.isArray(sheets)
+  ) {
     return null;
   }
   const isString = (value: unknown): value is string => typeof value === 'string';
@@ -457,6 +526,20 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
     portionParts: portionParts.filter(isString),
     documentParts: documentParts.filter(isString),
     headersAndFooters: headersAndFooters.map(parseHeaderFooter),
+    sheets: sheets.map(parseSheet),
+  };
+}
+
+// A sheet the editor did not answer as expected counts as one without the
+// page marking.
+function parseSheet(value: unknown): SheetSnapshot {
+  if (typeof value !== 'object' || value === null || !('centres' in value) || !Array.isArray(value.centres)) {
+    return { centres: [null], differentFirst: false, differentOddEven: false };
+  }
+  return {
+    centres: value.centres.map((centre: unknown) => (typeof centre === 'string' ? centre : null)),
+    differentFirst: 'differentFirst' in value && value.differentFirst === true,
+    differentOddEven: 'differentOddEven' in value && value.differentOddEven === true,
   };
 }
 
