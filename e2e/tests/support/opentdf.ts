@@ -1,9 +1,8 @@
 import type { Page } from '@playwright/test';
 import type { DemoAccount } from './accounts.ts';
-import { deploymentSetting } from './deployment.ts';
+import { DOMAIN, deploymentSetting } from './deployment.ts';
 import { field, stringField } from './json.ts';
 
-const DOMAIN = process.env.DOMAIN ?? 'dcs.test';
 export const PLATFORM = `https://tdf.${DOMAIN}`;
 export const IDP = `https://idp.${DOMAIN}`;
 

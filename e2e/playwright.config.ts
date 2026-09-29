@@ -1,11 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
-
-const domain = process.env.DOMAIN ?? 'dcs.test';
+import { DOMAIN } from './tests/support/deployment.ts';
 
 // The stack is reached through its public host names; map them to the local
 // reverse proxy so that no hosts-file change is needed on developer machines.
-const hostResolverRules = `--host-resolver-rules=MAP *.${domain} 127.0.0.1`;
-const localDomains = ['portail', 'docs', 'idp', 'tdf'].map((host) => `${host}.${domain}`).join(',');
+const hostResolverRules = `--host-resolver-rules=MAP *.${DOMAIN} 127.0.0.1`;
+const localDomains = ['portail', 'docs', 'idp', 'tdf'].map((host) => `${host}.${DOMAIN}`).join(',');
 
 export default defineConfig({
   testDir: './tests',
@@ -16,7 +15,7 @@ export default defineConfig({
   retries: process.env.CI === undefined ? 0 : 1,
   reporter: process.env.CI === undefined ? 'list' : [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: `https://portail.${domain}`,
+    baseURL: `https://portail.${DOMAIN}`,
     ignoreHTTPSErrors: true,
     // CI keeps a trace and a screenshot of every test as evidence for the stop
     // report (about 10 MB of trace per test); local runs keep failures only.

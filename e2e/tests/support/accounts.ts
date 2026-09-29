@@ -1,4 +1,5 @@
 import { type Browser, expect, type Page } from '@playwright/test';
+import { DOMAIN } from './deployment.ts';
 import { watchEditorLoads } from './documents.ts';
 
 export interface DemoAccount {
@@ -33,8 +34,7 @@ export async function signIn(page: Page, account: DemoAccount): Promise<void> {
 
 // A second, independent browser session, for co-editing scenarios.
 export async function signedInPage(browser: Browser, account: DemoAccount): Promise<Page> {
-  const domain = process.env.DOMAIN ?? 'dcs.test';
-  const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: `https://portail.${domain}` });
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: `https://portail.${DOMAIN}` });
   const page = await context.newPage();
   watchEditorLoads(page);
   await signIn(page, account);
