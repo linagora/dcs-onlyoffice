@@ -5,7 +5,7 @@ import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
-import { customXmlParts, loadPackage } from './opc.ts';
+import { customXmlParts, loadPackage, partNamesOf } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
@@ -89,7 +89,7 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // The binding references every part of ADatP-4778.2 Tables 5-2 and 5-3
     // that the package holds, the custom properties part written just now
     // included: only the saved package tells which parts exist.
-    const parts = await partsOf(zip, bindablePartsOf(Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false)));
+    const parts = await partsOf(zip, bindablePartsOf(partNamesOf(zip)));
     return {
       signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, options.signer, options.now()) },
       // The other parts written, which the portal stores with the binding.
@@ -173,7 +173,7 @@ export async function bindingVerdict(zip: JSZip, labels: PackageLabels, certific
     return { status: 'unlabelled' };
   }
   const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
-  const names = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
+  const names = partNamesOf(zip);
   return verifyDocumentBinding(bindingXml, await partsOf(zip, names), certificate);
 }
 

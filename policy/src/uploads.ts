@@ -14,6 +14,7 @@ import {
   declareContentType,
   loadPackage,
   PACKAGE_RELATIONSHIPS_PART,
+  partNamesOf,
   RELATIONSHIPS_NAMESPACE,
   xmlPartOf,
 } from './opc.ts';
@@ -154,7 +155,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     }
     // The platform keeps sensitivity labels in custom properties only.
     await removeLabelInformation(zip, options.labelMapping?.tenant ?? null, options.now());
-    const parts = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
+    const parts = partNamesOf(zip);
     await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
     await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts)));
     return reply.type(DOCX_TYPE).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
