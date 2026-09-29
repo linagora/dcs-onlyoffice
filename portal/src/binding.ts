@@ -17,8 +17,8 @@ const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
 // dropped before the policy service signs the binding again, with the parts
 // the saved package holds, so that a binding it could not sign is stored
 // unsigned.
-export async function withoutSignature(docx: Uint8Array): Promise<Uint8Array> {
-  const zip = await JSZip.loadAsync(docx);
+export async function withoutSignature(file: Uint8Array): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(file);
   let changed = false;
   for (const { name, document } of await customXmlParts(zip)) {
     const root = document.documentElement;
@@ -34,7 +34,7 @@ export async function withoutSignature(docx: Uint8Array): Promise<Uint8Array> {
       changed = true;
     }
   }
-  return changed ? zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }) : docx;
+  return changed ? zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }) : file;
 }
 
 // The Custom XML parts of a package, parsed, whatever their names: the

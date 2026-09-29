@@ -16,7 +16,7 @@ import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts
 import { BaseLabels } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { EditingSessions } from './editing-sessions.ts';
-import { createDocumentFromTemplate, DOCX_CONTENT_TYPE, findDocument, listDocuments, listTemplates } from './documents.ts';
+import { createDocumentFromTemplate, DOCUMENT_FORMATS, fileNameOf, findDocument, listDocuments, listTemplates } from './documents.ts';
 import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
 import { type CommandService, requestForceSave } from './onlyoffice.ts';
 import { registerOpentdfRelay } from './opentdf-relay.ts';
@@ -163,10 +163,10 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       return refuse(reply, user, decision);
     }
     const content = await readFile(document.filePath);
-    bindingSignatures.checkAside(content, document.id, 'download');
+    bindingSignatures.checkAside(content, document, 'download');
     return reply
-      .type(DOCX_CONTENT_TYPE)
-      .header('Content-Disposition', attachment(document.fileName, `${document.id}.docx`))
+      .type(DOCUMENT_FORMATS[document.format].contentType)
+      .header('Content-Disposition', attachment(document.fileName, fileNameOf(document.id, document.format)))
       .send(content);
   });
 

@@ -17,8 +17,8 @@ export interface PortionLabels {
   tag: string | null;
 }
 
-// The labels in clear a DOCX package holds: its base label, and each
-// portion's labels by portion id.
+// The labels in clear a package holds: its base label, and each portion's
+// labels by portion id.
 export interface FileLabels {
   base: string | null;
   portions: Map<string, PortionLabels>;
@@ -28,8 +28,8 @@ const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/
 // The parts where the plugin's placeholders may be.
 const PLACEHOLDER_PART = /^word\/(document|header\d*|footer\d*)\.xml$/;
 
-export async function fileLabelsOf(docx: Uint8Array): Promise<FileLabels> {
-  const zip = await JSZip.loadAsync(docx);
+export async function fileLabelsOf(file: Uint8Array): Promise<FileLabels> {
+  const zip = await JSZip.loadAsync(file);
   const portions = new Map<string, PortionLabels>();
   const labelsOf = (id: string): PortionLabels => {
     const labels = portions.get(id) ?? { part: null, tag: null };
