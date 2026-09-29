@@ -11,6 +11,12 @@ export const CREATED_DOCUMENT = 'created document';
 export async function openNewDocument(page: Page, templateFileName: string): Promise<string> {
   await page.goto('/');
   await page.getByRole('button', { name: `New document from ${templateFileName}` }).click();
+  return openedDocumentId(page);
+}
+
+// Waits until the portal has opened the editor on a document the test just
+// created, and gives the document's id.
+export async function openedDocumentId(page: Page): Promise<string> {
   await page.waitForURL(/\/documents\/[a-z0-9-]+\/edit$/);
   const match = /\/documents\/([a-z0-9-]+)\/edit$/.exec(new URL(page.url()).pathname);
   if (match?.[1] === undefined) {
