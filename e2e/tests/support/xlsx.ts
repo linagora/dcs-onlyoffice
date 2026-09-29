@@ -44,6 +44,20 @@ export interface XlsxInspection extends PackageInspection {
   worksheets: WorksheetInspection[];
 }
 
+// Whether every sheet of a stored workbook shows a centre section in its six
+// headers and footers, with the flags that make them count.
+export function everySheetShows(xlsx: XlsxInspection, centre: string): boolean {
+  return (
+    xlsx.worksheets.length > 0 &&
+    xlsx.worksheets.every(
+      ({ headersAndFooters }) =>
+        headersAndFooters.differentFirst &&
+        headersAndFooters.differentOddEven &&
+        HEADER_FOOTER_NAMES.every((name) => headersAndFooters.strings[name]?.includes(centre) === true),
+    )
+  );
+}
+
 export async function inspectXlsx(xlsx: Buffer): Promise<XlsxInspection> {
   const zip = await JSZip.loadAsync(xlsx);
   const sharedStrings = await readSharedStrings(zip);

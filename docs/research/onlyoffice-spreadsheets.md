@@ -818,9 +818,26 @@ end-to-end test an answer names guards it; the other answers were checked once, 
   the range's object, `worksheet.getUserProtectedRangeByName(title).obj`, for the command lets it write the range's
   cells: the write reaches the co-author, the lift enters no history, and the range keeps no editor. Removing the range
   with `worksheet.editUserProtectedRanges(range, null, true)` after the same lift reaches the co-author too.
-- **8. Undo, in part.** For one author, undoing and redoing a lifted change and a range's removal work. In co-editing,
-  undoing a change worked, but redoing it, and undoing a removal, did nothing. A throwaway test found it; nothing
-  guards it yet.
+- **8. Undo.** For one author, one undo takes back a whole portion command, an insertion's placeholder, range, part,
+  document label and page marking included ([workbook-portions.spec.ts](../../e2e/tests/workbook-portions.spec.ts)); a
+  throwaway test found the same of a lifted change and of a range's removal, which a redo brought back. In fast
+  co-editing, the editor keeps no local history: an undo asks the co-editing history to reverse the author's last set of
+  changes, which it does only when it can reverse every change of the set, and otherwise does nothing
+  (`CCollaborativeHistory.GetReverseOwnChanges`). A change of a portion's text alone, which only replaces parts, comes
+  undone for both authors; an insertion, a change of label, which also rewrites the placeholder's cells and the page
+  marking, and a deletion stay whole, never half undone
+  ([workbook-co-editing.spec.ts](../../e2e/tests/workbook-co-editing.spec.ts)); in a throwaway test, a redo after such
+  an undo did nothing. The policy service then refuses to change the undone portion for the minute it remembers the
+  version the change wrote.
+- **9. Cell editing.** While a co-author types in a cell, their editor holds back every change that reaches them, a
+  portion's included, until they leave the cell: over 25 seconds, nothing arrived; once they left it, the change
+  reached their panel within about 2 seconds, and what they had typed stayed. A command runs while its author types in
+  a cell, without closing the cell editor, but what it writes stays in their browser until they leave the cell.
+  Meanwhile, the policy service refuses the other authors a change of the same portion, for the minute it remembers the
+  version; after that minute, another author's change and the held one both reached the workbook, which kept two parts
+  for one portion, each editor showing one of them. A command learns that its author types in a cell from the editor
+  itself, `worksheet.workbook.oApi.asc_getCellEditMode()`, since a command's `Api` does not offer the call; the panel
+  writes nothing meanwhile ([workbook-co-editing.spec.ts](../../e2e/tests/workbook-co-editing.spec.ts)).
 - **12. Headers, in part.** Once the panel has written the page marking, the print preview of a workbook three pages
   long shows it, bold and in its label's colour, centred in the header and the footer of the first page, of the even
   page and of the odd one, beside the template's left and right sections

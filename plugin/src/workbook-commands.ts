@@ -9,8 +9,9 @@ declare const Api: SpreadsheetApi;
 declare const Asc: { scope: CommandScope & SelectionScope };
 
 // What a workbook holds of the panel's parts, its user protected ranges, on
-// every sheet, which the portions' placeholders are, and the centre section
-// of every sheet's six headers and footers, where the page marking goes.
+// every sheet, which the portions' placeholders are, the centre section of
+// every sheet's six headers and footers, where the page marking goes, and
+// whether the author types in a cell.
 export function readWorkbookCommand(): DocumentSnapshot {
   // A header or footer string's sections. Codes are "&" and one character,
   // "&&" an ampersand; text before any section code is centred. The write
@@ -54,6 +55,7 @@ export function readWorkbookCommand(): DocumentSnapshot {
         differentOddEven: headerFooter.getDifferentOddEven() === true,
       };
     }),
+    cellBeingEdited: Api.GetActiveSheet().worksheet.workbook.oApi.asc_getCellEditMode(),
   };
 }
 
@@ -69,6 +71,12 @@ export function readWorkbookCommand(): DocumentSnapshot {
 export function writeWorkbookLabellingCommand(): WriteOutcome {
   const scope = Asc.scope;
   const sheet = Api.GetActiveSheet();
+  // The editor holds back whatever changes while its user types in a cell,
+  // until they leave it: another author could meanwhile change the same
+  // portion, and the workbook would end up with both versions.
+  if (sheet.worksheet.workbook.oApi.asc_getCellEditMode()) {
+    return 'cell-being-edited';
+  }
   const parts = sheet.GetCustomXmlParts();
   const portion = scope.portion;
   // An insertion and a change show the marking alike.

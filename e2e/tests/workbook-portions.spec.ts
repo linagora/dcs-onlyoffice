@@ -5,11 +5,22 @@ import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, removeUserProtectedRange } from './support/plugin.ts';
 import { forceSavedXlsx, shownPortions } from './support/portions.ts';
-import { cellValue, fillWorkbookPortionForm, firstPortionId, insertWorkbookPortion, restrictedWorkbook, typeIntoCell } from './support/workbooks.ts';
+import {
+  cellValue,
+  fillWorkbookPortionForm,
+  firstPortionId,
+  insertWorkbookPortion,
+  restrictedWorkbook,
+  typeIntoCell,
+  undoInWorkbook,
+} from './support/workbooks.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 const SPECIAL_FRANCE_CODE = 'DEMO-FR:2/1.1';
 const WITH_MORE_RESTRICTIVE_PORTIONS = 'DIFFUSION RESTREINTE – CONTIENT DES PORTIONS PLUS RESTRICTIVES';
+// The template's header once the workbook is marked DIFFUSION RESTREINTE, in
+// bold and in the colour the demo policy gives the label.
+const DIFFUSION_RESTREINTE_HEADER = '&LExercise NORTHWIND 26 - fictional&C&"-,Bold"&KE8590CDIFFUSION RESTREINTE';
 // What the placeholder of a SPECIAL FRANCE portion shows, in English.
 const PLACEHOLDER = `${SPECIAL_FRANCE} – protected portion`;
 const CELL_INSERTION_HINT = 'Select empty cells, pick a label and type the text: the portion goes into the selected cells.';
@@ -87,6 +98,27 @@ test('cells that hold a value or a formula are refused, and nothing is written',
   expect(saved.portionParts).toEqual([]);
   expect(saved.worksheets[0]?.userProtectedRanges).toEqual([]);
   expect(saved.worksheets[0]?.mergedCells).toEqual([]);
+});
+
+// One editor command writes the placeholder, its range, the portion's part,
+// the document label and the page marking; the panel's regular rereading of
+// the workbook adds no undo steps of its own.
+test('a single undo removes a portion inserted into cells, with its placeholder, its range and its part', async ({ page }) => {
+  const documentId = await restrictedWorkbook(page);
+  await insertWorkbookPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional undone count') }, EMPTY_CELLS);
+  await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
+  // Let the panel reread the workbook a few times.
+  await page.waitForTimeout(7_000);
+
+  await undoInWorkbook(page);
+
+  await expect(pluginPanel(page).getByTestId('portion-item')).toHaveCount(0);
+  await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText('DIFFUSION RESTREINTE');
+  const saved = await forceSavedXlsx(page, documentId, (xlsx) => xlsx.worksheets[0]?.headersAndFooters.strings.oddHeader === DIFFUSION_RESTREINTE_HEADER);
+  expect(saved.portionParts).toEqual([]);
+  expect(saved.worksheets[0]?.userProtectedRanges).toEqual([]);
+  expect(saved.worksheets[0]?.mergedCells).toEqual([]);
+  expect(saved.worksheets[0]?.cellTexts.has('F4')).toBe(false);
 });
 
 test("the spreadsheet editor's context menu and Insert tab offer to insert a protected portion into cells", async ({ page }) => {

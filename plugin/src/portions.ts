@@ -122,6 +122,9 @@ export interface DocumentState {
   // What the page marking shows in every header and footer, each holding one
   // page marking in its place; null when one of them does not.
   pageMarking: ShownPageMarking | null;
+  // Whether the author types in a cell of a workbook, meanwhile the panel
+  // writes nothing.
+  cellBeingEdited: boolean;
 }
 
 // A text document's page marking names its label in its tag, and its colour
@@ -161,6 +164,7 @@ export type WriteResult =
   | { status: 'not-encrypted'; reason: string }
   | { status: 'changed-meanwhile' }
   | { status: 'cells-occupied' }
+  | { status: 'cell-being-edited' }
   | { status: 'not-written' };
 
 // A new text for a portion the author holds the lock of, under the label it
@@ -237,16 +241,16 @@ async function writeLabelling(portion: PortionWriteScope, documentLabel: Documen
     true,
     parseWriteOutcome,
   );
-  return written === 'written' || written === 'cells-occupied' ? { status: written } : { status: 'not-written' };
+  return written === null ? { status: 'not-written' } : { status: written };
 }
 
 function parseWriteOutcome(result: unknown): WriteOutcome | null {
-  return result === 'written' || result === 'not-written' || result === 'cells-occupied' ? result : null;
+  return result === 'written' || result === 'not-written' || result === 'cells-occupied' || result === 'cell-being-edited' ? result : null;
 }
 
-// Rewrites the document label, and in a text document its page marking, from
-// the base label and the portions' labels.
-export async function writeDocumentLabel(request: DocumentLabelRequest, editor: EditorType): Promise<boolean> {
+// Rewrites the document label and its page marking from the base label and
+// the portions' labels.
+export async function writeDocumentLabel(request: DocumentLabelRequest, editor: EditorType): Promise<WriteOutcome> {
   const documentLabel = await fetchDocumentLabel(request);
   const done = await runCommand(
     EDITORS[editor].write,
@@ -254,7 +258,7 @@ export async function writeDocumentLabel(request: DocumentLabelRequest, editor: 
     true,
     parseWriteOutcome,
   );
-  return done === 'written';
+  return done ?? 'not-written';
 }
 
 // Portions in document order, each joined with the content of its part. A
@@ -269,7 +273,7 @@ export async function readDocumentState(editor: EditorType): Promise<DocumentSta
     parseSnapshot,
   );
   if (snapshot === null) {
-    return { portions: [], baseLabelCode: null, documentLabelCode: null, pageMarking: null };
+    return { portions: [], baseLabelCode: null, documentLabelCode: null, pageMarking: null, cellBeingEdited: false };
   }
   const contents = new Map<string, PortionPartContent>();
   for (const xml of snapshot.portionParts) {
@@ -306,6 +310,7 @@ export async function readDocumentState(editor: EditorType): Promise<DocumentSta
     baseLabelCode: documentPart?.base ?? null,
     documentLabelCode: documentPart?.label ?? null,
     pageMarking: EDITORS[editor].pageMarkingOf(snapshot),
+    cellBeingEdited: snapshot.cellBeingEdited,
   };
 }
 
@@ -508,7 +513,7 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
   if (typeof result !== 'object' || result === null) {
     return null;
   }
-  const { controls, ranges, portionParts, documentParts, headersAndFooters, sheets } = result as Record<string, unknown>; // SAFETY: object checked above
+  const { controls, ranges, portionParts, documentParts, headersAndFooters, sheets, cellBeingEdited } = result as Record<string, unknown>; // SAFETY: object checked above
   if (
     !Array.isArray(controls) ||
     !Array.isArray(ranges) ||
@@ -543,6 +548,7 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
     documentParts: documentParts.filter(isString),
     headersAndFooters: headersAndFooters.map(parseHeaderFooter),
     sheets: sheets.map(parseSheet),
+    cellBeingEdited: cellBeingEdited === true,
   };
 }
 

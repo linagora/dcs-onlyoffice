@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
 import type { BubbleContent } from './bubble-channel.ts';
+import type { WriteOutcome } from './commands.ts';
 import { DocumentLabel } from './DocumentLabel.tsx';
 import { type EnvelopeClient, envelopeClientFor, unavailableOpener } from './envelopes.ts';
 import {
@@ -139,23 +140,23 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     return result;
   };
 
-  const changeBaseLabel = async (code: string): Promise<boolean> => {
+  const changeBaseLabel = async (code: string): Promise<WriteOutcome> => {
     if (policy === null) {
-      return false;
+      return 'not-written';
     }
     const current = await refresh();
-    const applied = await writeDocumentLabel(
+    const outcome = await writeDocumentLabel(
       { policy, baseLabelCode: code, portionLabelCodes: current.portions.map((portion) => portion.labelCode) },
       editorTypeOf(await pluginReady),
     );
     await refresh();
     const documentId = documentIdOf(await pluginReady);
-    if (applied && documentId !== null) {
+    if (outcome === 'written' && documentId !== null) {
       reportBaseLabelChange(documentId, current.baseLabelCode, code).catch((error: unknown) => {
         logProblem('Reporting a base label change', error);
       });
     }
-    return applied;
+    return outcome;
   };
 
   return (

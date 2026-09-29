@@ -69,9 +69,9 @@ export interface SheetSnapshot {
 }
 
 // What reading a document gives: its placeholders, a text document's content
-// controls or a workbook's user protected ranges, the plugin's parts, and
-// where the page marking goes, a text document's headers and footers or a
-// workbook's sheets.
+// controls or a workbook's user protected ranges, the plugin's parts, where
+// the page marking goes, a text document's headers and footers or a
+// workbook's sheets, and whether the author types in a cell of a workbook.
 export interface DocumentSnapshot {
   controls: { tag: string; internalId: string }[];
   ranges: { title: string; reference: string }[];
@@ -79,6 +79,7 @@ export interface DocumentSnapshot {
   documentParts: string[];
   headersAndFooters: HeaderFooterSnapshot[];
   sheets: SheetSnapshot[];
+  cellBeingEdited: boolean;
 }
 
 // What selecting a workbook's placeholder takes: its range's title, the
@@ -89,5 +90,5 @@ export interface SelectionScope {
 
 // What a command that writes gives: whether it wrote, or, in a workbook,
 // that it refused selected cells that hold a value, a formula, a merge or a
-// portion.
-export type WriteOutcome = 'written' | 'not-written' | 'cells-occupied';
+// portion, or that it wrote nothing while the author types in a cell.
+export type WriteOutcome = 'written' | 'not-written' | 'cells-occupied' | 'cell-being-edited';
