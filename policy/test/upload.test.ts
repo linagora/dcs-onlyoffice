@@ -83,12 +83,21 @@ async function withRelatedCustomXml(docx: Uint8Array, part: string, xml: string)
   return zip.generateAsync({ type: 'uint8array' });
 }
 
+// The XML of a package's Custom XML parts, by part name.
+async function customXmlTexts(zip: JSZip): Promise<Map<string, string>> {
+  const parts = new Map<string, string>();
+  for (const name of Object.keys(zip.files).filter((file) => /^customXml\/item\d+\.xml$/.test(file))) {
+    parts.set(name, (await zip.file(name)?.async('string')) ?? '');
+  }
+  return parts;
+}
+
 // The reason a refusal gives, undefined for another answer.
 function reasonOf(json: unknown): unknown {
   return typeof json === 'object' && json !== null && 'reason' in json ? json.reason : undefined;
 }
 
-describe('the preparation of an uploaded document', () => {
+describe('uploads', () => {
   let server: FastifyInstance;
   let keys = '';
   let certificate = '';
@@ -119,6 +128,16 @@ describe('the preparation of an uploaded document', () => {
     });
     const isDocx = response.headers['content-type'] === DOCX_TYPE;
     return { statusCode: response.statusCode, json: isDocx ? null : response.json(), docx: isDocx ? new Uint8Array(response.rawPayload) : null };
+  }
+
+  async function read(body: Uint8Array): Promise<{ statusCode: number; json: unknown }> {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/uploads/read',
+      headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` },
+      payload: Buffer.from(body),
+    });
+    return { statusCode: response.statusCode, json: response.json() };
   }
 
   function base(code: string): string {
@@ -163,145 +182,220 @@ describe('the preparation of an uploaded document', () => {
     return parts;
   }
 
-  for (const [kind, body, reason] of [
-    ['a file that is no ZIP package', new TextEncoder().encode('Not a document at all'), 'not-a-package'],
-    ['a file that Purview encrypted', compoundFile(['\u0006DataSpaces', 'DRMEncryptedDataSpace', 'EncryptedPackage']), 'rights-management'],
-    ['a file that a password protects', compoundFile(['EncryptionInfo', 'EncryptedPackage']), 'password'],
-    ['another compound file, such as a legacy .doc', compoundFile(['WordDocument']), 'compound-file'],
-  ] as const) {
-    it(`refuses ${kind}, and says so`, async () => {
-      const { statusCode, json } = await prepared(body, base(DIFFUSION_RESTREINTE));
+  describe('the preparation of an uploaded document', () => {
+    for (const [kind, body, reason] of [
+      ['a file that is no ZIP package', new TextEncoder().encode('Not a document at all'), 'not-a-package'],
+      ['a file that Purview encrypted', compoundFile(['\u0006DataSpaces', 'DRMEncryptedDataSpace', 'EncryptedPackage']), 'rights-management'],
+      ['a file that a password protects', compoundFile(['EncryptionInfo', 'EncryptedPackage']), 'password'],
+      ['another compound file, such as a legacy .doc', compoundFile(['WordDocument']), 'compound-file'],
+    ] as const) {
+      it(`refuses ${kind}, and says so`, async () => {
+        const { statusCode, json } = await prepared(body, base(DIFFUSION_RESTREINTE));
+
+        assert.equal(statusCode, 422);
+        assert.equal(reasonOf(json), reason);
+      });
+    }
+
+    it('refuses a ZIP package without a WordprocessingML main document', async () => {
+      const zip = new JSZip();
+      zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="txt" ContentType="text/plain"/></Types>');
+      zip.file('notes.txt', 'Fictional notes');
+
+      const { statusCode, json } = await prepared(await zip.generateAsync({ type: 'uint8array' }), base(DIFFUSION_RESTREINTE));
 
       assert.equal(statusCode, 422);
-      assert.equal(reasonOf(json), reason);
+      assert.equal(reasonOf(json), 'not-a-document');
     });
-  }
 
-  it('refuses a ZIP package without a WordprocessingML main document', async () => {
-    const zip = new JSZip();
-    zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="txt" ContentType="text/plain"/></Types>');
-    zip.file('notes.txt', 'Fictional notes');
+    it('refuses a base label that the security policy does not know', async () => {
+      const { statusCode, json } = await prepared(await minimalDocx(), base('DEMO-FR:7'));
 
-    const { statusCode, json } = await prepared(await zip.generateAsync({ type: 'uint8array' }), base(DIFFUSION_RESTREINTE));
-
-    assert.equal(statusCode, 422);
-    assert.equal(reasonOf(json), 'not-a-document');
-  });
-
-  it('refuses a base label that the security policy does not know', async () => {
-    const { statusCode, json } = await prepared(await minimalDocx(), base('DEMO-FR:7'));
-
-    assert.equal(statusCode, 422);
-    assert.equal(reasonOf(json), 'unknown-label');
-  });
-
-  for (const [kind, query] of [
-    ['no base label', ''],
-    ['two base labels', `${base(DIFFUSION_RESTREINTE)}&base=${encodeURIComponent(DIFFUSION_RESTREINTE)}`],
-  ] as const) {
-    it(`refuses a request with ${kind}`, async () => {
-      const { statusCode } = await prepared(await minimalDocx(), query);
-
-      assert.equal(statusCode, 400);
+      assert.equal(statusCode, 422);
+      assert.equal(reasonOf(json), 'unknown-label');
     });
-  }
 
-  it('refuses a file whose portion labels in clear designate no label', async () => {
-    const { statusCode, json } = await prepared(await minimalDocx(['{"id":"p1","label":"DEMO-FR:9"}']), base(DIFFUSION_RESTREINTE));
+    for (const [kind, query] of [
+      ['no base label', ''],
+      ['two base labels', `${base(DIFFUSION_RESTREINTE)}&base=${encodeURIComponent(DIFFUSION_RESTREINTE)}`],
+    ] as const) {
+      it(`refuses a request with ${kind}`, async () => {
+        const { statusCode } = await prepared(await minimalDocx(), query);
 
-    assert.equal(statusCode, 422);
-    assert.equal(reasonOf(json), 'portion-labels');
-  });
-
-  it('refuses a file with several document label bindings, which the signature could not replace', async () => {
-    const binding = `<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}"/>`;
-
-    const { statusCode, json } = await prepared(await minimalDocx([], [binding, binding]), base(DIFFUSION_RESTREINTE));
-
-    assert.equal(statusCode, 422);
-    assert.equal(reasonOf(json), 'several-bindings');
-  });
-
-  it('refuses a file whose document label binding is not well-formed XML', async () => {
-    const { statusCode, json } = await prepared(await minimalDocx([], [`<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}">`]), base(DIFFUSION_RESTREINTE));
-
-    assert.equal(statusCode, 422);
-    assert.equal(reasonOf(json), 'malformed-binding');
-  });
-
-  it('refuses a caller without the secret it shares with the portal', async () => {
-    const { statusCode } = await prepared(await minimalDocx(), base(DIFFUSION_RESTREINTE), null);
-
-    assert.equal(statusCode, 403);
-  });
-
-  it('writes the base label part and the binding of an unlabelled DOCX, as the panel writes them', async () => {
-    const { statusCode, docx } = await prepared(new Uint8Array(await readFile(TEMPLATE)), base(DIFFUSION_RESTREINTE));
-
-    assert.equal(statusCode, 200);
-    assert.ok(docx !== null);
-    const parts = await customXmlParts(docx);
-    const baseLabel = parts.get(DOCUMENT_NAMESPACE);
-    assert.deepEqual([baseLabel?.root.getAttribute('base'), baseLabel?.root.getAttribute('label')], [DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE]);
-    assert.ok(parts.has(BINDING_NAMESPACE));
-    // Each part is a Custom XML part of the main document, with its properties.
-    const zip = await JSZip.loadAsync(docx);
-    const elements = async (part: string, localName: string): Promise<Element[]> =>
-      Array.from(new DOMParser().parseFromString((await zip.file(part)?.async('string')) ?? '<none/>', 'text/xml').getElementsByTagName(localName));
-    const documentRelationships = await elements('word/_rels/document.xml.rels', 'Relationship');
-    const overrides = await elements('[Content_Types].xml', 'Override');
-    for (const { part } of parts.values()) {
-      const item = path.basename(part);
-      const properties = `customXml/${item.replace('item', 'itemProps')}`;
-      assert.ok(documentRelationships.some((relationship) => relationship.getAttribute('Type') === CUSTOM_XML_RELATIONSHIP && relationship.getAttribute('Target') === `../customXml/${item}`));
-      assert.deepEqual((await elements(`customXml/_rels/${item}.rels`, 'Relationship')).map((relationship) => relationship.getAttribute('Target')), [path.basename(properties)]);
-      assert.match((await zip.file(properties)?.async('string')) ?? '', /ds:itemID="\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}"/);
-      assert.deepEqual(overrides.filter((override) => override.getAttribute('PartName') === `/${properties}`).map((override) => override.getAttribute('ContentType')), [CUSTOM_XML_PROPERTIES_TYPE]);
+        assert.equal(statusCode, 400);
+      });
     }
-  });
 
-  it('prepares a package that signs as it is, over the parts it holds, with the document label its portions give', async () => {
-    // A DIFFUSION RESTREINTE document with a SPECIAL FRANCE portion, in a
-    // package without notes, headers, styles or document properties.
-    const { docx } = await prepared(await minimalDocx([JSON.stringify({ id: 'p1', label: SPECIAL_FRANCE })]), base(DIFFUSION_RESTREINTE));
-    assert.ok(docx !== null);
+    it('refuses a file whose portion labels in clear designate no label', async () => {
+      const { statusCode, json } = await prepared(await minimalDocx(['{"id":"p1","label":"DEMO-FR:9"}']), base(DIFFUSION_RESTREINTE));
 
-    const { stored, bindingXml } = await signedAndStored(docx);
+      assert.equal(statusCode, 422);
+      assert.equal(reasonOf(json), 'portion-labels');
+    });
 
-    const verification = await verifyWithXmlsec(stored, bindingXml, certificate);
-    assert.equal(verification.status, 0);
-    // The document itself, and the custom properties the sensitivity label
-    // went to.
-    assert.deepEqual([...verification.references].sort(), ['docProps/custom.xml', 'word/document.xml']);
-    assert.equal(verification.manifest, '2/2');
-    // The demo policy's rule adds the informative category MORE RESTRICTIVE
-    // PORTIONS to a base label below one of the portions.
-    const label = new DOMParser().parseFromString(bindingXml, 'text/xml');
-    assert.deepEqual(
-      Array.from(label.getElementsByTagNameNS(LABEL_NAMESPACE, 'Classification')).map((element) => element.textContent),
-      ['DIFFUSION RESTREINTE'],
-    );
-    assert.deepEqual(
-      Array.from(label.getElementsByTagNameNS(LABEL_NAMESPACE, 'Category')).map((category) => [category.getAttribute('Type'), category.getAttribute('TagName'), category.textContent?.trim()]),
-      [['INFORMATIVE', 'Composition', 'MORE RESTRICTIVE PORTIONS']],
-    );
-    const custom = (await (await JSZip.loadAsync(stored)).file('docProps/custom.xml')?.async('string')) ?? '';
-    assert.match(custom, /MSIP_Label_10000000-0000-4000-8000-000000000002_Enabled/);
-  });
+    it('refuses a file with several document label bindings, which the signature could not replace', async () => {
+      const binding = `<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}"/>`;
 
-it('replaces a binding in whichever Custom XML part holds it', async () => {
-    const docx = await withRelatedCustomXml(await minimalDocx(), 'customXml/labels.xml', bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'DIFFUSION RESTREINTE')));
+      const { statusCode, json } = await prepared(await minimalDocx([], [binding, binding]), base(DIFFUSION_RESTREINTE));
 
-    const { docx: preparedDocx } = await prepared(docx, base(DIFFUSION_RESTREINTE));
+      assert.equal(statusCode, 422);
+      assert.equal(reasonOf(json), 'several-bindings');
+    });
 
-    assert.ok(preparedDocx !== null);
-    const zip = await JSZip.loadAsync(preparedDocx);
-    const bindings = [];
-    for (const name of Object.keys(zip.files).filter((file) => file.startsWith('customXml/') && !file.includes('_rels') && !file.includes('itemProps'))) {
-      if (((await zip.file(name)?.async('string')) ?? '').includes(BINDING_NAMESPACE)) {
-        bindings.push(name);
+    it('refuses a file whose document label binding is not well-formed XML', async () => {
+      const { statusCode, json } = await prepared(await minimalDocx([], [`<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}">`]), base(DIFFUSION_RESTREINTE));
+
+      assert.equal(statusCode, 422);
+      assert.equal(reasonOf(json), 'malformed-binding');
+    });
+
+    it('refuses a caller without the secret it shares with the portal', async () => {
+      const { statusCode } = await prepared(await minimalDocx(), base(DIFFUSION_RESTREINTE), null);
+
+      assert.equal(statusCode, 403);
+    });
+
+    it('writes the base label part and the binding of an unlabelled DOCX, as the panel writes them', async () => {
+      const { statusCode, docx } = await prepared(new Uint8Array(await readFile(TEMPLATE)), base(DIFFUSION_RESTREINTE));
+
+      assert.equal(statusCode, 200);
+      assert.ok(docx !== null);
+      const parts = await customXmlParts(docx);
+      const baseLabel = parts.get(DOCUMENT_NAMESPACE);
+      assert.deepEqual([baseLabel?.root.getAttribute('base'), baseLabel?.root.getAttribute('label')], [DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE]);
+      assert.ok(parts.has(BINDING_NAMESPACE));
+      // Each part is a Custom XML part of the main document, with its properties.
+      const zip = await JSZip.loadAsync(docx);
+      const elements = async (part: string, localName: string): Promise<Element[]> =>
+        Array.from(new DOMParser().parseFromString((await zip.file(part)?.async('string')) ?? '<none/>', 'text/xml').getElementsByTagName(localName));
+      const documentRelationships = await elements('word/_rels/document.xml.rels', 'Relationship');
+      const overrides = await elements('[Content_Types].xml', 'Override');
+      for (const { part } of parts.values()) {
+        const item = path.basename(part);
+        const properties = `customXml/${item.replace('item', 'itemProps')}`;
+        assert.ok(documentRelationships.some((relationship) => relationship.getAttribute('Type') === CUSTOM_XML_RELATIONSHIP && relationship.getAttribute('Target') === `../customXml/${item}`));
+        assert.deepEqual((await elements(`customXml/_rels/${item}.rels`, 'Relationship')).map((relationship) => relationship.getAttribute('Target')), [path.basename(properties)]);
+        assert.match((await zip.file(properties)?.async('string')) ?? '', /ds:itemID="\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}"/);
+        assert.deepEqual(overrides.filter((override) => override.getAttribute('PartName') === `/${properties}`).map((override) => override.getAttribute('ContentType')), [CUSTOM_XML_PROPERTIES_TYPE]);
       }
+    });
+
+    it('prepares a package that signs as it is, over the parts it holds, with the document label its portions give', async () => {
+      // A DIFFUSION RESTREINTE document with a SPECIAL FRANCE portion, in a
+      // package without notes, headers, styles or document properties.
+      const { docx } = await prepared(await minimalDocx([JSON.stringify({ id: 'p1', label: SPECIAL_FRANCE })]), base(DIFFUSION_RESTREINTE));
+      assert.ok(docx !== null);
+
+      const { stored, bindingXml } = await signedAndStored(docx);
+
+      const verification = await verifyWithXmlsec(stored, bindingXml, certificate);
+      assert.equal(verification.status, 0);
+      // The document itself, and the custom properties the sensitivity label
+      // went to.
+      assert.deepEqual([...verification.references].sort(), ['docProps/custom.xml', 'word/document.xml']);
+      assert.equal(verification.manifest, '2/2');
+      // The demo policy's rule adds the informative category MORE RESTRICTIVE
+      // PORTIONS to a base label below one of the portions.
+      const label = new DOMParser().parseFromString(bindingXml, 'text/xml');
+      assert.deepEqual(
+        Array.from(label.getElementsByTagNameNS(LABEL_NAMESPACE, 'Classification')).map((element) => element.textContent),
+        ['DIFFUSION RESTREINTE'],
+      );
+      assert.deepEqual(
+        Array.from(label.getElementsByTagNameNS(LABEL_NAMESPACE, 'Category')).map((category) => [category.getAttribute('Type'), category.getAttribute('TagName'), category.textContent?.trim()]),
+        [['INFORMATIVE', 'Composition', 'MORE RESTRICTIVE PORTIONS']],
+      );
+      const custom = (await (await JSZip.loadAsync(stored)).file('docProps/custom.xml')?.async('string')) ?? '';
+      assert.match(custom, /MSIP_Label_10000000-0000-4000-8000-000000000002_Enabled/);
+    });
+
+    it('replaces a binding in whichever Custom XML part holds it', async () => {
+      const docx = await withRelatedCustomXml(await minimalDocx(), 'customXml/labels.xml', bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'DIFFUSION RESTREINTE')));
+
+      const { docx: preparedDocx } = await prepared(docx, base(DIFFUSION_RESTREINTE));
+
+      assert.ok(preparedDocx !== null);
+      const zip = await JSZip.loadAsync(preparedDocx);
+      const bindings = [];
+      for (const name of Object.keys(zip.files).filter((file) => file.startsWith('customXml/') && !file.includes('_rels') && !file.includes('itemProps'))) {
+        if (((await zip.file(name)?.async('string')) ?? '').includes(BINDING_NAMESPACE)) {
+          bindings.push(name);
+        }
+      }
+      assert.deepEqual(bindings, ['customXml/labels.xml']);
+    });
+  });
+
+  describe('the reading of the label an uploaded file carries', () => {
+    it('reads the base label the platform wrote, and a binding signature that matches', async () => {
+      const { docx } = await prepared(await minimalDocx(), base('DEMO-FR:2/2.1'));
+      assert.ok(docx !== null);
+      const { stored } = await signedAndStored(docx);
+
+      assert.deepEqual(await read(stored), { statusCode: 200, json: { label: { code: 'DEMO-FR:2/2.1', source: 'base-label' }, signature: 'matched' } });
+    });
+
+    it('reads the document label of a binding another tool wrote, without its informative categories', async () => {
+      const releasableToNato = '<slab:Category Type="PERMISSIVE" TagName="Releasable To"><slab:GenericValue>NATO</slab:GenericValue></slab:Category>';
+      const composition = '<slab:Category Type="INFORMATIVE" TagName="Composition"><slab:GenericValue>MORE RESTRICTIVE PORTIONS</slab:GenericValue></slab:Category>';
+      const docx = await minimalDocx([], [bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'DIFFUSION RESTREINTE', releasableToNato + composition))]);
+
+      assert.deepEqual(await read(docx), { statusCode: 200, json: { label: { code: 'DEMO-FR:2/2.1', source: 'binding' }, signature: 'absent' } });
+    });
+
+    it('reads no label from a file that carries none', async () => {
+      assert.deepEqual(await read(await minimalDocx()), { statusCode: 200, json: { label: null, signature: 'absent' } });
+    });
+
+    it('says that the binding signature no longer matches a file changed after signing', async () => {
+      const { docx } = await prepared(await minimalDocx(), base(DIFFUSION_RESTREINTE));
+      assert.ok(docx !== null);
+      const zip = await JSZip.loadAsync((await signedAndStored(docx)).stored);
+      zip.file('word/document.xml', ((await zip.file('word/document.xml')?.async('string')) ?? '').replace('Fictional text in clear', 'Fictional text changed later'));
+
+      const { json } = await read(await zip.generateAsync({ type: 'uint8array' }));
+
+      assert.deepEqual(json, { label: { code: DIFFUSION_RESTREINTE, source: 'base-label' }, signature: 'not-matched' });
+    });
+
+    for (const [kind, customXml, reason] of [
+      ['a base label of another security policy', `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="OTHER-FR:1" label="OTHER-FR:1"/>`, 'foreign-label'],
+      ['a binding label of another security policy', bindingOf(originatorLabel('OTHER-FR', 'urn:oid:2.25.1', 'DIFFUSION RESTREINTE')), 'foreign-label'],
+      ['a binding label under the demo policy name with another identifier', bindingOf(originatorLabel('DEMO-FR', 'urn:oid:2.25.1', 'DIFFUSION RESTREINTE')), 'foreign-label'],
+      ['a binding label that the demo policy does not define', bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'TRES SECRET')), 'invalid-label'],
+    ] as const) {
+      it(`refuses ${kind}`, async () => {
+        const { statusCode, json } = await read(await minimalDocx([], [customXml]));
+
+        assert.equal(statusCode, 422);
+        assert.equal(reasonOf(json), reason);
+      });
     }
-    assert.deepEqual(bindings, ['customXml/labels.xml']);
+
+    it('refuses to read what cannot become a document, as the preparation does', async () => {
+      const { statusCode, json } = await read(compoundFile(['\u0006DataSpaces', 'DRMEncryptedDataSpace', 'EncryptedPackage']));
+
+      assert.equal(statusCode, 422);
+      assert.equal(reasonOf(json), 'rights-management');
+    });
+
+    it('reads the document label of a binding in a Custom XML part of any name', async () => {
+      const docx = await withRelatedCustomXml(await minimalDocx(), 'customXml/labels.xml', bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'DIFFUSION RESTREINTE')));
+
+      assert.deepEqual((await read(docx)).json, { label: { code: DIFFUSION_RESTREINTE, source: 'binding' }, signature: 'absent' });
+    });
+
+    it('says that the binding signature no longer matches a base label changed after signing, which the signature does not cover', async () => {
+      const { docx } = await prepared(await minimalDocx(), base(DIFFUSION_RESTREINTE));
+      assert.ok(docx !== null);
+      const zip = await JSZip.loadAsync((await signedAndStored(docx)).stored);
+      const [basePart] = [...(await customXmlTexts(zip)).entries()].filter(([, root]) => root.includes(DOCUMENT_NAMESPACE)).map(([part]) => part);
+      assert.ok(basePart !== undefined);
+      zip.file(basePart, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="DEMO-FR:1" label="DEMO-FR:1"/>`);
+
+      const { json } = await read(await zip.generateAsync({ type: 'uint8array' }));
+
+      assert.deepEqual(json, { label: { code: 'DEMO-FR:1', source: 'base-label' }, signature: 'not-matched' });
+    });
   });
 });
