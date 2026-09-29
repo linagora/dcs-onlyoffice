@@ -21,6 +21,7 @@ import {
 import { loadLabelMapping, mappedSensitivityLabel } from './label-mapping.ts';
 import { type Marking, renderMarking } from './marking.ts';
 import { isStringList, readTextField, unknownArray } from './guards.ts';
+import type { PackageKind } from './opc.ts';
 import { deriveOpentdfState, labelAttributes } from './opentdf.ts';
 import { acceptPackages, type DocumentLabelOf, registerPackageSignatures } from './package-signing.ts';
 import { computeDocumentLabel, type DocumentLabelResult, isMoreRestrictive, type RollupRule } from './rollup.ts';
@@ -526,7 +527,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       }
       const body = readDocumentLabelRequest(request.body);
       if (body === null) {
-        return reply.code(400).send({ error: 'Expected { base, portions: [codes], parts?: [part names] }' });
+        return reply.code(400).send({ error: 'Expected { base, portions: [codes], parts?: [part names], packageKind?: "text-document" | "workbook" }' });
       }
       const result = documentLabelUnder(policy, labelFromCode(policy, body.base), body.portions);
       if (!result.ok) {
@@ -537,7 +538,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
         label: toView(policy, result.label, request.query.lang ?? defaultLanguage),
         moreRestrictivePortions: result.moreRestrictivePortions,
         rule: rollupRule,
-        xml: serializeDocumentBinding(labelXml, body.parts ?? DEFAULT_DOCUMENT_PARTS),
+        xml: serializeDocumentBinding(labelXml, body.parts ?? DEFAULT_DOCUMENT_PARTS[body.packageKind]),
       };
     },
   );
@@ -590,6 +591,9 @@ interface DocumentLabelRequest {
   base: string;
   portions: string[];
   parts: string[] | null;
+  // The format whose parts the binding references when the request names
+  // none: a text document's unless told otherwise.
+  packageKind: PackageKind;
 }
 
 function readDocumentLabelRequest(body: unknown): DocumentLabelRequest | null {
@@ -598,10 +602,11 @@ function readDocumentLabelRequest(body: unknown): DocumentLabelRequest | null {
   }
   const portions: unknown = 'portions' in body ? body.portions : [];
   const parts: unknown = 'parts' in body ? body.parts : null;
-  if (!isStringList(portions) || (parts !== null && !isStringList(parts))) {
+  const packageKind: unknown = 'packageKind' in body ? body.packageKind : 'text-document';
+  if (!isStringList(portions) || (parts !== null && !isStringList(parts)) || (packageKind !== 'text-document' && packageKind !== 'workbook')) {
     return null;
   }
-  return { base: body.base, portions, parts };
+  return { base: body.base, portions, parts, packageKind };
 }
 
 function readCode(body: unknown): string | null {

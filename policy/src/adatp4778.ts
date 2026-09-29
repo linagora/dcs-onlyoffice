@@ -8,18 +8,14 @@ const PACK_PREFIX = 'pack:///';
 // The Id of the whole-document MetadataBinding, which a signature references.
 export const DOCUMENT_BINDING_ID = 'mb-document';
 
-// Parts a DOCX saved by ONLYOFFICE always contains among those of ADatP-4778.2
-// Tables 5-2 and 5-3, which the binding the panel writes references. Signing
-// a binding references the parts the package holds instead; a binding that
-// could not be signed keeps these, even in a workbook.
-export const DEFAULT_DOCUMENT_PARTS: readonly string[] = [
-  'word/document.xml',
-  'word/styles.xml',
-  'word/footnotes.xml',
-  'word/endnotes.xml',
-  'docProps/core.xml',
-  'docProps/app.xml',
-];
+// Parts a DOCX or an XLSX saved by ONLYOFFICE always contains among those of
+// ADatP-4778.2 Tables 5-2 and 5-3, which the binding the panel writes
+// references. Signing a binding references the parts the package holds
+// instead; a binding that could not be signed keeps these.
+export const DEFAULT_DOCUMENT_PARTS: Readonly<Record<PackageKind, readonly string[]>> = {
+  'text-document': ['word/document.xml', 'word/styles.xml', 'word/footnotes.xml', 'word/endnotes.xml', 'docProps/core.xml', 'docProps/app.xml'],
+  workbook: ['xl/workbook.xml', 'xl/styles.xml', 'xl/sharedStrings.xml', 'xl/worksheets/sheet1.xml', 'docProps/core.xml', 'docProps/app.xml'],
+};
 
 // ADatP-4778.2 Tables 5-2 and 5-3 for WordprocessingML, in reference order:
 // the parts a whole-document binding references when the package holds them.
