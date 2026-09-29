@@ -194,10 +194,11 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
 // that the stored label or its page marking is stale rewrites both. So does
 // the first author to open a labelled document that has no page marking yet,
 // or a workbook with a sheet that has none. Nothing is written until the
-// editor is known.
+// editor is known, nor while the author types in a cell of a workbook: the
+// rewrite waits until they leave it.
 export function useDocumentLabel(
   request: DocumentLabelRequest | null,
-  stored: Pick<DocumentState, 'documentLabelCode' | 'pageMarking'> | null,
+  stored: Pick<DocumentState, 'documentLabelCode' | 'pageMarking' | 'cellBeingEdited'> | null,
   canWrite: boolean,
   editor: EditorType | null,
 ): LabelView | null {
@@ -216,7 +217,8 @@ export function useDocumentLabel(
       const storedLabelCode = stored?.documentLabelCode ?? null;
       const pageMarking = stored?.pageMarking ?? null;
       const staleMarking = !showsPageMarkingOf(pageMarking, computed.label);
-      if (canWrite && editor !== null && storedLabelCode !== null && (storedLabelCode !== computed.label.code || staleMarking)) {
+      const writable = canWrite && editor !== null && stored?.cellBeingEdited !== true;
+      if (writable && storedLabelCode !== null && (storedLabelCode !== computed.label.code || staleMarking)) {
         await writeDocumentLabel(request, editor);
       }
     };
@@ -551,9 +553,10 @@ export function usePortionEdit(
 
   // Writes with `writeWith` and the document's other labels, unless the
   // portion changed outside the panel since the lock was taken: writing would
-  // drop that change. Whatever happens, the lock is then released, with
-  // `nextVersionOnceWritten` when something was written, and `report` tells
-  // the portal what was.
+  // drop that change. The lock is then released, with `nextVersionOnceWritten`
+  // when something was written, and `report` tells the portal what was; but
+  // while the author types in a cell of a workbook, the author keeps the lock
+  // and the edit, to try again once out of the cell.
   const writeUnderLock = async (
     edit: PortionEdit,
     writeWith: (others: OtherLabels) => Promise<WriteResult>,
@@ -579,6 +582,9 @@ export function usePortionEdit(
       logProblem(steps.writing, error);
       return { status: 'not-written' };
     });
+    if (result.status === 'cell-being-edited') {
+      return result;
+    }
     await release(portion.id, result.status === 'written' ? nextVersionOnceWritten : null).catch((error: unknown) => {
       logProblem('Releasing a portion lock', error);
     });

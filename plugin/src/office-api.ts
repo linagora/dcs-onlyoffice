@@ -158,6 +158,9 @@ export interface InternalWorksheet {
   // Whether a range intersects a user protected range; with `notCheckUser`,
   // whoever may edit it.
   isUserProtectedRangesIntersection(range: unknown, userId: null, notCheckUser: true): boolean;
+  // The editor itself, which tells whether its user types in a cell: a call
+  // that a command's `Api` does not offer.
+  workbook: { oApi: { asc_getCellEditMode(): boolean } };
 }
 
 export interface InternalRange {

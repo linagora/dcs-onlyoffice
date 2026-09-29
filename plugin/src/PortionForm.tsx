@@ -126,17 +126,25 @@ export interface PortionDeletionFormProps {
 }
 
 // A deletion waits for its author's confirmation, under the portion's lock.
-// The form closes with the lock, whatever the outcome: the panel says next to
-// the portion why a deletion failed.
+// The form closes with the lock, whatever the outcome, and the panel says next
+// to the portion why a deletion failed; but while the author types in a cell
+// of a workbook, the form stays, under the lock, and says why.
 export function PortionDeletionForm({ onConfirm, onCancel }: PortionDeletionFormProps): JSX.Element {
   const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
-  const confirm = (event: Event): void => {
+  const confirm = async (event: Event): Promise<void> => {
     event.preventDefault();
     setBusy(true);
-    onConfirm().catch((error: unknown) => {
+    setFailure(null);
+    const result = await onConfirm().catch((error: unknown): WriteResult => {
       logProblem('Deleting a portion', error);
+      return { status: 'not-written' };
     });
+    if (result.status === 'cell-being-edited') {
+      setBusy(false);
+      setFailure(writeFailureOf('deletion', result));
+    }
   };
 
   return (
@@ -150,6 +158,11 @@ export function PortionDeletionForm({ onConfirm, onCancel }: PortionDeletionForm
           {messages.cancelButton}
         </button>
       </div>
+      {failure !== null && (
+        <p class="error" data-testid="deletion-failure">
+          {failure}
+        </p>
+      )}
     </form>
   );
 }
@@ -166,6 +179,8 @@ export function writeFailureOf(kind: 'insertion' | 'change' | 'deletion', result
       return messages.portionChangedMeanwhile;
     case 'cells-occupied':
       return messages.cellsOccupied;
+    case 'cell-being-edited':
+      return messages.cellBeingEdited;
     case 'not-written':
       return { insertion: messages.insertionFailed, change: messages.changeFailed, deletion: messages.deletionFailed }[kind];
   }
