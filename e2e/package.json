@@ -5,6 +5,7 @@
   "scripts": {
     "e2e": "playwright test",
     "captures": "playwright test --config captures/playwright.config.ts",
+    "demo": "playwright test --config demo/playwright.config.ts",
     "check-internal-route": "node scripts/check-internal-route.ts",
     "search-document-server": "node scripts/search-document-server.ts",
     "typecheck": "tsc -p tsconfig.json"
