@@ -67,7 +67,7 @@ _Avoid_: assertion label, inner label
 The label an author gives to the document's unprotected content. It decides who may open the document; anyone may raise it, but only an administrator whose clearance allows it may lower it. A document without one counts as the least restrictive label.
 
 **Upload**:
-A DOCX brought into the portal from outside. Its base label is the label the file carries, as a bound document label or as a sensitivity label that the label mapping knows, or else one the person uploading it chooses.
+A DOCX or an XLSX brought into the portal from outside. Its base label is the label the file carries, as a bound document label or as a sensitivity label that the label mapping knows, or else one the person uploading it chooses.
 _Avoid_: import, deposit
 
 **Restricted document**:
