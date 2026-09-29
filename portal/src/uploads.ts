@@ -5,7 +5,7 @@ import type { UserIdentity } from './auth/sessions.ts';
 import type { BindingSignatures } from './binding-signature.ts';
 import { markingOfLabel } from './document-access.ts';
 import { newDocumentId, storeNewDocument } from './documents.ts';
-import type { LabelJournal } from './label-journal.ts';
+import { isLowering, type LabelJournal } from './label-journal.ts';
 import { renderMessagePage, type UploadLabel } from './pages.ts';
 import { identityHeaders } from './policy-relay.ts';
 
@@ -20,11 +20,13 @@ export interface UploadOptions {
   journal: LabelJournal;
 }
 
-// A person brings a DOCX into the portal and chooses its base label (an
-// upload). The policy service refuses what cannot become a document, writes
-// the platform's parts into it and signs its binding, as at a save; the
-// portal stores the result as a new document, named after the uploaded file,
-// and logs it. Only this route reads multipart bodies.
+// A person brings a DOCX into the portal (an upload). Its base label is the
+// label the file carries, unless the person chooses another under the base
+// label rule; one they must choose when it carries none. The policy service
+// reads that label, refuses what cannot become a document, writes the
+// platform's parts into it and signs its binding, as at a save; the portal
+// stores the result as a new document, named after the uploaded file, and
+// logs it. Only this route reads multipart bodies.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
   app.register(async (scope) => {
     await scope.register(multipart, { limits: { fileSize: UPLOAD_LIMIT_MEGABYTES * 1024 * 1024, files: 1 } });
@@ -49,36 +51,56 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
         }
         throw error;
       }
-      if (upload === null || upload.content.length === 0 || base === '') {
-        return refuse(reply, 400, 'Choose a DOCX file and its base label.');
+      if (upload === null || upload.content.length === 0) {
+        return refuse(reply, 400, 'Choose a DOCX file.');
       }
-      // The labels the form offers, and no other.
-      const offered = await labelsForUpload(options.policyInternalUrl, user, request.log);
+      const reading = await options.signatures.readUpload(upload.content);
+      if (!reading.ok) {
+        return refuse(reply, reading.status, reading.message);
+      }
+      const carried = reading.value.label;
+      // The form's first option, empty, keeps the label the file carries.
+      const kept = base === '' ? (carried?.code ?? null) : base;
+      if (kept === null) {
+        return refuse(reply, 400, 'The file carries no label: choose its base label.');
+      }
+      const offered = await labelsForUpload(options.policyInternalUrl, user, request.log, carried?.code ?? null);
       if (offered === null) {
         return refuse(reply, 503, 'The policy service cannot tell which labels your clearance allows. Try again later.');
       }
-      if (!offered.some((label) => label.code === base)) {
-        return refuse(reply, 403, 'The base label is not among those your clearance allows.');
+      const lowering = carried === null ? false : await isLowering(options.policyInternalUrl, carried.code, kept, request.log);
+      if (!offered.some((label) => label.code === kept)) {
+        if (kept === carried?.code) {
+          return refuse(reply, 403, "The file's label is beyond your clearance.");
+        }
+        return refuse(
+          reply,
+          403,
+          lowering === true ? "Only an administrator whose clearance allows the file's label may lower it." : 'The base label is not among those your clearance allows.',
+        );
       }
-      const prepared = await options.signatures.preparedUpload(upload.content, base);
+      const prepared = await options.signatures.preparedUpload(upload.content, kept);
       if (!prepared.ok) {
         return refuse(reply, prepared.status, prepared.message);
       }
       const documentId = newDocumentId(upload.fileName);
-      const signed = await options.signatures.signedUpload(prepared.docx, documentId);
+      const signed = await options.signatures.signedUpload(prepared.value, documentId);
       if (signed === null) {
         return refuse(reply, 503, 'The policy service could not sign the document. Try again later.');
       }
       await storeNewDocument(options.documentsDirectory, documentId, signed, upload.fileName);
-      options.journal.recordUpload({ documentId, base }, user.id);
+      options.journal.recordUpload({ documentId, base: kept, read: carried, signature: reading.value.signature }, lowering, user.id);
       return reply.redirect(`/documents/${documentId}/edit`, 303);
     });
   });
 }
 
-// The labels a person's clearance allows under the first policy, as the panel
-// offers them for a new portion; null when the policy service cannot tell.
-export async function labelsForUpload(policyInternalUrl: string, user: UserIdentity, log: FastifyBaseLogger): Promise<UploadLabel[] | null> {
+// The labels a person may give an uploaded file under the first policy, as
+// the panel offers them for a portion: those their clearance allows, and,
+// instead of a label the file carries, none lower unless they are an
+// administrator whose clearance allows it. Null when the policy service
+// cannot tell.
+export async function labelsForUpload(policyInternalUrl: string, user: UserIdentity, log: FastifyBaseLogger, carried: string | null = null): Promise<UploadLabel[] | null> {
   try {
     const policies = await policyJson(new URL('/policies', policyInternalUrl), {});
     const first: unknown = Array.isArray(policies) ? policies[0] : null;
@@ -86,7 +108,8 @@ export async function labelsForUpload(policyInternalUrl: string, user: UserIdent
     if (typeof name !== 'string') {
       throw new Error('The policy service declares no policy');
     }
-    const labels = await policyJson(new URL(`/policies/${encodeURIComponent(name)}/labels/allowed`, policyInternalUrl), identityHeaders(user));
+    const choices = carried === null ? 'labels/allowed' : `labels/portion-choices?current=${encodeURIComponent(carried)}`;
+    const labels = await policyJson(new URL(`/policies/${encodeURIComponent(name)}/${choices}`, policyInternalUrl), identityHeaders(user));
     if (!Array.isArray(labels)) {
       throw new Error('Unexpected label list');
     }

@@ -122,7 +122,8 @@ export function renderDocumentListPage(user: UserIdentity, documents: ListedDocu
   );
 }
 
-// A DOCX and its base label, among those the person's clearance allows.
+// A DOCX and its base label: the label the file carries, or one among those
+// the person's clearance allows.
 function renderUploadForm(upload: UploadForm): string {
   if (upload.labels === null) {
     return '<p>Uploads are unavailable: the policy service cannot tell which labels your clearance allows. Try again later.</p>';
@@ -130,10 +131,13 @@ function renderUploadForm(upload: UploadForm): string {
   if (upload.labels.length === 0) {
     return '<p>Your clearance allows no label to give an uploaded document.</p>';
   }
-  const options = upload.labels.map((label) => `<option value="${escapeHtml(label.code)}">${escapeHtml(label.marking.text)}</option>`).join('');
+  const options = [
+    '<option value="">The label the file carries</option>',
+    ...upload.labels.map((label) => `<option value="${escapeHtml(label.code)}">${escapeHtml(label.marking.text)}</option>`),
+  ].join('');
   return `<form class="upload" method="post" action="/documents/upload" enctype="multipart/form-data">
   <label>DOCX file, up to ${upload.limitMegabytes} MB <input type="file" name="file" accept=".docx,${DOCX_CONTENT_TYPE}" required></label>
-  <label>Base label <select name="base" required>${options}</select></label>
+  <label>Base label <select name="base">${options}</select></label>
   <button type="submit">Upload</button>
 </form>`;
 }

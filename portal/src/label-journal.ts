@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
+import type { CarriedLabel, UploadReading } from './binding-signature.ts';
 import type { FileLabels } from './document-labels.ts';
 
 const LOWERING_TIMEOUT_MS = 10_000;
@@ -34,11 +35,14 @@ export interface PortionDeletion {
   before: PortionState;
 }
 
-// A DOCX a person brought into the portal as a new document, with the base
-// label they chose.
+// A DOCX a person brought into the portal as a new document: the base label
+// it got, the label the file carried, as a base label, and where that came
+// from, null for none, and whether the file's binding signature matched.
 export interface DocumentUpload {
   documentId: string;
   base: string;
+  read: CarriedLabel | null;
+  signature: UploadReading['signature'];
 }
 
 // The journal of label changes, in the portal's log. Any editor can change a
@@ -70,8 +74,10 @@ export class LabelJournal {
     this.#log.info({ ...deletion, user }, 'Portion deleted in the panel');
   }
 
-  recordUpload(upload: DocumentUpload, user: string): void {
-    this.#log.info({ ...upload, user }, 'Document uploaded');
+  // An upload is logged as a change of the label the file carried, which
+  // `lowering` tells whether the base label lowers.
+  recordUpload(upload: DocumentUpload, lowering: boolean | null, user: string): void {
+    this.#recordReport({ ...upload, user }, lowering, { changed: 'Document uploaded', lowered: 'Document uploaded, its label lowered' });
   }
 
   // What a save changed in the labels in clear of a stored file: its base

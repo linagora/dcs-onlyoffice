@@ -65,7 +65,19 @@ test('the French officer uploads an unlabelled DOCX, which opens in the editor w
   // The journal records the upload: the document, the person and the base
   // label, without any of the document's text.
   await expect.poll(() => documentLogEntries(since, 'Document uploaded', documentId)).toEqual([
-    { level: 30, time: expect.any(Number), pid: expect.any(Number), hostname: expect.any(String), documentId, base: DIFFUSION_RESTREINTE_CODE, user: 'alice', msg: 'Document uploaded' },
+    {
+      level: 30,
+      time: expect.any(Number),
+      pid: expect.any(Number),
+      hostname: expect.any(String),
+      documentId,
+      base: DIFFUSION_RESTREINTE_CODE,
+      read: null,
+      signature: 'absent',
+      user: 'alice',
+      lowering: false,
+      msg: 'Document uploaded',
+    },
   ]);
   const sentence = (await docxText(docx)).split(/(?<=[.!?])\s+/).find((candidate) => candidate.length > 20);
   expect(sentence).toBeDefined();
@@ -93,7 +105,7 @@ test.describe('someone cleared for NON PROTÉGÉ only', () => {
   test('is offered only the labels their clearance allows', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByLabel('Base label').locator('option')).toHaveText(['NON PROTÉGÉ']);
+    await expect(page.getByLabel('Base label').locator('option')).toHaveText(['The label the file carries', 'NON PROTÉGÉ']);
   });
 
   // DIFFUSION RESTREINTE, beyond the clearance, and NON PROTÉGÉ with the
