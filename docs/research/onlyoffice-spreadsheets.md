@@ -792,8 +792,18 @@ b297063cce0ac79d10a8efd382b0f90f3b9fd6615fac7f01c88f0288e5fa7372  [MS-OI29500].p
 ## 18. Answered with a live editor
 
 ONLYOFFICE 9.4 on the standalone stack, in Chromium, with two browsers in fast co-editing, on 29 September 2026. The
-end-to-end tests named here guard each answer, but the last but one.
+end-to-end test an answer names guards it; the other answers were checked once, by hand or with a throwaway test.
 
+- **1. Following the cursor.** With `initOnSelectionChanged`, the editor calls the panel's `init` again at each
+  change of the selection, whether the name box's search, a mouse click or an arrow key moves it, in the editor and in
+  the viewer; a read-only command then tells which range holds the active cell.
+  [workbook-selection.spec.ts](../../e2e/tests/workbook-selection.spec.ts) guards the name box and the arrow keys, in
+  the editor and in the viewer; mouse clicks were checked by hand. The panel's rereads, every 3 seconds, make no such
+  call.
+- **2. Bubble placement, in part.** With `isTargeted`, the bubble opens 10 pixels inside the top-left corner of the
+  selected placeholder's merged area, over its marking; tried by hand at 100% zoom, without frozen panes or
+  scrolling. The tests check that it opens, stays open through rereads, and opens again when the placeholder is
+  selected once Escape has closed it, not where.
 - **3. View mode.** The left panel that the portal loads for a read-only session runs in the spreadsheet viewer: it
   shows the document label and sends the editor no command that writes, and the stored file stays as it was
   ([workbook.spec.ts](../../e2e/tests/workbook.spec.ts)). A right panel in the spreadsheet viewer was not tried: the
