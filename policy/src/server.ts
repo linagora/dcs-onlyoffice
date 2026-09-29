@@ -124,8 +124,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     if (found === null) {
       return { tenant: labelMapping.tenant, label: null };
     }
-    const restricting = { ...found.label, categories: found.label.categories.filter((category) => !isInformative(category)) };
-    return mappedSensitivityLabel(labelMapping, labelCode(found.policy, restricting));
+    return mappedSensitivityLabel(labelMapping, labelCode(found.policy, withoutInformativeCategories(found.label)));
   };
 
   const leastRestrictiveLabel = (): { policy: SecurityPolicy; label: Label } | null => {
@@ -151,11 +150,18 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     });
   };
 
+  // The policy a label names, with that identifier when it gives one; null
+  // for another policy, one with the same name among them.
+  const namedPolicy = (name: string, uri: string | null): SecurityPolicy | null => {
+    const policy = findPolicy(name);
+    return policy !== null && (uri === null || uri === `urn:oid:${policy.oid}`) ? policy : null;
+  };
+
   // The valid label an originator label designates, under the policy it names
   // with that identifier.
   const designatedLabel = (designated: DesignatedLabel): PolicyLabel => {
-    const policy = findPolicy(designated.policy);
-    if (policy === null || (designated.policyUri !== null && designated.policyUri !== `urn:oid:${policy.oid}`)) {
+    const policy = namedPolicy(designated.policy, designated.policyUri);
+    if (policy === null) {
       return { ok: false, error: `No policy ${designated.policy} with that identifier` };
     }
     const validation = validateLabel(policy, designated.request);
@@ -514,6 +520,12 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
   );
 
   return app;
+}
+
+// A label without its informative categories, which a base label and a
+// sensitivity label leave to the document label.
+function withoutInformativeCategories(label: Label): Label {
+  return { ...label, categories: label.categories.filter((category) => !isInformative(category)) };
 }
 
 // An informative category restricts nothing: no access rule reads it.
