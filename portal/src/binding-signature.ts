@@ -39,6 +39,29 @@ type BindingVerification = (
 // Where the portal serves a stored file.
 export type ServedTo = 'document-server' | 'download';
 
+// The label an uploaded file carries, and where it comes from: the
+// platform's base label part or an ADatP-4778 binding.
+export interface CarriedLabel {
+  code: string;
+  source: 'base-label' | 'binding';
+}
+
+// What the policy service reads in an uploaded file: the label it carries,
+// null for none, and whether its binding signature matched the platform's
+// certificate.
+export interface UploadReading {
+  label: CarriedLabel | null;
+  signature: 'matched' | 'not-matched' | 'absent';
+}
+
+// Why the policy service refuses an uploaded file (422), or could not handle
+// it (503), as a message for the person.
+export interface UploadRefusal {
+  ok: false;
+  status: 422 | 503;
+  message: string;
+}
+
 // Has the policy service sign the document label's binding of each file the
 // portal is about to store (ADR 0004), and check it whenever the portal
 // serves a stored file. The policy service first computes the document label
@@ -66,13 +89,29 @@ export class BindingSignatures {
     return (await this.#signedOrNull(docx, documentId, headers, 'The binding of a save could not be signed')) ?? docx;
   }
 
+  // The label an uploaded file carries, where it comes from, and whether its
+  // binding signature matched, or why the policy service refuses the file.
+  async readUpload(docx: Uint8Array): Promise<{ ok: true; value: UploadReading } | UploadRefusal> {
+    return this.#uploadStep('/uploads/read', docx, async (response) => readUploadReading(await response.json()));
+  }
+
   // An uploaded file with the platform's parts, which the policy service
   // writes as the panel does, or why it refuses the file.
-  async preparedUpload(docx: Uint8Array, base: string): Promise<{ ok: true; docx: Uint8Array } | { ok: false; status: 422 | 503; message: string }> {
+  async preparedUpload(docx: Uint8Array, base: string): Promise<{ ok: true; value: Uint8Array } | UploadRefusal> {
+    return this.#uploadStep(`/uploads/prepare?base=${encodeURIComponent(base)}`, docx, async (response) => new Uint8Array(await response.arrayBuffer()));
+  }
+
+  // A step of an upload: the policy service's answer, or its refusal, which
+  // it explains; a failure is logged.
+  async #uploadStep<T>(route: string, docx: Uint8Array, answerOf: (response: Response) => Promise<T | null>): Promise<{ ok: true; value: T } | UploadRefusal> {
     try {
-      const response = await this.#post(`/uploads/prepare?base=${encodeURIComponent(base)}`, docx);
+      const response = await this.#post(route, docx);
       if (response.ok) {
-        return { ok: true, docx: new Uint8Array(await response.arrayBuffer()) };
+        const value = await answerOf(response);
+        if (value === null) {
+          throw new Error('The policy service gave an unexpected answer');
+        }
+        return { ok: true, value };
       }
       const body: unknown = await response.json();
       const message: unknown = typeof body === 'object' && body !== null && 'error' in body ? body.error : null;
@@ -81,8 +120,8 @@ export class BindingSignatures {
       }
       throw new Error(`The policy service answered ${response.status}`);
     } catch (error: unknown) {
-      this.#log.error({ err: error }, 'An uploaded file could not be prepared');
-      return { ok: false, status: 503, message: 'The policy service could not prepare the document. Try again later.' };
+      this.#log.error({ route: route.split('?', 1)[0], err: error }, 'An uploaded file could not be read or prepared');
+      return { ok: false, status: 503, message: 'The policy service could not handle the document. Try again later.' };
     }
   }
 
@@ -238,4 +277,20 @@ function writtenPartOf(value: unknown): WrittenPart | null {
   return typeof value === 'object' && value !== null && 'part' in value && typeof value.part === 'string' && 'xml' in value && typeof value.xml === 'string'
     ? { part: value.part, xml: value.xml }
     : null;
+}
+
+function readUploadReading(body: unknown): UploadReading | null {
+  if (typeof body !== 'object' || body === null || !('label' in body) || !('signature' in body)) {
+    return null;
+  }
+  const { label, signature } = body;
+  if (signature !== 'matched' && signature !== 'not-matched' && signature !== 'absent') {
+    return null;
+  }
+  if (label === null) {
+    return { label: null, signature };
+  }
+  const code: unknown = typeof label === 'object' && 'code' in label ? label.code : null;
+  const source: unknown = typeof label === 'object' && label !== null && 'source' in label ? label.source : null;
+  return typeof code === 'string' && (source === 'base-label' || source === 'binding') ? { label: { code, source }, signature } : null;
 }

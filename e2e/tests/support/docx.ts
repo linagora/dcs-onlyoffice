@@ -84,13 +84,14 @@ export interface CustomProperty {
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const PACKAGE_RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/relationships';
+export const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
 const CUSTOM_PROPERTIES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties';
 const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
 export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 export const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
-const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
+export const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
 const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments|commentsExtended)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
 
 export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {

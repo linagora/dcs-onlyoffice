@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { XMLSerializer } from '@xmldom/xmldom';
 import type JSZip from 'jszip';
 import { escapeXml } from './adatp4774.ts';
-import { appendRelationship, CONTENT_TYPES_PART, declareContentType, PACKAGE_RELATIONSHIPS_PART, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
+import { appendRelationship, CONTENT_TYPES_PART, declareContentType, PACKAGE_RELATIONSHIPS_PART, partNamed, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
 import { childElements, childrenNamed, parseXml } from './xml.ts';
 
 // A sensitivity label of a Microsoft 365 tenant: its id, and its unique name
@@ -129,13 +129,6 @@ async function relationshipTargets(zip: JSZip, types: string[]): Promise<string[
     .filter((relationship) => types.includes(relationship.getAttribute('Type') ?? ''))
     .map((relationship) => (relationship.getAttribute('Target') ?? '').replace(/^(\.?\/)+/, ''))
     .filter((target) => target !== '');
-}
-
-// The package part of that name, as the package spells it: part names match
-// without regard to case (ECMA-376 Part 2 §6.2.2.3).
-function partNamed(zip: JSZip, name: string): string | null {
-  const wanted = name.toLowerCase();
-  return Object.keys(zip.files).find((file) => zip.files[file]?.dir === false && file.toLowerCase() === wanted) ?? null;
 }
 
 // The Sensitivity Label Information part a package holds, found through its

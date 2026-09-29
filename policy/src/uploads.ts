@@ -9,14 +9,14 @@ import {
   appendRelationship,
   CONTENT_TYPES_NAMESPACE,
   CONTENT_TYPES_PART,
-  CUSTOM_XML_ITEM,
+  customXmlParts,
   declareContentType,
   loadPackage,
   PACKAGE_RELATIONSHIPS_PART,
   RELATIONSHIPS_NAMESPACE,
   xmlPartOf,
 } from './opc.ts';
-import { type DocumentLabelOf, packageBody, readPackageLabels } from './package-signing.ts';
+import { bindingLabelXml, bindingVerdict, type DocumentLabelOf, type PackageLabels, packageBody, readPackageLabels } from './package-signing.ts';
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -43,7 +43,25 @@ export type UploadRefusal =
   | 'unknown-label'
   | 'several-bindings'
   | 'malformed-binding'
-  | 'portion-labels';
+  | 'portion-labels'
+  | 'foreign-label'
+  | 'invalid-label';
+
+// The label code that a code or a label element gives, or why it gives none:
+// a label of another security policy, or no valid label of the platform's.
+export type ReadLabel = { ok: true; code: string } | { ok: false; refusal: 'foreign-label' | 'invalid-label' };
+
+// Where the label an uploaded file carries comes from: the platform's base
+// label part, or the document label of an ADatP-4778 binding.
+export type LabelSource = 'base-label' | 'binding';
+
+// The label an uploaded file carries, and where it comes from, or why the
+// platform cannot take it.
+type CarriedLabel = { ok: true; code: string; source: LabelSource } | Extract<ReadLabel, { ok: false }>;
+
+// What the binding signature of an uploaded file says against the platform's
+// certificate.
+export type SignatureStatus = 'matched' | 'not-matched' | 'absent';
 
 const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
   'not-a-package': 'The file is no DOCX package',
@@ -55,22 +73,54 @@ const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
   'several-bindings': 'The file holds several document label bindings, where ADatP-4778.2 allows one',
   'malformed-binding': "The file's document label binding is not well-formed XML",
   'portion-labels': "The labels of the file's protected portions give no document label under the security policy",
+  'foreign-label': "The file's label belongs to another security policy",
+  'invalid-label': "The file's label is no valid label of the security policy",
 };
 
 export interface UploadOptions {
   secret: string;
+  // The certificate a binding signature must match.
+  certificate: string;
   documentLabelOf: DocumentLabelOf;
-  // A label code in its canonical form, null when it designates no label.
-  canonicalLabelCode: (code: string) => string | null;
+  // A label code in its canonical form, or why it designates no label.
+  readLabelCode: (code: string) => ReadLabel;
+  // The code of the label an ADatP-4774 label element designates, or why it
+  // designates none.
+  readLabelXml: (xml: string) => ReadLabel;
+  // A valid label code without the informative categories that only a
+  // document label takes.
+  baseLabelOf: (code: string) => string;
 }
 
-// The portal passes each uploaded file to the policy service, which refuses
-// what cannot become a document, then writes the platform's parts into it as
-// the panel writes them: the base label part, and the binding of the document
-// label computed from that base label and the portion labels in clear, which
+// The portal passes each uploaded file to the policy service twice. First it
+// reads the label the file carries, with where it comes from and whether its
+// binding signature matched, so that the portal decides the base label.
+// Then the policy service writes the platform's parts into it as the panel
+// writes them: the base label part, and the binding of the document label
+// computed from that base label and the portion labels in clear, which
 // references the parts the package holds. The portal then has the binding
-// signed, as at a save. The DOCX body parser comes from acceptPackages.
+// signed, as at a save. Both refuse what cannot become a document. The DOCX
+// body parser comes from acceptPackages.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
+  app.post('/uploads/read', async (request, reply) => {
+    const received = packageBody(request, options.secret);
+    if (!received.ok) {
+      return reply.code(received.status).send({ error: received.error });
+    }
+    const uploaded = await uploadedPackage(received.body);
+    if (!uploaded.ok) {
+      return refuse(reply, uploaded.refusal);
+    }
+    const carried = carriedLabel(uploaded.labels, options);
+    if (carried !== null && !carried.ok) {
+      return refuse(reply, carried.refusal);
+    }
+    return {
+      label: carried === null ? null : { code: carried.code, source: carried.source },
+      signature: await signatureStatus(uploaded.zip, uploaded.labels, options),
+    };
+  });
+
   // Unchecked input: a repeated parameter arrives as an array.
   app.post<{ Querystring: { base?: unknown } }>('/uploads/prepare', async (request, reply) => {
     const received = packageBody(request, options.secret);
@@ -81,31 +131,78 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     if (typeof requested !== 'string' || requested === '') {
       return reply.code(400).send({ error: 'Expected one base label code' });
     }
-    const opened = await openUpload(received.body);
-    if (!opened.ok) {
-      return refuse(reply, opened.refusal);
+    const uploaded = await uploadedPackage(received.body);
+    if (!uploaded.ok) {
+      return refuse(reply, uploaded.refusal);
     }
-    const { zip, mainPart } = opened;
-    const base = options.canonicalLabelCode(requested);
-    if (base === null) {
+    const { zip, mainPart, labels } = uploaded;
+    const base = options.readLabelCode(requested);
+    if (!base.ok) {
       return refuse(reply, 'unknown-label');
     }
-    const labels = await readPackageLabels(zip);
-    if (labels.unreadableBindings.length > 0) {
-      return refuse(reply, 'malformed-binding');
-    }
-    if (labels.bindings.length > 1) {
-      return refuse(reply, 'several-bindings');
-    }
-    const computed = options.documentLabelOf(base, labels.portionCodes);
+    const computed = options.documentLabelOf(base.code, labels.portionCodes);
     if (!computed.ok) {
       return refuse(reply, 'portion-labels');
     }
     const parts = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
-    await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base)}" label="${escapeXml(computed.code)}"/>`);
+    await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
     await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts)));
     return reply.type(DOCX_TYPE).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
   });
+}
+
+// An uploaded package, with its main part and its labels in clear, or why it
+// cannot become a document: its binding, if it has one, must be one that
+// signing can replace.
+async function uploadedPackage(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPart: string; labels: PackageLabels } | { ok: false; refusal: UploadRefusal }> {
+  const opened = await openUpload(body);
+  if (!opened.ok) {
+    return opened;
+  }
+  const labels = await readPackageLabels(opened.zip);
+  if (labels.unreadableBindings.length > 0) {
+    return { ok: false, refusal: 'malformed-binding' };
+  }
+  if (labels.bindings.length > 1) {
+    return { ok: false, refusal: 'several-bindings' };
+  }
+  return { ...opened, labels };
+}
+
+// The label an uploaded file carries: the platform's base label part, else
+// the document label of its binding, found in whichever Custom XML part holds
+// it, as a base label; null when it carries none.
+function carriedLabel(labels: PackageLabels, options: UploadOptions): CarriedLabel | null {
+  if (labels.baseCode !== null) {
+    const read = options.readLabelCode(labels.baseCode);
+    return read.ok ? { ...read, source: 'base-label' } : read;
+  }
+  const [binding] = labels.bindings;
+  const xml = binding === undefined ? null : bindingLabelXml(binding);
+  if (xml === null) {
+    return null;
+  }
+  const read = options.readLabelXml(xml);
+  return read.ok ? { ok: true, code: options.baseLabelOf(read.code), source: 'binding' } : read;
+}
+
+// Whether an uploaded file's binding signature matched the platform's
+// certificate. The signature does not cover the base label part: a signed
+// document label that the labels in clear no longer give was changed since
+// signing, and does not match either.
+async function signatureStatus(zip: JSZip, labels: PackageLabels, options: UploadOptions): Promise<SignatureStatus> {
+  if (labels.bindings.length === 0) {
+    return 'absent';
+  }
+  const verdict = await bindingVerdict(zip, labels, options.certificate);
+  if (verdict.status !== 'valid') {
+    return verdict.status === 'altered' ? 'not-matched' : 'absent';
+  }
+  const [binding] = labels.bindings;
+  const xml = binding === undefined ? null : bindingLabelXml(binding);
+  const signed = xml === null ? null : options.readLabelXml(xml);
+  const computed = options.documentLabelOf(labels.baseCode, labels.portionCodes);
+  return signed?.ok === true && computed.ok && signed.code === computed.code ? 'matched' : 'not-matched';
 }
 
 function refuse(reply: FastifyReply, refusal: UploadRefusal): FastifyReply {
@@ -150,7 +247,7 @@ async function mainDocumentPart(zip: JSZip): Promise<string | null> {
 // one, else as a new part of the main document, with its properties part and
 // relationships, as ONLYOFFICE writes those of the panel.
 async function writeCustomXmlPart(zip: JSZip, mainPart: string, namespace: string, xml: string): Promise<void> {
-  for (const part of Object.keys(zip.files).filter((name) => CUSTOM_XML_ITEM.test(name))) {
+  for (const part of await customXmlParts(zip)) {
     const parsed = parseXml((await zip.file(part)?.async('string')) ?? '');
     if (parsed.ok && parsed.root.namespaceURI === namespace) {
       zip.file(part, xml);

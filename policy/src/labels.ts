@@ -112,6 +112,11 @@ export function labelCode(policy: SecurityPolicy, label: Label): string {
   return `${policy.name}:${classification.lacv}${segments.join('')}`;
 }
 
+// The name of the policy a label code names, null for no label code.
+export function policyNameOfCode(code: string): string | null {
+  return /^([^:]+):/.exec(code)?.[1] ?? null;
+}
+
 // Reverse of labelCode. Returns null when the code does not designate existing
 // entries of this policy; the result still has to be validated.
 export function parseLabelCode(policy: SecurityPolicy, code: string): LabelRequest | null {

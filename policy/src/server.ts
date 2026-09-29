@@ -15,6 +15,7 @@ import {
   labelCode,
   type LabelRequest,
   parseLabelCode,
+  policyNameOfCode,
   validateLabel,
 } from './labels.ts';
 import { loadLabelMapping, mappedSensitivityLabel } from './label-mapping.ts';
@@ -28,7 +29,7 @@ import { policyNamed } from './spif/lookup.ts';
 import { PortionLocks, registerPortionLocks } from './portion-locks.ts';
 import type { MappedSensitivityLabel } from './sensitivity-label.ts';
 import { loadPolicies } from './spif/reader.ts';
-import { registerUploads } from './uploads.ts';
+import { type ReadLabel, registerUploads } from './uploads.ts';
 
 const DEFAULT_PORTION_LOCK_LEASE_MS = 5 * 60 * 1000;
 
@@ -124,8 +125,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     if (found === null) {
       return { tenant: labelMapping.tenant, label: null };
     }
-    const restricting = { ...found.label, categories: found.label.categories.filter((category) => !isInformative(category)) };
-    return mappedSensitivityLabel(labelMapping, labelCode(found.policy, restricting));
+    return mappedSensitivityLabel(labelMapping, labelCode(found.policy, withoutInformativeCategories(found.label)));
   };
 
   const leastRestrictiveLabel = (): { policy: SecurityPolicy; label: Label } | null => {
@@ -151,11 +151,18 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     });
   };
 
+  // The policy a label names, with that identifier when it gives one; null
+  // for another policy, one with the same name among them.
+  const namedPolicy = (name: string, uri: string | null): SecurityPolicy | null => {
+    const policy = findPolicy(name);
+    return policy !== null && (uri === null || uri === `urn:oid:${policy.oid}`) ? policy : null;
+  };
+
   // The valid label an originator label designates, under the policy it names
   // with that identifier.
   const designatedLabel = (designated: DesignatedLabel): PolicyLabel => {
-    const policy = findPolicy(designated.policy);
-    if (policy === null || (designated.policyUri !== null && designated.policyUri !== `urn:oid:${policy.oid}`)) {
+    const policy = namedPolicy(designated.policy, designated.policyUri);
+    if (policy === null) {
       return { ok: false, error: `No policy ${designated.policy} with that identifier` };
     }
     const validation = validateLabel(policy, designated.request);
@@ -445,6 +452,18 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     return policy === null ? reply.code(404).send({ error: `Unknown policy ${request.params.policy}` }) : clearanceChoicesOf(policy);
   });
 
+  // The code of the label an ADatP-4774 originator label element designates,
+  // or why it designates none: it names another policy, or no valid label of
+  // the policy it names.
+  const labelOfXml = (xml: string): ReadLabel => {
+    const designated = readOriginatorLabel(xml);
+    if (designated !== null && namedPolicy(designated.policy, designated.policyUri) === null) {
+      return { ok: false, refusal: 'foreign-label' };
+    }
+    const found = designated === null ? null : designatedLabel(designated);
+    return found?.ok === true ? { ok: true, code: labelCode(found.policy, found.label) } : { ok: false, refusal: 'invalid-label' };
+  };
+
   const { bindingSignature } = options;
   if (bindingSignature !== undefined) {
     // A document without a base label counts as the least restrictive label
@@ -464,19 +483,27 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       now,
       sensitivityLabelOf,
       codeOfLabelXml: (xml) => {
-        const designated = readOriginatorLabel(xml);
-        const found = designated === null ? null : designatedLabel(designated);
-        return found?.ok === true ? labelCode(found.policy, found.label) : null;
+        const read = labelOfXml(xml);
+        return read.ok ? read.code : null;
       },
       documentLabelOf,
     });
     // Uploads share the portal's secret, and end signed as a save.
     registerUploads(app, {
       secret: bindingSignature.secret,
+      certificate: bindingSignature.signer.certificate,
       documentLabelOf,
-      canonicalLabelCode: (code) => {
+      readLabelCode: (code) => {
         const found = labelOfCode(code);
-        return found === null ? null : labelCode(found.policy, found.label);
+        if (found !== null) {
+          return { ok: true, code: labelCode(found.policy, found.label) };
+        }
+        return { ok: false, refusal: namedPolicy(policyNameOfCode(code) ?? '', null) === null ? 'foreign-label' : 'invalid-label' };
+      },
+      readLabelXml: labelOfXml,
+      baseLabelOf: (code) => {
+        const found = labelOfCode(code);
+        return found === null ? code : labelCode(found.policy, withoutInformativeCategories(found.label));
       },
     });
   }
@@ -514,6 +541,12 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
   );
 
   return app;
+}
+
+// A label without its informative categories, which a base label and a
+// sensitivity label leave to the document label.
+function withoutInformativeCategories(label: Label): Label {
+  return { ...label, categories: label.categories.filter((category) => !isInformative(category)) };
 }
 
 // An informative category restricts nothing: no access rule reads it.
