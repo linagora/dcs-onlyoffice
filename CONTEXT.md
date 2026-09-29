@@ -36,15 +36,23 @@ _Avoid_: correspondence table, crosswalk
 
 ### Documents
 
+**Workbook**:
+A spreadsheet document, edited in ONLYOFFICE's spreadsheet editor, whose protected portions are ranges of cells.
+_Avoid_: spreadsheet (for the file), Excel file
+
 **Protected portion**:
-A part of a document whose text is typed in the labelling panel, never in the document body, and which carries its own label; the body only shows a locked placeholder.
-_Avoid_: secret paragraph, encrypted block
+A part of a document whose text is typed in the labelling panel, never in the document itself, and which carries its own label; the document only shows its placeholder.
+_Avoid_: secret paragraph, encrypted block, protected cell
+
+**Placeholder**:
+What the document shows of a protected portion: its marking, where the portion sits, which authors cannot edit. In a text document it is a locked block; in a workbook, a merged range of cells that only the author who inserted the portion may change.
+_Avoid_: stub, mask
 
 **Portion label**:
 The label of one protected portion. The file holds it in clear, for everyone and for other labelling tools, and bound in the portion's envelope. An author changing the portion may raise it to any label their clearance allows; only an administrator whose clearance allows it may lower it.
 
 **Portion lock**:
-The right to change or delete a protected portion, held by one author at a time who can edit the document and read the portion; it lapses unless their labelling panel renews it.
+The right to change or delete a protected portion, held by one author at a time who can edit the document and read the portion, and in a workbook who inserted it; it lapses unless their labelling panel renews it.
 _Avoid_: checkout, reservation
 
 **Portion version**:
@@ -71,7 +79,7 @@ The label of the whole document, computed from its base label and its portion la
 _Avoid_: global label, rollup
 
 **Page marking**:
-The marking of the document label, repeated at the top and the bottom of every page, in a place of its own that authors cannot edit.
+The marking of the document label, repeated at the top and the bottom of every page. In a text document it sits in a place of its own that authors cannot edit; in a workbook, in the headers and footers of every sheet, which only printing and PDF show.
 _Avoid_: banner, header label
 
 **Journal**:
