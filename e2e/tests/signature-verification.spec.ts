@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { documentLogEntries, storeDocument } from './support/deployment.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
-import { BINDING_NAMESPACE } from './support/docx.ts';
+import { BINDING_NAMESPACE, inspectDocx } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, storedFile } from './support/portions.ts';
@@ -11,6 +11,9 @@ import { changedSinceSigning, demoCertificate, verifyBindingSignature } from './
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
+// Codes of the demo SPIF's labels.
+const DIFFUSION_RESTREINTE_CODE = 'DEMO-FR:2';
+const NON_PROTEGE_CODE = 'DEMO-FR:1';
 
 // The signed file of a new document labelled DIFFUSION RESTREINTE.
 async function signedFile(page: Page): Promise<Buffer> {
@@ -56,6 +59,26 @@ test('a stored file changed outside the portal is logged when it is served, and 
   await expect
     .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
     .toContainEqual(changedSinceSigning('download', ['docProps/app.xml']));
+});
+
+test('a stored file whose base label was lowered outside the portal is logged, when it is served, as changed since signing', async ({ page }) => {
+  const since = new Date();
+  let baseLabelPart = '';
+  const lowered = await rewritten(await signedFile(page), (name, xml) => {
+    const changed = xml.replace(`base="${DIFFUSION_RESTREINTE_CODE}"`, `base="${NON_PROTEGE_CODE}"`);
+    if (changed !== xml) {
+      baseLabelPart = name;
+    }
+    return changed;
+  });
+  expect((await inspectDocx(Buffer.from(lowered))).baseLabel).toBe(NON_PROTEGE_CODE);
+  const documentId = await storedAsNewDocument(lowered);
+
+  await openDocument(page, documentId);
+
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
+    .toContainEqual(changedSinceSigning('document-server', [baseLabelPart]));
 });
 
 test('a file stored before signing existed is logged as unsigned, opens, and is signed at its next save', async ({ page }) => {

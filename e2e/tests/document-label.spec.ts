@@ -34,5 +34,8 @@ test('the document label follows its base label and portions, and is stored per 
     ],
   });
   expect(docx.bindableParts).toContain('word/header1.xml');
-  expect([...(docx.bindings[0]?.references ?? [])].sort()).toEqual(docx.bindableParts.map((part) => `pack:///${part}`));
+  // A URI cannot hold brackets: the address of the content types
+  // percent-encodes them.
+  expect([...(docx.bindings[0]?.references ?? [])].sort()).toEqual(docx.bindableParts.map((part) => `pack:///${encodeURI(part)}`).sort());
+  expect(docx.bindings[0]?.references).toContain('pack:///%5BContent_Types%5D.xml');
 });

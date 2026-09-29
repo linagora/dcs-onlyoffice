@@ -69,8 +69,10 @@ export interface PackageInspection {
   // The code of the document label the panel last wrote beside the base
   // label, which it rewrites when it finds it stale; null without one.
   documentLabel: string | null;
-  // Present parts that ADatP-4778.2 Tables 5-2 and 5-3 require a whole-document
-  // binding to reference.
+  // Present parts that a whole-document binding references: those of
+  // ADatP-4778.2 Tables 5-2 and 5-3 and the others that can hold content, by
+  // format; the Custom XML parts but the binding's; the relationship parts
+  // and the content types.
   bindableParts: string[];
 }
 
@@ -100,7 +102,30 @@ const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocumen
 export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 export const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
 export const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
-const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments|commentsExtended)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
+// ADatP-4778.2 Tables 5-2 and 5-3 for WordprocessingML, and the parts that can
+// hold a text document's content that the tables leave out, as
+// docs/research/labelling-standards.md, section 4.9, lists them.
+const BINDABLE_PART = new RegExp(
+  '^(' +
+    [
+      String.raw`word/(document|styles|footnotes|endnotes|comments|commentsExtended)\.xml`,
+      String.raw`word/(header|footer)\d*\.xml`,
+      String.raw`word/media/.+`,
+      String.raw`docProps/(core|app|custom)\.xml`,
+      String.raw`word/(people|commentsIds|commentsExtensible)\.xml`,
+      String.raw`word/glossary/(document|styles)\.xml`,
+      String.raw`word/charts/(chart|chartEx|colors|styles?)\d+\.xml`,
+      String.raw`word/drawings/[^/]+\.xml`,
+      String.raw`word/diagrams/[^/]+\.xml`,
+      String.raw`word/(embeddings|ink|activeX)/.+`,
+      String.raw`docProps/thumbnail\.[^/]+`,
+    ].join('|') +
+    ')$',
+);
+// The parts a whole-document binding references in either format: the
+// relationship parts, the content types, and the Custom XML parts and their
+// properties parts.
+const PACKAGE_PART = /^((.+\/)?_rels\/[^/]*\.rels|\[Content_Types\]\.xml|customXml\/[^/]+)$/;
 
 export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   const zip = await JSZip.loadAsync(docx);
@@ -113,11 +138,13 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   };
 }
 
-// `bindablePart` matches the parts of the tables for the package's format.
+// `bindablePart` matches the parts that can hold content in the package's
+// format.
 export async function inspectPackage(zip: JSZip, bindablePart: RegExp): Promise<PackageInspection> {
   const allTexts: string[] = [];
   const portionParts: PortionPart[] = [];
   const bindings: DocumentBinding[] = [];
+  const bindingParts: string[] = [];
   let baseLabel: string | null = null;
   let documentLabel: string | null = null;
   for (const name of Object.keys(zip.files).sort()) {
@@ -135,6 +162,7 @@ export async function inspectPackage(zip: JSZip, bindablePart: RegExp): Promise<
       const binding = readBinding(content);
       if (binding !== null) {
         bindings.push(binding);
+        bindingParts.push(name);
       }
       const root = parse(content);
       if (root.namespaceURI === DOCUMENT_NAMESPACE && root.localName === 'document') {
@@ -151,7 +179,7 @@ export async function inspectPackage(zip: JSZip, bindablePart: RegExp): Promise<
     baseLabel,
     documentLabel,
     bindableParts: Object.keys(zip.files)
-      .filter((name) => zip.files[name]?.dir === false && bindablePart.test(name))
+      .filter((name) => zip.files[name]?.dir === false && (bindablePart.test(name) || PACKAGE_PART.test(name)) && !bindingParts.includes(name))
       .sort(),
   };
 }
