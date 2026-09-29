@@ -3,6 +3,7 @@ import { browserFetch, openNewDocument, requestForceSave } from './documents.ts'
 import { type DocxInspection, inspectDocx } from './docx.ts';
 import type { MarkedText } from './marker.ts';
 import { pluginPanel } from './plugin.ts';
+import { inspectXlsx, type XlsxInspection } from './xlsx.ts';
 
 export interface NewPortion {
   marking: string;
@@ -78,26 +79,31 @@ export async function leaveAndWaitForSave(editors: Page[], documentId: string, p
 }
 
 // Force-saves until the stored file shows what the test waits for.
-export async function forceSavedDocx(
-  page: Page,
-  documentId: string,
-  isReady: (docx: DocxInspection) => boolean,
-): Promise<DocxInspection> {
-  let docx: DocxInspection | null = null;
+export async function forceSavedDocx(page: Page, documentId: string, isReady: (docx: DocxInspection) => boolean): Promise<DocxInspection> {
+  return forceSaved(page, documentId, inspectDocx, isReady);
+}
+
+// Force-saves a workbook until its stored file shows what the test waits for.
+export async function forceSavedXlsx(page: Page, documentId: string, isReady: (xlsx: XlsxInspection) => boolean): Promise<XlsxInspection> {
+  return forceSaved(page, documentId, inspectXlsx, isReady);
+}
+
+async function forceSaved<T>(page: Page, documentId: string, inspect: (file: Buffer) => Promise<T>, isReady: (inspected: T) => boolean): Promise<T> {
+  let inspected: T | null = null;
   await expect
     .poll(
       async () => {
         await requestForceSave(page, documentId);
-        docx = await storedDocx(page, documentId);
-        return isReady(docx);
+        inspected = await inspect(await storedFile(page, documentId));
+        return isReady(inspected);
       },
       { timeout: 60_000, intervals: [2_000] },
     )
     .toBe(true);
-  if (docx === null) {
+  if (inspected === null) {
     throw new Error('No saved document');
   }
-  return docx;
+  return inspected;
 }
 
 // A portion as its document's saved file holds it: the code of its label and

@@ -2,6 +2,7 @@ import { test as base, type Page, type TestInfo } from '@playwright/test';
 import { DEMO_ACCOUNTS, type DemoAccount, signIn } from './accounts.ts';
 import { browserFetch, CREATED_DOCUMENT, watchEditorLoads } from './documents.ts';
 import { DOCX_TYPE } from './docx.ts';
+import { XLSX_TYPE } from './xlsx.ts';
 
 export { expect } from '@playwright/test';
 
@@ -21,9 +22,9 @@ export const test = base.extend<SignedInFixtures>({
   },
 });
 
-// Evidence for the stop report: the stored DOCX of every document the test
-// created, as the portal serves it once the test is over. A test that left the
-// portal (signed out, for instance) has none to attach.
+// Evidence for the stop report: the stored DOCX or XLSX of every document the
+// test created, as the portal serves it once the test is over. A test that
+// left the portal (signed out, for instance) has none to attach.
 async function attachCreatedDocuments(page: Page, portalUrl: string | null, testInfo: TestInfo): Promise<void> {
   if (portalUrl === null || page.isClosed() || !page.url().startsWith(portalUrl)) {
     return;
@@ -31,7 +32,8 @@ async function attachCreatedDocuments(page: Page, portalUrl: string | null, test
   for (const annotation of testInfo.annotations.filter((candidate) => candidate.type === CREATED_DOCUMENT)) {
     const response = await browserFetch(page, `/documents/${annotation.description}/download`);
     if (response.status === 200) {
-      await testInfo.attach(`${annotation.description}.docx`, { body: response.body, contentType: DOCX_TYPE });
+      const workbook = response.contentType === XLSX_TYPE;
+      await testInfo.attach(`${annotation.description}${workbook ? '.xlsx' : '.docx'}`, { body: response.body, contentType: workbook ? XLSX_TYPE : DOCX_TYPE });
     }
   }
 }
