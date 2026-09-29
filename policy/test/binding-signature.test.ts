@@ -289,9 +289,13 @@ describe('the signature of the document label binding', () => {
     assert.equal(verification.manifest, `${present.length}/${present.length}`);
   });
 
-  it('references the Tables 5-2 and 5-3 parts a workbook holds, chart styles under both names, as xmlsec1 verifies', async () => {
+  // A workbook that holds, besides its template's parts, every part that can
+  // hold its content: those of ADatP-4778.2 Tables 5-2 and 5-3, chart styles
+  // under both their names, and those the tables leave out; with its theme,
+  // calculation chain and printer settings, which hold none.
+  async function workbookWithEveryPart(): Promise<Uint8Array> {
     const labelled = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE, { template: WORKBOOK_TEMPLATE });
-    const xlsx = await withParts(labelled, {
+    return withParts(labelled, {
       'xl/worksheets/sheet2.xml': '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
       'xl/charts/chart1.xml': '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>',
       'xl/charts/colors1.xml': '<cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle"/>',
@@ -303,14 +307,34 @@ describe('the signature of the document label binding', () => {
       'xl/comments1.xml': '<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
       'xl/media/image1.png': 'Fictional picture',
       'docProps/custom.xml': '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"/>',
-      // Parts the tables leave out.
-      'xl/theme/theme1.xml': '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>',
-      'xl/drawings/drawing1.xml': '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"/>',
+      // Parts the tables leave out that hold content.
       'xl/threadedComments/threadedComment1.xml': '<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"/>',
+      'xl/persons/person.xml': '<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"/>',
+      'xl/drawings/drawing1.xml': '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"/>',
+      'xl/drawings/vmlDrawing1.vml': '<xml xmlns:v="urn:schemas-microsoft-com:vml"/>',
+      'xl/diagrams/data1.xml': '<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>',
+      'xl/charts/chartEx1.xml': '<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"/>',
       'xl/pivotCache/pivotCacheDefinition1.xml': '<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/pivotCache/pivotCacheRecords1.xml': '<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
       'xl/tables/table1.xml': '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/slicers/slicer1.xml': '<slicers xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"/>',
+      'xl/slicerCaches/slicerCache1.xml': '<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"/>',
+      'xl/externalLinks/externalLink1.xml': '<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/richData/rdrichvalue.xml': '<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"/>',
+      'xl/metadata.xml': '<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
       'xl/chartsheets/sheet1.xml': '<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/queryTables/queryTable1.xml': '<queryTable xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/connections.xml': '<connections xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/embeddings/oleObject1.bin': 'Fictional embedded object',
+      // Parts that hold no content.
+      'xl/theme/theme1.xml': '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>',
+      'xl/calcChain.xml': '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+      'xl/printerSettings/printerSettings1.bin': 'Fictional printer settings',
     });
+  }
+
+  it('references every part of a workbook that can hold its content, but not its theme, calculation chain or printer settings, as xmlsec1 verifies', async () => {
+    const xlsx = await workbookWithEveryPart();
 
     const { statusCode, body } = await sign(xlsx, SECRET, XLSX_TYPE);
 
@@ -321,19 +345,53 @@ describe('the signature of the document label binding', () => {
       'docProps/core.xml',
       'docProps/custom.xml',
       'xl/charts/chart1.xml',
+      'xl/charts/chartEx1.xml',
       'xl/charts/colors1.xml',
       'xl/charts/style1.xml',
       'xl/charts/styles2.xml',
+      'xl/chartsheets/sheet1.xml',
       'xl/comments1.xml',
+      'xl/connections.xml',
+      'xl/diagrams/data1.xml',
+      'xl/drawings/drawing1.xml',
+      'xl/drawings/vmlDrawing1.vml',
+      'xl/embeddings/oleObject1.bin',
+      'xl/externalLinks/externalLink1.xml',
       'xl/media/image1.png',
+      'xl/metadata.xml',
+      'xl/persons/person.xml',
+      'xl/pivotCache/pivotCacheDefinition1.xml',
+      'xl/pivotCache/pivotCacheRecords1.xml',
       'xl/pivotTables/pivotTable1.xml',
+      'xl/queryTables/queryTable1.xml',
+      'xl/richData/rdrichvalue.xml',
       'xl/sharedStrings.xml',
+      'xl/slicerCaches/slicerCache1.xml',
+      'xl/slicers/slicer1.xml',
       'xl/styles.xml',
+      'xl/tables/table1.xml',
+      'xl/threadedComments/threadedComment1.xml',
       'xl/workbook.xml',
       'xl/worksheets/sheet1.xml',
       'xl/worksheets/sheet2.xml',
     ]);
-    assert.deepEqual([verification.status, verification.manifest], [0, '15/15']);
+    assert.deepEqual([verification.status, verification.manifest], [0, '33/33']);
+    // Annex A has a reference to data that is not XML state its content type.
+    const { xml } = signedOf(body);
+    assert.match(xml, /URI="pack:\/\/\/xl\/embeddings\/oleObject1\.bin" xmime:contentType="application\/vnd\.openxmlformats-officedocument\.oleObject"/);
+    assert.match(xml, /URI="pack:\/\/\/xl\/drawings\/vmlDrawing1\.vml" xmime:contentType="application\/vnd\.openxmlformats-officedocument\.vmlDrawing"/);
+  });
+
+  it('names a threaded comment, a pivot cache, a drawing or a table of a workbook changed since signing', async () => {
+    const signed = await signedPackage(await workbookWithEveryPart(), server, XLSX_TYPE);
+
+    for (const part of ['xl/threadedComments/threadedComment1.xml', 'xl/pivotCache/pivotCacheRecords1.xml', 'xl/drawings/drawing1.xml', 'xl/tables/table1.xml']) {
+      const changed = await withChangedPart(signed, part, (xml) => `${xml}<!-- changed after signing -->`);
+      assert.deepEqual(await verdictOf(changed, SECRET, XLSX_TYPE), {
+        statusCode: 200,
+        body: { status: 'altered', reason: 'Parts changed since signing', changedParts: [part], labelInformationPart: null },
+      });
+    }
   });
 
   // A DIFFUSION RESTREINTE workbook holding SPECIAL FRANCE portion parts, and
