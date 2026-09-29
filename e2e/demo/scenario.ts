@@ -31,8 +31,10 @@ const WITH_MORE_RESTRICTIVE_PORTIONS = `${DIFFUSION_RESTREINTE} – CONTIENT DES
 // body's elements, and its text: content that went through ONLYOFFICE in
 // clear, which the French officer protects.
 const REPORT_TRANSPORT = { position: 6, text: 'Two fictional convoys a day link the rear base and the command posts.' };
-// The demo SPIF's code for DIFFUSION RESTREINTE released to NATO.
+// The demo SPIF's codes for DIFFUSION RESTREINTE released to NATO, and for
+// SPECIAL FRANCE.
 const RELEASABLE_TO_NATO_CODE = 'DEMO-FR:2/2.1';
+const SPECIAL_FRANCE_CODE = 'DEMO-FR:2/1.1';
 const WORKBOOK_TEMPLATE = 'exercise-northwind-logistics.xlsx';
 // Empty cells of the workbook template's sheet, where the portions go, wide
 // and high enough for a placeholder to show its whole marking.
@@ -146,6 +148,12 @@ async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOpt
 
   await test.step('8. The stored file carries the page marking and a binding that xmlsec1 verifies', async () => {
     await leaveAndWaitForSave([alice, bob], documentId, 1);
+    // The save the portal forced when the base label changed may hold the
+    // first portion alone, as it stood then: the session's last save holds it
+    // SPECIAL FRANCE.
+    await expect
+      .poll(async () => (await storedDocx(alice, documentId)).portionParts.map((part) => part.label), { timeout: 90_000, intervals: [3_000] })
+      .toEqual([SPECIAL_FRANCE_CODE]);
     const stored = await storedDocx(alice, documentId);
     expect(new Set(pageMarkingTexts(stored))).toEqual(new Set([WITH_MORE_RESTRICTIVE_PORTIONS]));
     const bindable = stored.bindableParts;
