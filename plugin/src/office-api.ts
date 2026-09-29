@@ -117,8 +117,34 @@ export interface InternalUserProtectedRange {
   asc_getRef(): string | null;
 }
 
+// One of a sheet's six header and footer strings.
+export interface InternalHeaderFooterData {
+  getStr(): string;
+}
+
+// A sheet's headers and footers, whose setters the editor's history records.
+export interface InternalHeaderFooter {
+  getOddHeader(): InternalHeaderFooterData | null;
+  getOddFooter(): InternalHeaderFooterData | null;
+  getEvenHeader(): InternalHeaderFooterData | null;
+  getEvenFooter(): InternalHeaderFooterData | null;
+  getFirstHeader(): InternalHeaderFooterData | null;
+  getFirstFooter(): InternalHeaderFooterData | null;
+  getDifferentFirst(): boolean | null;
+  getDifferentOddEven(): boolean | null;
+  setOddHeader(value: string): void;
+  setOddFooter(value: string): void;
+  setEvenHeader(value: string): void;
+  setEvenFooter(value: string): void;
+  setFirstHeader(value: string): void;
+  setFirstFooter(value: string): void;
+  setDifferentFirst(value: boolean): void;
+  setDifferentOddEven(value: boolean): void;
+}
+
 export interface InternalWorksheet {
   userProtectedRanges: InternalUserProtectedRange[] | null;
+  headerFooter: InternalHeaderFooter;
   // Whether a range intersects a user protected range; with `notCheckUser`,
   // whoever may edit it.
   isUserProtectedRangesIntersection(range: unknown, userId: null, notCheckUser: true): boolean;

@@ -26,6 +26,8 @@ export interface PageMarkingScope {
   alias: string;
   text: string;
   color: string | null;
+  // The centre section that shows it in a workbook's headers and footers.
+  headerFooterCentre: string;
 }
 
 // What writing the document label writes: its parts and its page marking.
@@ -57,15 +59,26 @@ export interface HeaderFooterSnapshot {
   blocks: (ControlSnapshot | null)[] | null;
 }
 
+// A sheet's six header and footer strings, as far as the page marking goes:
+// the centre section of each, null where the sheet has none, and whether
+// first and even pages have their own.
+export interface SheetSnapshot {
+  centres: (string | null)[];
+  differentFirst: boolean;
+  differentOddEven: boolean;
+}
+
 // What reading a document gives: its placeholders, a text document's content
 // controls or a workbook's user protected ranges, the plugin's parts, and
-// the headers and footers where the page marking goes.
+// where the page marking goes, a text document's headers and footers or a
+// workbook's sheets.
 export interface DocumentSnapshot {
   controls: { tag: string; internalId: string }[];
   ranges: { title: string; reference: string }[];
   portionParts: string[];
   documentParts: string[];
   headersAndFooters: HeaderFooterSnapshot[];
+  sheets: SheetSnapshot[];
 }
 
 // What a command that writes gives: whether it wrote, or, in a workbook,
