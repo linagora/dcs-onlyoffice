@@ -8,7 +8,7 @@ import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedXlsx, storedFile } from './support/portions.ts';
 import { addSheet, insertWorkbookPortion } from './support/workbooks.ts';
-import { HEADER_FOOTER_NAMES, type XlsxInspection } from './support/xlsx.ts';
+import { everySheetShows, HEADER_FOOTER_NAMES } from './support/xlsx.ts';
 
 const WORKBOOK_TEMPLATE = 'exercise-northwind-logistics.xlsx';
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
@@ -28,20 +28,6 @@ const DIFFUSION_RESTREINTE_HEADER = '&LExercise NORTHWIND 26 - fictional&C&"-,Bo
 const DIFFUSION_RESTREINTE_FOOTER = '&C&"-,Bold"&KE8590CDIFFUSION RESTREINTE&RFictional workbook';
 // Microsoft Excel's limit for each header and footer string, codes included.
 const EXCEL_LIMIT = 255;
-
-// Whether every sheet of a stored workbook shows a centre section in its six
-// headers and footers, with the flags that make them count.
-function everySheetShows(xlsx: XlsxInspection, centre: string): boolean {
-  return (
-    xlsx.worksheets.length > 0 &&
-    xlsx.worksheets.every(
-      ({ headersAndFooters }) =>
-        headersAndFooters.differentFirst &&
-        headersAndFooters.differentOddEven &&
-        HEADER_FOOTER_NAMES.every((name) => headersAndFooters.strings[name]?.includes(centre) === true),
-    )
-  );
-}
 
 async function labelledWorkbook(page: Page, marking: string): Promise<string> {
   const documentId = await openNewDocument(page, WORKBOOK_TEMPLATE);
