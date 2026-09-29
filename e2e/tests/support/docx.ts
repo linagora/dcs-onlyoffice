@@ -67,12 +67,24 @@ export interface DocxInspection {
   // Present parts that ADatP-4778.2 Tables 5-2 and 5-3 require a whole-document
   // binding to reference.
   bindableParts: string[];
+  // The custom document properties, where the sensitivity label goes.
+  customProperties: CustomProperty[];
+}
+
+export interface CustomProperty {
+  fmtid: string | null;
+  name: string;
+  // The value's variant type, such as lpwstr.
+  type: string | null;
+  value: string;
 }
 
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const PACKAGE_RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/relationships';
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
+const CUSTOM_PROPERTIES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties';
+const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
 export const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 export const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
 const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
@@ -113,7 +125,26 @@ export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
     bindableParts: Object.keys(zip.files)
       .filter((name) => zip.files[name]?.dir === false && BINDABLE_PART.test(name))
       .sort(),
+    customProperties: await readCustomProperties(zip),
   };
+}
+
+async function readCustomProperties(zip: JSZip): Promise<CustomProperty[]> {
+  const xml = await zip.file('docProps/custom.xml')?.async('string');
+  if (xml === undefined) {
+    return [];
+  }
+  return elements(parse(xml), CUSTOM_PROPERTIES_NAMESPACE, 'property').map((property) => {
+    const [value] = childElements(property).filter((child) => child.namespaceURI === VARIANT_TYPES_NAMESPACE);
+    return { fmtid: property.getAttribute('fmtid'), name: property.getAttribute('name') ?? '', type: value?.localName ?? null, value: value?.textContent ?? '' };
+  });
+}
+
+// The properties of the sensitivity label `labelId`, by attribute name
+// (MSIP_Label_<label id>_<attribute>).
+export function sensitivityLabelProperties(docx: DocxInspection, labelId: string): Record<string, string> {
+  const prefix = `MSIP_Label_${labelId}_`;
+  return Object.fromEntries(docx.customProperties.filter((property) => property.name.startsWith(prefix)).map((property) => [property.name.slice(prefix.length), property.value]));
 }
 
 function readContentControl(sdt: Element): ContentControl {

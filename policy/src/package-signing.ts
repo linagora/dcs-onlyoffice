@@ -5,6 +5,7 @@ import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
+import { type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -14,6 +15,7 @@ const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/
 const PLACEHOLDER_PART = /^word\/(document|header\d*|footer\d*)\.xml$/;
 // Saved documents, pictures included, stay well below this.
 const PACKAGE_LIMIT_BYTES = 100 * 1024 * 1024;
+const STORED_CUSTOM_PROPERTIES_HEADER = 'x-stored-custom-properties';
 
 // The document label that a base label and portion labels give, as the panel
 // computes it: its code and its ADatP-4774 label element.
@@ -26,6 +28,9 @@ export interface PackageSignatureOptions {
   // The code of the label an ADatP-4774 label element designates, null when
   // it designates no valid label.
   codeOfLabelXml: (xml: string) => string | null;
+  // What the label mapping gives a document label, or a document without
+  // one; null without a mapping.
+  sensitivityLabelOf: (documentLabelCode: string | null) => MappedSensitivityLabel | null;
   now: () => Date;
 }
 
@@ -68,7 +73,10 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     }
     const { binding } = sole;
     if (binding === null) {
-      return { signed: null, replacement: null };
+      // No document label, no sensitivity label: one the file carries goes.
+      const unlabelled = options.sensitivityLabelOf(null);
+      const { writtenParts } = unlabelled === null ? { writtenParts: [] } : await writeSensitivityLabel(zip, unlabelled, options.now(), storedCustomProperties(request));
+      return { signed: null, parts: await partsWritten(zip, writtenParts), replacement: null };
     }
     const computed = options.documentLabelOf(labels.baseCode, labels.portionCodes);
     if (!computed.ok) {
@@ -76,9 +84,19 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     }
     const current = binding.root.getElementsByTagNameNS(LABEL_NAMESPACE, 'originatorConfidentialityLabel')[0] ?? null;
     const before = current === null ? null : options.codeOfLabelXml(current.toString());
+    // The sensitivity label goes in parts the signature covers, so it is
+    // written first (ADR 0005).
+    const mapped = options.sensitivityLabelOf(computed.code);
+    const { customPropertiesPart, writtenParts } =
+      mapped === null ? { customPropertiesPart: null, writtenParts: [] } : await writeSensitivityLabel(zip, mapped, options.now(), storedCustomProperties(request));
     const references = Array.from(binding.root.getElementsByTagNameNS(BINDING_NAMESPACE, 'DataReference'))
       .map((reference) => packPartName(reference.getAttribute('URI') ?? ''))
       .filter((name): name is string => name !== null);
+    // The binding references the custom properties part, which ADatP-4778.2
+    // Table 5-3 lists, even when it was written just now.
+    if (customPropertiesPart !== null && !references.includes(customPropertiesPart)) {
+      references.push(customPropertiesPart);
+    }
     const parts = await partsOf(zip, references);
     const missing = references.filter((name) => !parts.has(name));
     if (missing.length > 0) {
@@ -86,6 +104,8 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     }
     return {
       signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, options.signer, options.now()) },
+      // The other parts written, which the portal stores with the binding.
+      parts: await partsWritten(zip, writtenParts),
       replacement: before === computed.code ? null : { before, after: computed.code },
     };
   });
@@ -110,6 +130,19 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     const names = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
     return verifyDocumentBinding(bindingXml, await partsOf(zip, names), options.signer.certificate);
   });
+}
+
+// The parts written, as the portal stores them.
+async function partsWritten(zip: JSZip, names: string[]): Promise<{ part: string; xml: string }[]> {
+  return Promise.all(names.map(async (part) => ({ part, xml: (await zip.file(part)?.async('string')) ?? '' })));
+}
+
+// The custom properties part of the file as stored before this save, which the
+// portal sends base64-encoded in a header, empty when the stored file has
+// none; null when it sends no header.
+function storedCustomProperties(request: FastifyRequest): string | null {
+  const header = request.headers[STORED_CUSTOM_PROPERTIES_HEADER];
+  return typeof header === 'string' ? Buffer.from(header, 'base64').toString('utf8') : null;
 }
 
 // The package a request from the portal carries, or why it is refused.

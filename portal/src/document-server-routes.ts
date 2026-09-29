@@ -155,10 +155,21 @@ async function storeCallbackFile(
   if (!response.ok) {
     return 'failed';
   }
-  const content = await services.signatures.signed(await refreshBinding(new Uint8Array(await response.arrayBuffer())), documentId);
+  // The file as stored before this save, whose labels the journal compares
+  // and whose sensitivity label keeps its date across the session's saves.
+  const stored = await readFile(document.filePath).then(
+    (bytes) => ({ ok: true as const, bytes }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  const content = await services.signatures.signed(await refreshBinding(new Uint8Array(await response.arrayBuffer())), documentId, stored.ok ? stored.bytes : null);
   // Reading the labels must not cost the save: unreadable ones skip the log.
   const [before, after] = await Promise.all([
-    readLabels(log, documentId, async () => fileLabelsOf(await readFile(document.filePath))),
+    readLabels(log, documentId, async () => {
+      if (!stored.ok) {
+        throw stored.error;
+      }
+      return fileLabelsOf(stored.bytes);
+    }),
     readLabels(log, documentId, async () => fileLabelsOf(content)),
   ]);
   // The Document Server names only the last editor of a save: the people

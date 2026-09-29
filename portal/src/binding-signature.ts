@@ -3,9 +3,24 @@ import JSZip from 'jszip';
 import { DOCX_CONTENT_TYPE } from './documents.ts';
 
 const SIGNATURE_TIMEOUT_MS = 30_000;
+const STORED_CUSTOM_PROPERTIES_HEADER = 'x-stored-custom-properties';
+// Beyond this, once encoded, a header could exceed what the policy service
+// accepts.
+const STORED_CUSTOM_PROPERTIES_LIMIT = 8 * 1024;
+// The portal stores what ONLYOFFICE saves, which keeps the custom properties
+// in this part.
+const CUSTOM_PROPERTIES_PART = 'docProps/custom.xml';
+
+interface WrittenPart {
+  part: string;
+  xml: string;
+}
 
 interface SignatureAnswer {
-  signed: { part: string; xml: string } | null;
+  signed: WrittenPart | null;
+  // The other parts the policy service wrote, such as the custom properties
+  // that hold the sensitivity label (ADR 0005).
+  parts: WrittenPart[];
   replacement: { before: string | null; after: string } | null;
 }
 
@@ -37,10 +52,14 @@ export class BindingSignatures {
     this.#log = log;
   }
 
-  async signed(docx: Uint8Array, documentId: string): Promise<Uint8Array> {
+  // `stored` is the file as stored before this save: the editor never sees
+  // the sensitivity label the policy service writes, so the label's date and
+  // action id come from the stored file's custom properties.
+  async signed(docx: Uint8Array, documentId: string, stored: Uint8Array | null): Promise<Uint8Array> {
+    const headers = await this.#storedPropertiesHeader(stored, documentId);
     let answer: SignatureAnswer;
     try {
-      answer = await this.#ask('/bindings/sign', docx, readSignatureAnswer);
+      answer = await this.#ask('/bindings/sign', docx, readSignatureAnswer, headers);
     } catch (error: unknown) {
       this.#log.error({ documentId, err: error }, 'The binding of a save could not be signed');
       return docx;
@@ -52,7 +71,9 @@ export class BindingSignatures {
       return docx;
     }
     const zip = await JSZip.loadAsync(docx);
-    zip.file(answer.signed.part, answer.signed.xml);
+    for (const written of [...answer.parts, answer.signed]) {
+      zip.file(written.part, written.xml);
+    }
     return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   }
 
@@ -75,10 +96,32 @@ export class BindingSignatures {
     }
   }
 
-  async #ask<T>(route: string, docx: Uint8Array, read: (body: unknown) => T | null): Promise<T> {
+  // The header that carries the stored file's custom properties, empty when
+  // it has none; no header when they cannot be read or are too large, and the
+  // policy service then goes by the saved file.
+  async #storedPropertiesHeader(stored: Uint8Array | null, documentId: string): Promise<Record<string, string>> {
+    if (stored === null) {
+      return {};
+    }
+    let properties: Uint8Array | null;
+    try {
+      properties = (await (await JSZip.loadAsync(stored)).file(CUSTOM_PROPERTIES_PART)?.async('uint8array')) ?? null;
+    } catch (error: unknown) {
+      this.#log.warn({ documentId, err: error }, 'The custom properties of a stored file could not be read');
+      return {};
+    }
+    const encoded = properties === null ? '' : Buffer.from(properties).toString('base64');
+    if (encoded.length > STORED_CUSTOM_PROPERTIES_LIMIT) {
+      this.#log.warn({ documentId, bytes: properties?.length }, 'The custom properties of a stored file are too large to send');
+      return {};
+    }
+    return { [STORED_CUSTOM_PROPERTIES_HEADER]: encoded };
+  }
+
+  async #ask<T>(route: string, docx: Uint8Array, read: (body: unknown) => T | null, headers: Record<string, string> = {}): Promise<T> {
     const response = await fetch(new URL(route, this.#policyUrl), {
       method: 'POST',
-      headers: { authorization: `Bearer ${this.#secret}`, 'content-type': DOCX_CONTENT_TYPE },
+      headers: { ...headers, authorization: `Bearer ${this.#secret}`, 'content-type': DOCX_CONTENT_TYPE },
       body: docx,
       signal: AbortSignal.timeout(SIGNATURE_TIMEOUT_MS),
     });
@@ -107,14 +150,22 @@ function readVerification(body: unknown): BindingVerification | null {
 }
 
 function readSignatureAnswer(body: unknown): SignatureAnswer | null {
-  if (typeof body !== 'object' || body === null || !('signed' in body) || !('replacement' in body)) {
+  if (typeof body !== 'object' || body === null || !('signed' in body) || !('parts' in body) || !('replacement' in body)) {
     return null;
   }
-  const { signed, replacement } = body;
-  const signedPart =
-    typeof signed === 'object' && signed !== null && 'part' in signed && typeof signed.part === 'string' && 'xml' in signed && typeof signed.xml === 'string'
-      ? { part: signed.part, xml: signed.xml }
-      : null;
+  const { signed, parts, replacement } = body;
+  const signedPart = writtenPartOf(signed);
+  if (!Array.isArray(parts)) {
+    return null;
+  }
+  const writtenParts: WrittenPart[] = [];
+  for (const part of parts as unknown[]) {
+    const written = writtenPartOf(part);
+    if (written === null) {
+      return null;
+    }
+    writtenParts.push(written);
+  }
   const replaced =
     typeof replacement === 'object' &&
     replacement !== null &&
@@ -127,5 +178,11 @@ function readSignatureAnswer(body: unknown): SignatureAnswer | null {
   if ((signed !== null && signedPart === null) || (replacement !== null && replaced === null)) {
     return null;
   }
-  return { signed: signedPart, replacement: replaced };
+  return { signed: signedPart, parts: writtenParts, replacement: replaced };
+}
+
+function writtenPartOf(value: unknown): WrittenPart | null {
+  return typeof value === 'object' && value !== null && 'part' in value && typeof value.part === 'string' && 'xml' in value && typeof value.xml === 'string'
+    ? { part: value.part, xml: value.xml }
+    : null;
 }
