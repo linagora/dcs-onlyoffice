@@ -1,4 +1,13 @@
-import type { CommandScope, ControlSnapshot, DocumentSnapshot, HeaderFooterKind, HeaderFooterSnapshot, PortionBlockScope, PortionWriteScope } from './commands.ts';
+import type {
+  CommandScope,
+  ControlSnapshot,
+  DocumentSnapshot,
+  HeaderFooterKind,
+  HeaderFooterSnapshot,
+  PortionBlockScope,
+  PortionWriteScope,
+  WriteOutcome,
+} from './commands.ts';
 import type {
   ApiBlockLvlSdt,
   ApiContentControl,
@@ -20,9 +29,9 @@ declare const Asc: { scope: CommandScope };
 
 // One command writes a new portion, a portion's change or its deletion, if
 // there is one, with the document label and its page marking, so that a
-// single undo reverts all of them. False when the portion to change or delete
-// is gone.
-export function writeLabellingCommand(): boolean {
+// single undo reverts all of them. Nothing is written when the portion to
+// change or delete is gone.
+export function writeLabellingCommand(): WriteOutcome {
   const scope = Asc.scope;
   const document = Api.GetDocument();
   const parts = document.GetCustomXmlParts();
@@ -189,10 +198,10 @@ export function writeLabellingCommand(): boolean {
     insertPortionBlock(scope.portion);
   }
   if (scope.portion?.kind === 'change' && !changePortionBlock(scope.portion)) {
-    return false;
+    return 'not-written';
   }
   if (scope.portion?.kind === 'deletion' && !deletePortionBlock(scope.portion)) {
-    return false;
+    return 'not-written';
   }
   for (const replacement of scope.replacements) {
     for (const existing of parts.GetByNamespace(replacement.namespace)) {
@@ -214,7 +223,7 @@ export function writeLabellingCommand(): boolean {
       }
     }
   }
-  return true;
+  return 'written';
 }
 
 export function readDocumentCommand(): DocumentSnapshot {
@@ -254,6 +263,7 @@ export function readDocumentCommand(): DocumentSnapshot {
       tag: control.GetTag(),
       internalId: control.GetInternalId(),
     })),
+    ranges: [],
     portionParts: parts.GetByNamespace(Asc.scope.portionNamespace).map((part) => part.GetXml()),
     documentParts: parts.GetByNamespace(Asc.scope.documentNamespace).map((part) => part.GetXml()),
     headersAndFooters,

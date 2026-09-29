@@ -399,6 +399,7 @@ export function usePortionEdit(
   envelopes: EnvelopeClient | null,
   refresh: () => Promise<DocumentState>,
   baseLabelCode: string | null,
+  editor: EditorType | null,
 ): PortionEditView {
   const [underWay, setUnderWay] = useState<(PortionEdit & { leaseMs: number }) | null>(null);
   const [notice, setNotice] = useState<PortionNotice | null>(null);
@@ -548,7 +549,8 @@ export function usePortionEdit(
     const version = nextVersion(portion);
     return writeUnderLock(
       underWay,
-      async (others) => (envelopes === null ? { status: 'not-written' } : changePortion({ portion, label, text }, others, envelopes)),
+      async (others) =>
+        envelopes === null || editor === null ? { status: 'not-written' } : changePortion({ portion, label, text }, others, envelopes, editor),
       version,
       async (id) => reportPortionChange(id, portion.id, { label: underWay.label.code, version: portion.version }, { label: label.code, version }),
     );
@@ -563,7 +565,7 @@ export function usePortionEdit(
     const { portion, label } = underWay;
     return writeUnderLock(
       underWay,
-      async (others) => deletePortion(portion, label.policy, others),
+      async (others) => (editor === null ? { status: 'not-written' } : deletePortion(portion, label.policy, others, editor)),
       nextVersion(portion),
       async (id) => reportPortionDeletion(id, portion.id, { label: label.code, version: portion.version }),
     );

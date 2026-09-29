@@ -100,11 +100,67 @@ export interface OfficeApi {
   HexColor(hex: string): ApiColor;
 }
 
+// A user protected range of the spreadsheet editor, and one of its users.
+export interface ApiProtectedRangeUserInfo {
+  GetId(): string;
+}
+
+export interface ApiProtectedRange {
+  GetAllUsers(): ApiProtectedRangeUserInfo[] | null;
+  DeleteUser(id: string): boolean;
+}
+
+// The spreadsheet editor's internal model, which no public API reaches:
+// undocumented, it may change with any version of ONLYOFFICE (ADR 0006).
+export interface InternalUserProtectedRange {
+  name: string;
+  asc_getRef(): string | null;
+}
+
+export interface InternalWorksheet {
+  userProtectedRanges: InternalUserProtectedRange[] | null;
+  // Whether a range intersects a user protected range; with `notCheckUser`,
+  // whoever may edit it.
+  isUserProtectedRangesIntersection(range: unknown, userId: null, notCheckUser: true): boolean;
+}
+
+export interface InternalRange {
+  bbox: unknown;
+  // The merged area it intersects, null when none.
+  hasMerged(): unknown;
+}
+
+export interface ApiRange {
+  // A single cell's value, or a row of values per row of the range.
+  GetValue(): unknown;
+  // A single cell's formula, starting with "=", or its value.
+  GetFormula(): string;
+  // Calls back with each of the range's cells that holds anything.
+  ForEach(callback: (cell: ApiRange) => void): boolean;
+  SetValue(value: string): boolean;
+  Merge(across: boolean): boolean;
+  SetBold(bold: boolean): unknown;
+  SetWrap(wrap: boolean): unknown;
+  SetAlignHorizontal(alignment: 'center'): unknown;
+  SetAlignVertical(alignment: 'center'): unknown;
+  SetFontColor(color: ApiColor): unknown;
+  SetBorders(edge: 'Top' | 'Bottom' | 'Left' | 'Right', style: 'Medium', color: ApiColor): boolean;
+  GetAddress(rowAbsolute: boolean, columnAbsolute: boolean, style: 'xlA1', external: boolean): string | null;
+  range: InternalRange;
+}
+
 // A worksheet gives the workbook's Custom XML parts, whichever sheet it is.
 export interface ApiWorksheet {
   GetCustomXmlParts(): ApiCustomXmlParts;
+  GetName(): string;
+  GetSelection(): ApiRange;
+  // The current user becomes the range's only editor.
+  AddProtectedRange(title: string, reference: string): ApiProtectedRange;
+  worksheet: InternalWorksheet;
 }
 
 export interface SpreadsheetApi {
   GetActiveSheet(): ApiWorksheet;
+  GetSheets(): ApiWorksheet[];
+  CreateColorFromRGB(red: number, green: number, blue: number): ApiColor;
 }

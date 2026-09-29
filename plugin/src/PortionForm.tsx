@@ -8,7 +8,7 @@ import type { WriteResult } from './portions.ts';
 // A new portion, which the editor's menus may have asked for, or a change of
 // a portion, starting from its label and text.
 export type PortionFormPurpose =
-  | { kind: 'insertion'; requested: boolean }
+  | { kind: 'insertion'; requested: boolean; hint: string }
   | { kind: 'change'; labelCode: string; text: string; onCancel: () => void };
 
 export interface PortionFormProps {
@@ -64,7 +64,7 @@ export function PortionForm({ labels, purpose, onSubmit }: PortionFormProps): JS
     <form class="portion-form" onSubmit={submit}>
       {purpose.kind === 'insertion' && purpose.requested && (
         <p class="hint" data-testid="insertion-requested">
-          {messages.insertionHint}
+          {purpose.hint}
         </p>
       )}
       <fieldset>
@@ -164,6 +164,8 @@ export function writeFailureOf(kind: 'insertion' | 'change' | 'deletion', result
       return kind === 'insertion' ? messages.encryptionFailed(result.reason) : messages.changeEncryptionFailed(result.reason);
     case 'changed-meanwhile':
       return messages.portionChangedMeanwhile;
+    case 'cells-occupied':
+      return messages.cellsOccupied;
     case 'not-written':
       return { insertion: messages.insertionFailed, change: messages.changeFailed, deletion: messages.deletionFailed }[kind];
   }
