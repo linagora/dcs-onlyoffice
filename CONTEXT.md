@@ -45,14 +45,14 @@ A part of a document whose text is typed in the labelling panel, never in the do
 _Avoid_: secret paragraph, encrypted block, protected cell
 
 **Placeholder**:
-What the document shows of a protected portion: its marking, where the portion sits, which authors cannot edit. In a text document it is a locked block; in a workbook, a merged range of cells that only the author who inserted the portion may change.
+What the document shows of a protected portion: its marking, where the portion sits, which authors cannot edit but through the labelling panel. In a text document it is a locked block; in a workbook, a merged range of locked cells.
 _Avoid_: stub, mask
 
 **Portion label**:
 The label of one protected portion. The file holds it in clear, for everyone and for other labelling tools, and bound in the portion's envelope. An author changing the portion may raise it to any label their clearance allows; only an administrator whose clearance allows it may lower it.
 
 **Portion lock**:
-The right to change or delete a protected portion, held by one author at a time who can edit the document and read the portion, and in a workbook who inserted it; it lapses unless their labelling panel renews it.
+The right to change or delete a protected portion, held by one author at a time who can edit the document and read the portion; it lapses unless their labelling panel renews it.
 _Avoid_: checkout, reservation
 
 **Portion version**:
