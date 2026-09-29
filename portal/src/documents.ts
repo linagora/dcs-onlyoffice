@@ -25,9 +25,14 @@ export type SaveKind = 'session-ended' | 'forced';
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 // Each format's file extension, media type and ONLYOFFICE editor.
-export const DOCUMENT_FORMATS: Readonly<Record<DocumentFormat, { extension: string; contentType: string; documentType: 'word' | 'cell' }>> = {
-  docx: { extension: '.docx', contentType: DOCX_CONTENT_TYPE, documentType: 'word' },
-  xlsx: { extension: '.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', documentType: 'cell' },
+// A workbook's page shows its screen marking, since the spreadsheet editor
+// shows its page marking only when printing; a text document's pages show
+// theirs.
+export const DOCUMENT_FORMATS: Readonly<
+  Record<DocumentFormat, { extension: string; contentType: string; documentType: 'word' | 'cell'; screenMarked: boolean }>
+> = {
+  docx: { extension: '.docx', contentType: DOCX_CONTENT_TYPE, documentType: 'word', screenMarked: false },
+  xlsx: { extension: '.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', documentType: 'cell', screenMarked: true },
 };
 // Every format, in the order in which a folder's files are looked for: should
 // it hold both a DOCX and an XLSX for one identifier, the text document is the

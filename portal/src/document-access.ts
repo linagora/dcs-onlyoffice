@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { UserIdentity } from './auth/sessions.ts';
-import type { BaseLabels } from './document-labels.ts';
+import type { FileLabels, StoredLabels } from './document-labels.ts';
 import type { StoredDocument } from './documents.ts';
 import { identityHeaders } from './policy-relay.ts';
 
@@ -21,20 +21,22 @@ const DECISION_TIMEOUT_MS = 10_000;
 
 // The portal decides nothing: the policy service decides, from the person's
 // clearance and each document's base label, which covers its content in
-// clear, whether the document opens for them.
+// clear, whether the document opens for them. It also gives the marking of
+// the document label a stored workbook names, which the workbook's page shows
+// as it opens.
 export class DocumentAccessCheck {
   #policyUrl: string;
-  #baseLabels: BaseLabels;
+  #storedLabels: StoredLabels;
   #log: FastifyBaseLogger;
 
-  constructor(policyInternalUrl: string, baseLabels: BaseLabels, log: FastifyBaseLogger) {
+  constructor(policyInternalUrl: string, storedLabels: StoredLabels, log: FastifyBaseLogger) {
     this.#policyUrl = policyInternalUrl;
-    this.#baseLabels = baseLabels;
+    this.#storedLabels = storedLabels;
     this.#log = log;
   }
 
   async decide(user: UserIdentity, documents: StoredDocument[]): Promise<DocumentDecision[]> {
-    const codes = await Promise.all(documents.map(async (document) => this.#baseLabelCode(document)));
+    const codes = await Promise.all(documents.map(async (document) => (await this.#storedLabelsOf(document))?.base));
     const readable = codes.filter((code): code is string | null => code !== undefined);
     const decisions = readable.length === 0 ? [] : await this.#decisions(user, readable);
     let next = 0;
@@ -56,12 +58,22 @@ export class DocumentAccessCheck {
     return decision ?? { open: false, reason: 'unavailable' };
   }
 
+  // The marking of the document label the stored file names, which the page
+  // around a workbook's editor shows until the panel tells it the label it
+  // computes; a file that names none counts as the least restrictive label.
+  // Null when the file or the policy service cannot tell.
+  async documentLabelMarkingOf(user: UserIdentity, document: StoredDocument): Promise<Marking | null> {
+    const labels = await this.#storedLabelsOf(document);
+    const [decision] = labels === undefined ? [] : ((await this.#decisions(user, [labels.label])) ?? []);
+    return decision?.marking ?? null;
+  }
+
   // Undefined when the stored file cannot be read.
-  async #baseLabelCode(document: StoredDocument): Promise<string | null | undefined> {
+  async #storedLabelsOf(document: StoredDocument): Promise<Pick<FileLabels, 'base' | 'label'> | undefined> {
     try {
-      return await this.#baseLabels.of(document);
+      return await this.#storedLabels.of(document);
     } catch (error: unknown) {
-      this.#log.error({ documentId: document.id, err: error }, 'The base label of a stored document could not be read');
+      this.#log.error({ documentId: document.id, err: error }, 'The labels of a stored document could not be read');
       return undefined;
     }
   }
@@ -81,7 +93,7 @@ export class DocumentAccessCheck {
       }
       return decisions.map(policyDecisionOf);
     } catch (error: unknown) {
-      this.#log.error({ err: error }, 'The policy service could not decide who opens documents');
+      this.#log.error({ err: error }, 'The policy service could not decide on the labels of documents');
       return null;
     }
   }

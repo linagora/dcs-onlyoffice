@@ -13,7 +13,7 @@ import { registerClearanceAdmin } from './clearance-admin.ts';
 import type { PortalConfig } from './config.ts';
 import { LabelJournal, type PortionState } from './label-journal.ts';
 import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts';
-import { BaseLabels } from './document-labels.ts';
+import { StoredLabels } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { EditingSessions } from './editing-sessions.ts';
 import { createDocumentFromTemplate, DOCUMENT_FORMATS, fileNameOf, findDocument, listDocuments, listTemplates } from './documents.ts';
@@ -63,8 +63,8 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
-  const baseLabels = new BaseLabels();
-  const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, baseLabels, app.log);
+  const storedLabels = new StoredLabels();
+  const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, storedLabels, app.log);
   const labelJournal = new LabelJournal(config.policyInternalUrl, app.log);
   const bindingSignatures = new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, app.log);
   const commands: CommandService = { internalUrl: config.onlyofficeInternalUrl, secret: config.onlyofficeJwtSecret };
@@ -84,7 +84,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       listTemplates(config.templatesDirectory),
       labelsForUpload(config.policyInternalUrl, session.user, request.log),
     ]);
-    baseLabels.retain(new Set(documents.map((document) => document.id)));
+    storedLabels.retain(new Set(documents.map((document) => document.id)));
     const decisions = await documentAccess.decide(session.user, documents);
     const listed = documents.map((document, index) => ({ document, decision: decisions[index] ?? { open: false, reason: 'unavailable' } as const }));
     return reply
@@ -141,11 +141,13 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       config.onlyofficeJwtSecret,
     );
     editingSessions.remember(document.key, user);
+    const screenMarking = DOCUMENT_FORMATS[document.format].screenMarked ? { initial: await documentAccess.documentLabelMarkingOf(user, document) } : null;
     return reply.type('text/html; charset=utf-8').send(
       renderEditorPage({
         title: document.fileName,
         apiScriptUrl: `${config.docsPublicUrl}/web-apps/apps/api/documents/api.js`,
         editorConfig,
+        screenMarking,
       }),
     );
   };

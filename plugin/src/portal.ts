@@ -41,6 +41,19 @@ export async function reportExistingContentProtection(documentId: string, portio
   await postReport(documentId, 'existing-content-protection', { portion: portionId, after });
 }
 
+// What the panel tells the portal's page around a workbook's editor: the
+// marking of the document label, which the page shows as its screen marking.
+export interface ScreenMarkingMessage {
+  type: 'dcs-screen-marking';
+  marking: { text: string; color: string | null };
+}
+
+// Sends the page a marking, by a message that only a top window on the
+// portal's origin, the panel's own, receives.
+export function sendScreenMarking(marking: ScreenMarkingMessage['marking']): void {
+  window.top?.postMessage({ type: 'dcs-screen-marking', marking } satisfies ScreenMarkingMessage, window.location.origin);
+}
+
 async function postReport(documentId: string, report: string, body: object): Promise<void> {
   const response = await fetch(`/documents/${encodeURIComponent(documentId)}/${report}`, {
     method: 'POST',

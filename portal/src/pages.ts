@@ -34,7 +34,20 @@ export interface EditorPageOptions {
   title: string;
   apiScriptUrl: string;
   editorConfig: SignedEditorConfig;
+  // A workbook's screen marking, with the marking of the document label the
+  // stored file names, null when unknown; null for a text document.
+  screenMarking: { initial: Marking | null } | null;
 }
+
+// The editor fills the page; a workbook's screen marking takes a strip above
+// and below it, whose colours the page's script sets.
+const EDITOR_PAGE_STYLE = `
+  html, body { height: 100%; margin: 0; }
+  #editor { height: 100%; }
+  body.screen-marked { display: flex; flex-direction: column; }
+  body.screen-marked #editor { flex: 1 1 auto; height: auto; min-height: 0; }
+  .screen-marking { flex: none; padding: 3px 8px; text-align: center; font: bold 13px/1.4 system-ui, sans-serif; }
+`;
 
 const STYLE = `
   body { font-family: system-ui, sans-serif; margin: 0; color: #1f2933; }
@@ -267,17 +280,26 @@ export function renderMessagePage(title: string, message: string): string {
   );
 }
 
+// A workbook's page shows its screen marking above and below the editor,
+// which ONLYOFFICE's spreadsheet editor leaves out on screen: the script fills
+// the strips from the stored label, then from the panel's.
 export function renderEditorPage(options: EditorPageOptions): string {
+  const { screenMarking } = options;
+  const strip = screenMarking === null ? '' : '<div class="screen-marking" data-testid="screen-marking"></div>';
+  const initialMarking =
+    screenMarking === null ? '' : `\n  <script type="application/json" id="screen-marking">${serializeForScript(screenMarking.initial)}</script>`;
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>${escapeHtml(options.title)}</title>
-  <style>html, body { height: 100%; margin: 0; } #editor { height: 100%; }</style>
+  <style>${EDITOR_PAGE_STYLE}</style>
 </head>
-<body>
+<body${screenMarking === null ? '' : ' class="screen-marked"'}>
+  ${strip}
   <div id="editor"></div>
-  <script type="application/json" id="editor-config">${serializeForScript(options.editorConfig)}</script>
+  ${strip}
+  <script type="application/json" id="editor-config">${serializeForScript(options.editorConfig)}</script>${initialMarking}
   <script src="${escapeHtml(options.apiScriptUrl)}"></script>
   <script src="/static/editor.js"></script>
 </body>
