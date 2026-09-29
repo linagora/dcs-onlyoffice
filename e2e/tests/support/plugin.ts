@@ -122,21 +122,40 @@ export function editorFrame(page: Page): Frame {
   return frame;
 }
 
+// The labelling plugin's frame, once the plugin runtime has started in it:
+// the frame appears before the editor has sent the runtime its code, which
+// defines callCommand, and its init message, which gives the plugin's info.
 export async function pluginFrame(page: Page): Promise<Frame> {
   let found: Frame | null = null;
   await expect
     .poll(
-      () => {
-        found = page.frames().find((frame) => frame.url().includes(PLUGIN_PAGE)) ?? null;
+      async () => {
+        const frame = page.frames().find((candidate) => candidate.url().includes(PLUGIN_PAGE)) ?? null;
+        found = frame !== null && (await pluginRuntimeStarted(frame)) ? frame : null;
         return found !== null;
       },
       { timeout: 60_000 },
     )
     .toBe(true);
   if (found === null) {
-    throw new Error('The labelling plugin iframe never appeared');
+    throw new Error('The labelling plugin never started in its iframe');
   }
   return found;
+}
+
+async function pluginRuntimeStarted(frame: Frame): Promise<boolean> {
+  try {
+    return await frame.evaluate(() => {
+      const plugin = window.Asc?.plugin;
+      return typeof plugin?.callCommand === 'function' && typeof plugin.info === 'object' && plugin.info !== null;
+    });
+  } catch (error: unknown) {
+    // The frame may still be loading the plugin's page.
+    if (error instanceof Error) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export async function pluginInfoIdentity(frame: Frame): Promise<PluginInfoIdentity> {
