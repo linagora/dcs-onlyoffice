@@ -38,6 +38,9 @@ const CONTENT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/
 const CUSTOM_PROPERTIES_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties';
 const STRICT_CUSTOM_PROPERTIES_RELATIONSHIP = 'http://purl.oclc.org/ooxml/officeDocument/relationships/customProperties';
 const CUSTOM_PROPERTIES_TYPE = 'application/vnd.openxmlformats-officedocument.custom-properties+xml';
+// The package relationship to the Sensitivity Label Information part
+// ([MS-OI29500] §3.4.1.5).
+const LABEL_INFORMATION_RELATIONSHIP = 'http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels';
 const CUSTOM_PROPERTIES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties';
 const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
 // Office reads the sensitivity label properties among the user-defined ones
@@ -113,12 +116,37 @@ function labelPropertiesXml(tenant: string, label: SensitivityLabel, earlier: Ma
 // The custom properties part that the package relationship designates, and
 // whether the package holds it; null without a relationship.
 async function customPropertiesPartOf(zip: JSZip): Promise<{ part: string; present: boolean } | null> {
+  const [target] = await relationshipTargets(zip, [CUSTOM_PROPERTIES_RELATIONSHIP, STRICT_CUSTOM_PROPERTIES_RELATIONSHIP]);
+  if (target === undefined) {
+    return null;
+  }
+  const present = partNamed(zip, target);
+  return { part: present ?? target, present: present !== null };
+}
+
+// The parts that the package relationships of the given types designate, as
+// their targets name them from the package root.
+async function relationshipTargets(zip: JSZip, types: string[]): Promise<string[]> {
   const relationships = await documentOf(zip, PACKAGE_RELATIONSHIPS_PART);
-  const relationship = Array.from(relationships?.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship') ?? []).find((candidate) =>
-    [CUSTOM_PROPERTIES_RELATIONSHIP, STRICT_CUSTOM_PROPERTIES_RELATIONSHIP].includes(candidate.getAttribute('Type') ?? ''),
-  );
-  const target = relationship?.getAttribute('Target')?.replace(/^\//, '') ?? null;
-  return target === null ? null : { part: target, present: zip.file(target) !== null };
+  return Array.from(relationships?.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship') ?? [])
+    .filter((relationship) => types.includes(relationship.getAttribute('Type') ?? ''))
+    .map((relationship) => (relationship.getAttribute('Target') ?? '').replace(/^(\.?\/)+/, ''))
+    .filter((target) => target !== '');
+}
+
+// The package part of that name, as the package spells it: part names match
+// without regard to case (ECMA-376 Part 2 §6.2.2.3).
+function partNamed(zip: JSZip, name: string): string | null {
+  const wanted = name.toLowerCase();
+  return Object.keys(zip.files).find((file) => zip.files[file]?.dir === false && file.toLowerCase() === wanted) ?? null;
+}
+
+// The Sensitivity Label Information part a package holds, found through its
+// package relationship; null when it holds none. The platform never writes
+// one (ADR 0005), and ONLYOFFICE drops it at each save.
+export async function labelInformationPartOf(zip: JSZip): Promise<string | null> {
+  const parts = (await relationshipTargets(zip, [LABEL_INFORMATION_RELATIONSHIP])).map((target) => partNamed(zip, target));
+  return parts.find((part) => part !== null) ?? null;
 }
 
 // Whether a custom properties part is in the Transitional namespaces, the only
