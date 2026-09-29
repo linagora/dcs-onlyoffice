@@ -8,7 +8,16 @@ import { bubble, pluginPanel } from '../tests/support/plugin.ts';
 import { insertPortion, leaveAndWaitForSave, storedDocx, storedFile } from '../tests/support/portions.ts';
 import { demoCertificate, verifyBindingSignature } from '../tests/support/signature.ts';
 import { fillUploadForm } from '../tests/support/uploads.ts';
-import { cellValue, closePrintPreview, editorHeadersAndFooters, insertWorkbookPortion, openPrintPreview, selectCells } from '../tests/support/workbooks.ts';
+import {
+  cellValue,
+  closePrintPreview,
+  editorHeadersAndFooters,
+  insertWorkbookPortion,
+  openPrintPreview,
+  openProtectionConfirmation,
+  selectCells,
+  SUPPLY_ROWS,
+} from '../tests/support/workbooks.ts';
 import { everySheetShows, inspectXlsx } from '../tests/support/xlsx.ts';
 
 // The Word file of the demo generator that the example Microsoft 365 tenant
@@ -165,8 +174,9 @@ async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOpt
   });
 }
 
-// Steps 11 to 18, in a workbook: the text document's steps from the base
-// label to the signed binding, the page marking showing in the print preview.
+// Steps 11 to 19, in a workbook: the text document's steps from the base
+// label to the signed binding, with the protection of rows already filled,
+// the page marking showing in the print preview.
 async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions): Promise<void> {
   const alicePanel = pluginPanel(alice);
   const aliceItem = (id: string) => portionItem(alice, id);
@@ -246,22 +256,38 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
   });
 
-  await test.step('17. The page marking shows in the print preview', async () => {
+  const rowsId = await test.step('17. She protects two rows already filled for French eyes only, which the allied officer can no longer read', async () => {
+    const confirmation = await openProtectionConfirmation(alice, SPECIAL_FRANCE, SUPPLY_ROWS.reference);
+    await expect(confirmation.getByTestId('protection-preview')).toHaveText(SUPPLY_ROWS.text);
+    await options.capture(alice, '17-workbook-protection');
+    await confirmation.getByRole('button', { name: 'Protect the selection' }).click();
+    const id = await portionIdOf(alice, 'Logistics group');
+    await expect(aliceItem(id).getByTestId('portion-text')).toHaveText(SUPPLY_ROWS.text);
+    await expect(bobItem(id).getByTestId('portion-notice')).toHaveText('Access denied');
+    await expect.poll(() => cellValue(bob, 'A7')).toBe(`${SPECIAL_FRANCE} – protected portion`);
+    // Away from the placeholder, whose bubble would stay over the print preview.
+    await selectCells(alice, 'B12');
+    return id;
+  });
+
+  await test.step('18. The page marking shows in the print preview', async () => {
     const header = `&LExercise NORTHWIND 26 - fictional${WITH_MORE_RESTRICTIVE_PORTIONS_CENTRE}`;
     const footer = `${WITH_MORE_RESTRICTIVE_PORTIONS_CENTRE}&RFictional workbook`;
     await expect
       .poll(() => editorHeadersAndFooters(alice))
       .toEqual([{ oddHeader: header, oddFooter: footer, evenHeader: header, evenFooter: footer, firstHeader: header, firstFooter: footer }]);
     await openPrintPreview(alice);
-    await options.capture(alice, '17-workbook-print-preview');
+    await options.capture(alice, '18-workbook-print-preview');
     await closePrintPreview(alice);
   });
 
-  await test.step('18. The stored workbook carries the page marking and a binding that xmlsec1 verifies', async () => {
-    await leaveAndWaitForSave([alice, bob], documentId, 1);
+  await test.step('19. The stored workbook carries the page marking and a binding that xmlsec1 verifies', async () => {
+    // The base label's save, made as the portions went in, held two portions too.
+    await leaveAndWaitForSave([alice, bob], documentId, [firstId, rowsId]);
     const file = await storedFile(alice, documentId);
     const stored = await inspectXlsx(file);
     expect(everySheetShows(stored, WITH_MORE_RESTRICTIVE_PORTIONS_CENTRE)).toBe(true);
+    expect(stored.allText).not.toContain('Logistics group');
     const bindable = stored.bindableParts;
     expect(await verifyBindingSignature(file, demoCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
   });
