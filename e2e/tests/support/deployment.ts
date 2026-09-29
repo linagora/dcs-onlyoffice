@@ -12,7 +12,7 @@ const SETTINGS_FILE = new URL('../../../deploy/.env', import.meta.url);
 
 // The stack's public domain: that of the stack under test, else the
 // standalone profile's default.
-export const DOMAIN: string = settingOf('DOMAIN') ?? 'dcs.test';
+export const DOMAIN: string = settingOf('DOMAIN') ?? 'dcs.localhost';
 
 // A setting of the stack under test, which must be set.
 export function deploymentSetting(name: string): string {
