@@ -10,17 +10,39 @@ import { field } from './json.ts';
 const COMPOSE_DIRECTORY = fileURLToPath(new URL('../../../deploy/', import.meta.url));
 const SETTINGS_FILE = new URL('../../../deploy/.env', import.meta.url);
 
-// The stack's public domain, as the Playwright configuration reads it.
-export const DOMAIN = process.env.DOMAIN ?? 'dcs.test';
+// The stack's public domain: that of the stack under test, else the
+// standalone profile's default.
+export const DOMAIN: string = settingOf('DOMAIN') ?? 'dcs.localhost';
 
-// A setting of the stack under test: the environment wins over the .env file
-// that compose reads.
+// Whether browsers resolve the stack's host names to this machine by
+// themselves, as they resolve every name under localhost.
+export const RESOLVED_BY_BROWSERS: boolean = DOMAIN === 'localhost' || DOMAIN.endsWith('.localhost');
+
+// A setting of the stack under test, which must be set.
 export function deploymentSetting(name: string): string {
-  const value = process.env[name] ?? parseEnv(readFileSync(SETTINGS_FILE, 'utf8'))[name];
-  if (value === undefined || value === '') {
+  const value = settingOf(name);
+  if (value === null) {
     throw new Error(`${name} is set neither in the environment nor in deploy/.env`);
   }
   return value;
+}
+
+// A setting of the stack under test: the environment's, which wins over the
+// .env file that compose reads; null when neither sets it.
+function settingOf(name: string): string | null {
+  return process.env[name] || settingInFile(name);
+}
+
+// A setting of deploy/.env, null when the file or the setting is missing.
+function settingInFile(name: string): string | null {
+  try {
+    return parseEnv(readFileSync(SETTINGS_FILE, 'utf8'))[name] || null;
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
 }
 
 // Makes the clearance directory unreadable to OpenTDF's entity resolution, as

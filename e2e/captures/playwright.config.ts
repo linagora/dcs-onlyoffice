@@ -1,6 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-
-const domain = process.env.DOMAIN ?? 'dcs.test';
+import { DOMAIN, RESOLVED_BY_BROWSERS } from '../tests/support/deployment.ts';
 
 // The README's screenshots (docs/screenshots), taken on the standalone stack
 // with pnpm --filter @dcs/e2e captures. They stay out of the end-to-end suite,
@@ -14,7 +13,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: `https://portail.${domain}`,
+    baseURL: `https://portail.${DOMAIN}`,
     ignoreHTTPSErrors: true,
   },
   projects: [
@@ -28,7 +27,7 @@ export default defineConfig({
         deviceScaleFactor: 2,
         // As in the suite: the stack's host names lead to the local reverse
         // proxy, with no hosts-file change.
-        launchOptions: { args: [`--host-resolver-rules=MAP *.${domain} 127.0.0.1`] },
+        launchOptions: { args: RESOLVED_BY_BROWSERS ? [] : [`--host-resolver-rules=MAP *.${DOMAIN} 127.0.0.1`] },
       },
     },
   ],
