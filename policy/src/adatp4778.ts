@@ -18,6 +18,30 @@ export const DEFAULT_DOCUMENT_PARTS: readonly string[] = [
   'docProps/app.xml',
 ];
 
+// ADatP-4778.2 Tables 5-2 and 5-3 for WordprocessingML, in reference order:
+// the parts a whole-document binding references when the package holds them.
+// The portal applies the same list at every save.
+const WORDPROCESSING_BINDABLE_PARTS: readonly RegExp[] = [
+  /^word\/document\.xml$/,
+  /^word\/styles\.xml$/,
+  /^word\/header\d*\.xml$/,
+  /^word\/footer\d*\.xml$/,
+  /^word\/footnotes\.xml$/,
+  /^word\/endnotes\.xml$/,
+  /^word\/comments\.xml$/,
+  /^word\/commentsExtended\.xml$/,
+  /^word\/media\/.+$/,
+  /^docProps\/core\.xml$/,
+  /^docProps\/app\.xml$/,
+  /^docProps\/custom\.xml$/,
+];
+
+// The parts of a package, given by name, that its whole-document binding
+// references.
+export function bindablePartsOf(parts: readonly string[]): string[] {
+  return WORDPROCESSING_BINDABLE_PARTS.flatMap((pattern) => parts.filter((part) => pattern.test(part)).sort());
+}
+
 const MEDIA_TYPES: Readonly<Record<string, string>> = {
   png: 'image/png',
   jpg: 'image/jpeg',

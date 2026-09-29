@@ -28,6 +28,7 @@ import { policyNamed } from './spif/lookup.ts';
 import { PortionLocks, registerPortionLocks } from './portion-locks.ts';
 import type { MappedSensitivityLabel } from './sensitivity-label.ts';
 import { loadPolicies } from './spif/reader.ts';
+import { registerUploads } from './uploads.ts';
 
 const DEFAULT_PORTION_LOCK_LEASE_MS = 5 * 60 * 1000;
 
@@ -468,6 +469,15 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
         return found?.ok === true ? labelCode(found.policy, found.label) : null;
       },
       documentLabelOf,
+    });
+    // Uploads share the portal's secret, and end signed as a save.
+    registerUploads(app, {
+      secret: bindingSignature.secret,
+      documentLabelOf,
+      canonicalLabelCode: (code) => {
+        const found = labelOfCode(code);
+        return found === null ? null : labelCode(found.policy, found.label);
+      },
     });
   }
 
