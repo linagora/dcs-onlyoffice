@@ -61,18 +61,24 @@ export class BindingSignatures {
   // action id come from the stored file's custom properties.
   async signed(docx: Uint8Array, documentId: string, stored: Uint8Array | null): Promise<Uint8Array> {
     const headers = await this.#storedPropertiesHeader(stored, documentId);
+    return (await this.#signedOrNull(docx, documentId, headers, 'The binding of a save could not be signed')) ?? docx;
+  }
+
+  // The file with the parts the policy service wrote, its signed binding
+  // among them; null when it signed none, the failure then logged.
+  async #signedOrNull(docx: Uint8Array, documentId: string, headers: Record<string, string>, failure: string): Promise<Uint8Array | null> {
     let answer: SignatureAnswer;
     try {
       answer = await this.#ask('/bindings/sign', docx, readSignatureAnswer, headers);
     } catch (error: unknown) {
-      this.#log.error({ documentId, err: error }, 'The binding of a save could not be signed');
-      return docx;
+      this.#log.error({ documentId, err: error }, failure);
+      return null;
     }
     if (answer.replacement !== null) {
       this.#log.warn({ documentId, ...answer.replacement }, 'Document label replaced at save');
     }
     if (answer.signed === null) {
-      return docx;
+      return null;
     }
     const zip = await JSZip.loadAsync(docx);
     for (const written of [...answer.parts, answer.signed]) {
@@ -128,12 +134,7 @@ export class BindingSignatures {
   }
 
   async #ask<T>(route: string, docx: Uint8Array, read: (body: unknown) => T | null, headers: Record<string, string> = {}): Promise<T> {
-    const response = await fetch(new URL(route, this.#policyUrl), {
-      method: 'POST',
-      headers: { ...headers, authorization: `Bearer ${this.#secret}`, 'content-type': DOCX_CONTENT_TYPE },
-      body: docx,
-      signal: AbortSignal.timeout(SIGNATURE_TIMEOUT_MS),
-    });
+    const response = await this.#post(route, docx, headers);
     const body: unknown = await response.json();
     const answer = response.ok ? read(body) : null;
     if (answer === null) {
@@ -141,6 +142,17 @@ export class BindingSignatures {
       throw new Error(`The policy service answered ${response.status}: ${reason}`);
     }
     return answer;
+  }
+
+  // Sends a package to a route of the policy service that only the portal
+  // may call.
+  async #post(route: string, docx: Uint8Array, headers: Record<string, string> = {}): Promise<Response> {
+    return fetch(new URL(route, this.#policyUrl), {
+      method: 'POST',
+      headers: { ...headers, authorization: `Bearer ${this.#secret}`, 'content-type': DOCX_CONTENT_TYPE },
+      body: docx,
+      signal: AbortSignal.timeout(SIGNATURE_TIMEOUT_MS),
+    });
   }
 }
 
