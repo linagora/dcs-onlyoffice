@@ -19,10 +19,22 @@ export interface UserProtectedRange {
   users: string[];
 }
 
+// A sheet's six header and footer strings, null where it has none, and
+// whether first and even pages have their own.
+export interface SheetHeadersAndFooters {
+  strings: Record<HeaderFooterName, string | null>;
+  differentFirst: boolean;
+  differentOddEven: boolean;
+}
+
+export const HEADER_FOOTER_NAMES = ['oddHeader', 'oddFooter', 'evenHeader', 'evenFooter', 'firstHeader', 'firstFooter'] as const;
+export type HeaderFooterName = (typeof HEADER_FOOTER_NAMES)[number];
+
 export interface WorksheetInspection {
   part: string;
   userProtectedRanges: UserProtectedRange[];
   mergedCells: string[];
+  headersAndFooters: SheetHeadersAndFooters;
   // The text of each cell that holds one, by reference, shared strings
   // resolved.
   cellTexts: Map<string, string>;
@@ -67,8 +79,14 @@ function readWorksheet(part: string, sheet: Element, sharedStrings: string[]): W
       cellTexts.set(cell.getAttribute('r') ?? '', text);
     }
   }
+  const headerFooter = elements(sheet, 'headerFooter')[0];
+  const flag = (name: string): boolean => ['1', 'true'].includes(headerFooter?.getAttribute(name) ?? '');
+  const strings = Object.fromEntries(
+    HEADER_FOOTER_NAMES.map((name) => [name, headerFooter === undefined ? null : (elements(headerFooter, name)[0]?.textContent ?? null)]),
+  ) as Record<HeaderFooterName, string | null>; // SAFETY: an entry for each name, built just above
   return {
     part,
+    headersAndFooters: { strings, differentFirst: flag('differentFirst'), differentOddEven: flag('differentOddEven') },
     userProtectedRanges: extensions
       .flatMap((extension) => elements(extension, 'userProtectedRange'))
       .map((range) => ({
