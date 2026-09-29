@@ -38,6 +38,8 @@ const CUSTOM_PROPERTIES_TYPE = 'application/vnd.openxmlformats-officedocument.cu
 // The package relationship to the Sensitivity Label Information part
 // ([MS-OI29500] §3.4.1.5).
 const LABEL_INFORMATION_RELATIONSHIP = 'http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels';
+// The root of a Sensitivity Label Information part ([MS-OFFCRYPTO] §2.6.4).
+const LABEL_LIST_NAMESPACE = 'http://schemas.microsoft.com/office/2020/mipLabelMetadata';
 const CUSTOM_PROPERTIES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties';
 const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
 // Office reads the sensitivity label properties among the user-defined ones
@@ -178,6 +180,48 @@ async function relationshipTargets(zip: JSZip, types: string[]): Promise<string[
 export async function labelInformationPartOf(zip: JSZip): Promise<string | null> {
   const parts = (await relationshipTargets(zip, [LABEL_INFORMATION_RELATIONSHIP])).map((target) => partNamed(zip, target));
   return parts.find((part) => part !== null) ?? null;
+}
+
+// What a tenant's element in the Sensitivity Label Information part says: the
+// label applied, null for a removed or disabled one, or "unreadable" when the
+// tenant has several elements, which [MS-OFFCRYPTO] §2.6.5.4 forbids.
+type TenantLabel = LabelAttributes | null | 'unreadable';
+
+// The elements of a package's Sensitivity Label Information part, by tenant,
+// ids lowercase without braces; none without the part.
+async function labelInformationOf(zip: JSZip): Promise<Map<string, TenantLabel>> {
+  const part = await labelInformationPartOf(zip);
+  const root = part === null ? null : ((await xmlPartOf(zip, part))?.documentElement ?? null);
+  const labels = new Map<string, TenantLabel>();
+  if (root === null || root.namespaceURI !== LABEL_LIST_NAMESPACE || root.localName !== 'labelList') {
+    return labels;
+  }
+  for (const element of childrenNamed(root, LABEL_LIST_NAMESPACE, 'label')) {
+    const tenant = normalizedGuid(element.getAttribute('siteId') ?? '');
+    const id = normalizedGuid(element.getAttribute('id') ?? '');
+    const applied = isTrue(element.getAttribute('enabled')) && !isTrue(element.getAttribute('removed')) && GUID.test(id);
+    const label = applied ? { id, name: null, method: element.getAttribute('method') || 'Standard', contentBits: element.getAttribute('contentBits') || '0' } : null;
+    labels.set(tenant, labels.has(tenant) ? 'unreadable' : label);
+  }
+  return labels;
+}
+
+// The ids of a tenant's sensitivity labels that a file applies, as
+// [MS-OFFCRYPTO] §2.6.3 reads them: the tenant's element in the Sensitivity
+// Label Information part decides when there is one; otherwise the tenant's
+// enabled label properties do.
+export async function appliedSensitivityLabels(zip: JSZip, tenant: string): Promise<string[]> {
+  const element = (await labelInformationOf(zip)).get(tenant);
+  if (element !== undefined) {
+    return element === null || element === 'unreadable' ? [] : [element.id];
+  }
+  const { properties } = await customPropertiesOf(zip);
+  return [...labelIdsOfTenant(properties, tenant)].filter((id) => enabledLabel(properties, id, tenant) !== null);
+}
+
+// An xsd:boolean that holds true.
+function isTrue(value: string | null): boolean {
+  return value === '1' || value?.toLowerCase() === 'true';
 }
 
 // Whether a custom properties part is in the Transitional namespaces, the only
