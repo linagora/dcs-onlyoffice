@@ -1,15 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import JSZip from 'jszip';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { documentLogEntries } from './support/deployment.ts';
 import { openDocument, openedDocumentId, openNewDocument } from './support/documents.ts';
-import { BINDING_NAMESPACE, DOCX_TYPE, LABEL_NAMESPACE } from './support/docx.ts';
+import { BINDING_NAMESPACE, DOCX_TYPE, LABEL_NAMESPACE, sensitivityLabelProperties } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, insertPortion, shownPortions, storedDocx, storedFile } from './support/portions.ts';
 import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
-import { upload, type UploadedFile, withCustomXmlPart } from './support/uploads.ts';
+import { upload, type UploadedFile, withCustomXmlPart, withLabelMetadata, wordLabelElement, wordLabelProperties } from './support/uploads.ts';
 
 const TEMPLATE = new URL('../../deploy/demo/documents/exercise-northwind.docx', import.meta.url);
 const RELEASABLE_TO_NATO = 'DIFFUSION RESTREINTE – DIFFUSION OTAN';
@@ -19,6 +20,12 @@ const NON_PROTEGE = 'NON PROTÉGÉ';
 // The demo SPIF's codes for these labels, which the journal names.
 const CODES = { nato: 'DEMO-FR:2/2.1', specialFrance: 'DEMO-FR:2/1.1', diffusionRestreinte: 'DEMO-FR:2', nonProtege: 'DEMO-FR:1' } as const;
 const DEMO_POLICY_URI = 'urn:oid:2.25.166231019600111174217682845337071458325';
+// The example label mapping's fictional tenant (deploy/spif), the sensitivity
+// label it pairs with DIFFUSION RESTREINTE released to NATO, and another
+// tenant.
+const DEMO_TENANT = '00000000-0000-0000-0000-000000000000';
+const NATO_SENSITIVITY_LABEL = '10000000-0000-4000-8000-000000000003';
+const OTHER_TENANT = '11111111-2222-3333-4444-555555555555';
 
 // The template labelled by another tool: an ADatP-4778 binding of a
 // DIFFUSION RESTREINTE document label, unsigned, under the given policy, and
@@ -100,6 +107,34 @@ test('a base label part of any name decides who opens the uploaded document', as
   const answer = await chloe.goto(`/documents/${documentId}/edit`);
   expect(answer?.status()).toBe(403);
   await chloe.context().close();
+});
+
+test('a Word file with a sensitivity label of the mapped tenant gets the label the mapping pairs with it', async ({ page }) => {
+  const since = new Date();
+  const otherTenantLabel = randomUUID();
+  const buffer = await withLabelMetadata(await readFile(TEMPLATE), {
+    properties: wordLabelProperties(NATO_SENSITIVITY_LABEL, DEMO_TENANT, 2) + wordLabelProperties(otherTenantLabel, OTHER_TENANT, 9),
+    labelList: wordLabelElement(NATO_SENSITIVITY_LABEL.toUpperCase(), DEMO_TENANT) + wordLabelElement(otherTenantLabel, OTHER_TENANT),
+  });
+
+  expect(await upload(page, { name: 'Fictional Word report.docx', mimeType: DOCX_TYPE, buffer }, 'carried')).toBe(303);
+
+  const documentId = await openedDocumentId(page);
+  await expect(pluginPanel(page).getByLabel('Base label')).toHaveValue(CODES.nato);
+  // The stored file holds no Sensitivity Label Information part, keeps the
+  // other tenant's label, and carries the mapped tenant's as the platform
+  // writes it.
+  expect((await JSZip.loadAsync(await storedFile(page, documentId))).file('docMetadata/LabelInfo.xml')).toBeNull();
+  const stored = await storedDocx(page, documentId);
+  // The other tenant's element decided its label, which the stored file
+  // keeps as custom properties, converted from the element.
+  const otherTenant = sensitivityLabelProperties(stored, otherTenantLabel);
+  expect(otherTenant).toMatchObject({ Enabled: 'true', SiteId: OTHER_TENANT, Method: 'Standard', ContentBits: '0' });
+  expect(otherTenant).not.toHaveProperty('Name');
+  expect(sensitivityLabelProperties(stored, NATO_SENSITIVITY_LABEL)).toMatchObject({ Enabled: 'true', SiteId: DEMO_TENANT, Name: 'DCS-Diffusion-Restreinte-OTAN', Method: 'Privileged', ContentBits: '0' });
+  await expect
+    .poll(() => documentLogEntries(since, 'Document uploaded', documentId))
+    .toEqual([uploadEntry({ base: CODES.nato, read: { code: CODES.nato, source: 'sensitivity-label' }, signature: 'absent', lowering: false })]);
 });
 
 test('a file that carries a label may be raised', async ({ page }) => {

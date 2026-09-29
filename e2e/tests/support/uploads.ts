@@ -69,3 +69,40 @@ export async function withCustomXmlPart(docx: Buffer, xml: string, namespace: st
   );
   return zip.generateAsync({ type: 'nodebuffer' });
 }
+
+const LABEL_LIST_NAMESPACE = 'http://schemas.microsoft.com/office/2020/mipLabelMetadata';
+
+// A tenant's sensitivity label properties, as [MS-OI29500] §3.11.2 shows Word
+// writing them.
+export function wordLabelProperties(labelId: string, tenant: string, firstPid: number): string {
+  const values = [['Enabled', 'true'], ['SetDate', '2018-09-24T21:38:47-0800'], ['Method', 'Standard'], ['Name', 'Fictional label'], ['SiteId', tenant], ['ActionId', randomUUID()], ['ContentBits', '0']];
+  return values
+    .map(([attribute, value], index) => `<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="${firstPid + index}" name="MSIP_Label_${labelId}_${attribute}"><vt:lpwstr>${value}</vt:lpwstr></property>`)
+    .join('');
+}
+
+// A Sensitivity Label Information element, as the examples of
+// [MS-OFFCRYPTO] §3.12 write it, ids braced.
+export function wordLabelElement(labelId: string, tenant: string): string {
+  return `<clbl:label id="{${labelId}}" enabled="1" method="Standard" siteId="{${tenant}}" contentBits="0" removed="0" />`;
+}
+
+// A DOCX whose custom properties become the given ones, with a Sensitivity
+// Label Information part, its relationship and its content type, as Word
+// writes them in a tenant that turned co-authoring on.
+export async function withLabelMetadata(docx: Buffer, metadata: { properties: string; labelList: string }): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(docx);
+  zip.file(
+    'docProps/custom.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">${metadata.properties}</Properties>`,
+  );
+  zip.file('docMetadata/LabelInfo.xml', `<?xml version="1.0" encoding="utf-8" standalone="yes"?><clbl:labelList xmlns:clbl="${LABEL_LIST_NAMESPACE}">${metadata.labelList}</clbl:labelList>`);
+  const relationships = (await zip.file('_rels/.rels')?.async('string')) ?? '';
+  zip.file(
+    '_rels/.rels',
+    relationships.replace('</Relationships>', '<Relationship Id="rIdLabels" Type="http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels" Target="docMetadata/LabelInfo.xml"/></Relationships>'),
+  );
+  const types = (await zip.file('[Content_Types].xml')?.async('string')) ?? '';
+  zip.file('[Content_Types].xml', types.replace('</Types>', '<Override PartName="/docMetadata/LabelInfo.xml" ContentType="application/vnd.ms-office.classificationlabels+xml"/></Types>'));
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
