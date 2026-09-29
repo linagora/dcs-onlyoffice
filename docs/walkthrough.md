@@ -106,16 +106,22 @@ Alice deletes the second portion: it leaves both panels, and its cells are empty
 
 ![The confirmation of a portion's deletion in a workbook](screenshots/walkthrough/16-workbook-deletion.png)
 
-## 17. The page marking of a workbook
+## 17. Rows already filled, protected
+
+The last two rows of supplies turn out to be for French eyes only. Alice selects them, cells already filled that a portion's insertion refuses, picks DIFFUSION RESTREINTE – SPÉCIAL FRANCE and presses **Protect the selection**. The panel shows their values as the portion will hold them, rows of tab-separated cells, and warns that they already went through ONLYOFFICE in clear: they are protected from now on only, and copies made before, such as the editor's working files of this session, keep them. Once she confirms, the values go, encrypted, into a new portion's envelope, and the rows become its placeholder: Bob's panel shows "Access denied". The editor's context menu offers the same action. The journal records the protection, never the values.
+
+![The panel's confirmation, with the warning and the values of the two rows](screenshots/walkthrough/17-workbook-protection.png)
+
+## 18. The page marking of a workbook
 
 A workbook's page marking goes into the centre of every sheet's headers and footers, first and even pages included: the spreadsheet editor shows it only when printing, in the print preview (**File**, **Print**) and in a PDF, while the panel shows the document label on screen.
 
-![The print preview, with the page marking at the top and the bottom of the page](screenshots/walkthrough/17-workbook-print-preview.png)
+![The print preview, with the page marking at the top and the bottom of the page](screenshots/walkthrough/18-workbook-print-preview.png)
 
-## 18. The signed binding of a workbook
+## 19. The signed binding of a workbook
 
 Once both leave the editor, the stored workbook carries the page marking and a binding signed as a text document's, over the parts that ADatP-4778.2 lists for a workbook: `xmlsec1` verifies it the same way, as [step 8](#8-the-signed-binding) tells. This step has no picture.
 
 ## The journal
 
-Every step that changes a label is in the portal's journal, which never holds a portion's text: in `deploy`, `docker compose logs portal | grep -E 'Base label|Portion|Document uploaded'`.
+Every step that changes a label is in the portal's journal, which never holds a portion's text: in `deploy`, `docker compose logs portal | grep -E 'Base label|Portion|Document uploaded|Existing content'`.
