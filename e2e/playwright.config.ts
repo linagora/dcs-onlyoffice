@@ -1,10 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
-import { DOMAIN } from './tests/support/deployment.ts';
+import { DOMAIN, RESOLVED_BY_BROWSERS } from './tests/support/deployment.ts';
 
-// The stack is reached through its public host names; map them to the local
-// reverse proxy so that no hosts-file change is needed on developer machines.
-const hostResolverRules = `--host-resolver-rules=MAP *.${DOMAIN} 127.0.0.1`;
-const localDomains = ['portail', 'docs', 'idp', 'tdf'].map((host) => `${host}.${DOMAIN}`).join(',');
+// The stack is reached through its public host names. Under localhost, the
+// browsers resolve them to this machine by themselves, which the suite then
+// checks, as newcomers rely on it; the names of another domain lead to the
+// local reverse proxy through the browsers' settings, so that no hosts-file
+// change is needed on developer machines.
+const hostResolverRules = RESOLVED_BY_BROWSERS ? [] : [`--host-resolver-rules=MAP *.${DOMAIN} 127.0.0.1`];
+const firefoxUserPrefs: Record<string, string> = RESOLVED_BY_BROWSERS
+  ? {}
+  : { 'network.dns.localDomains': ['portail', 'docs', 'idp', 'tdf'].map((host) => `${host}.${DOMAIN}`).join(',') };
 
 export default defineConfig({
   testDir: './tests',
@@ -25,7 +30,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], launchOptions: { args: [hostResolverRules] } },
+      use: { ...devices['Desktop Chrome'], launchOptions: { args: hostResolverRules } },
     },
     {
       // Browser-specific behaviours only (iframe origin, cookies, the WebCrypto
@@ -34,7 +39,7 @@ export default defineConfig({
       grep: /@cross-browser/,
       use: {
         ...devices['Desktop Firefox'],
-        launchOptions: { firefoxUserPrefs: { 'network.dns.localDomains': localDomains } },
+        launchOptions: { firefoxUserPrefs },
       },
     },
   ],

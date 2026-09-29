@@ -14,6 +14,10 @@ const SETTINGS_FILE = new URL('../../../deploy/.env', import.meta.url);
 // standalone profile's default.
 export const DOMAIN: string = settingOf('DOMAIN') ?? 'dcs.localhost';
 
+// Whether browsers resolve the stack's host names to this machine by
+// themselves, as they resolve every name under localhost.
+export const RESOLVED_BY_BROWSERS: boolean = DOMAIN === 'localhost' || DOMAIN.endsWith('.localhost');
+
 // A setting of the stack under test, which must be set.
 export function deploymentSetting(name: string): string {
   const value = settingOf(name);
