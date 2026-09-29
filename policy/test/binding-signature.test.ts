@@ -259,13 +259,15 @@ describe('the signature of the document label binding', () => {
     assert.deepEqual(body, { error: 'The package holds several document label bindings, where ADatP-4778.2 allows one' });
   });
 
-  it('refuses a binding that references a part the package lacks', async () => {
+  it('references the parts the package holds, whatever parts the binding it received named', async () => {
     const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE, { extraParts: ['word/media/image9.png'] });
 
-    const { statusCode, body } = await sign(docx);
+    const signed = signedOf((await sign(docx)).body);
 
-    assert.equal(statusCode, 422);
-    assert.deepEqual(body, { error: 'The binding references parts the package lacks: word/media/image9.png' });
+    const verification = await verifyWithXmlsec(docx, signed.xml, certificate);
+    const present = bindableParts(await JSZip.loadAsync(docx));
+    assert.deepEqual([...verification.references].sort(), [...present].sort());
+    assert.equal(verification.manifest, `${present.length}/${present.length}`);
   });
 
   it('leaves a document without a binding unsigned', async () => {

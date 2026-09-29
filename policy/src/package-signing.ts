@@ -2,7 +2,7 @@ import type { Element } from '@xmldom/xmldom';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type JSZip from 'jszip';
 import { LABEL_NAMESPACE } from './adatp4774.ts';
-import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
+import { BINDING_NAMESPACE, bindablePartsOf } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
 import { customXmlParts, loadPackage } from './opc.ts';
@@ -84,21 +84,11 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // The sensitivity label goes in parts the signature covers, so it is
     // written first (ADR 0005).
     const mapped = options.sensitivityLabelOf(computed.code);
-    const { customPropertiesPart, writtenParts } =
-      mapped === null ? { customPropertiesPart: null, writtenParts: [] } : await writeSensitivityLabel(zip, mapped, options.now(), storedCustomProperties(request));
-    const references = Array.from(binding.root.getElementsByTagNameNS(BINDING_NAMESPACE, 'DataReference'))
-      .map((reference) => packPartName(reference.getAttribute('URI') ?? ''))
-      .filter((name): name is string => name !== null);
-    // The binding references the custom properties part, which ADatP-4778.2
-    // Table 5-3 lists, even when it was written just now.
-    if (customPropertiesPart !== null && !references.includes(customPropertiesPart)) {
-      references.push(customPropertiesPart);
-    }
-    const parts = await partsOf(zip, references);
-    const missing = references.filter((name) => !parts.has(name));
-    if (missing.length > 0) {
-      return reply.code(422).send({ error: `The binding references parts the package lacks: ${missing.join(', ')}` });
-    }
+    const { writtenParts } = mapped === null ? { writtenParts: [] } : await writeSensitivityLabel(zip, mapped, options.now(), storedCustomProperties(request));
+    // The binding references every part of ADatP-4778.2 Tables 5-2 and 5-3
+    // that the package holds, the custom properties part written just now
+    // included: only the saved package tells which parts exist.
+    const parts = await partsOf(zip, bindablePartsOf(Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false)));
     return {
       signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, options.signer, options.now()) },
       // The other parts written, which the portal stores with the binding.

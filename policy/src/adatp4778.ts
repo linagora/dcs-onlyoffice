@@ -8,7 +8,9 @@ const PACK_PREFIX = 'pack:///';
 export const DOCUMENT_BINDING_ID = 'mb-document';
 
 // Parts a DOCX saved by ONLYOFFICE always contains among those of ADatP-4778.2
-// Tables 5-2 and 5-3. The portal lists the actual parts at every save.
+// Tables 5-2 and 5-3, which the binding the panel writes references. Signing
+// a binding references the parts the package holds instead; a binding that
+// could not be signed keeps these, even in a workbook.
 export const DEFAULT_DOCUMENT_PARTS: readonly string[] = [
   'word/document.xml',
   'word/styles.xml',
