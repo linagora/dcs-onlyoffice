@@ -1,6 +1,28 @@
 import { expect, type Page } from '@playwright/test';
+import { openNewDocument } from './documents.ts';
 import { editorFrame, pluginPanel } from './plugin.ts';
 import type { NewPortion } from './portions.ts';
+
+const WORKBOOK_TEMPLATE = 'exercise-northwind-logistics.xlsx';
+const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
+
+// A new DIFFUSION RESTREINTE workbook from the demo template, open in the
+// page's editor; its id.
+export async function restrictedWorkbook(page: Page): Promise<string> {
+  const documentId = await openNewDocument(page, WORKBOOK_TEMPLATE);
+  await pluginPanel(page).getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
+  await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
+  return documentId;
+}
+
+// The id of the first portion the panel lists.
+export async function firstPortionId(page: Page): Promise<string> {
+  const id = await pluginPanel(page).getByTestId('portion-item').first().getAttribute('data-portion-id');
+  if (id === null) {
+    throw new Error('The panel lists no portion');
+  }
+  return id;
+}
 
 // The spreadsheet editor's API, on the editor frame's window: the name box's
 // search, which selects a cell or a range, and the model of the active sheet.

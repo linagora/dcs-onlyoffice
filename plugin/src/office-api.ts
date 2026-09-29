@@ -115,6 +115,10 @@ export interface ApiProtectedRange {
 export interface InternalUserProtectedRange {
   name: string;
   asc_getRef(): string | null;
+  ref: { getName(): string };
+  // The model asks it before any edit of the range's cells, and before any
+  // change of the range itself.
+  isUserCanEdit(userId: string): boolean;
 }
 
 // One of a sheet's six header and footer strings.
@@ -144,6 +148,8 @@ export interface InternalHeaderFooter {
 
 export interface InternalWorksheet {
   userProtectedRanges: InternalUserProtectedRange[] | null;
+  // Changes a range, or removes it without `to`, in the editor's history.
+  editUserProtectedRanges(from: InternalUserProtectedRange, to: null, addToHistory: true): unknown;
   headerFooter: InternalHeaderFooter;
   // Whether a range intersects a user protected range; with `notCheckUser`,
   // whoever may edit it.
@@ -165,6 +171,9 @@ export interface ApiRange {
   ForEach(callback: (cell: ApiRange) => void): boolean;
   SetValue(value: string): boolean;
   Merge(across: boolean): boolean;
+  UnMerge(): boolean;
+  // Clears the values and the formats.
+  Clear(): unknown;
   SetBold(bold: boolean): unknown;
   SetWrap(wrap: boolean): unknown;
   SetAlignHorizontal(alignment: 'center'): unknown;
@@ -180,6 +189,7 @@ export interface ApiWorksheet {
   GetCustomXmlParts(): ApiCustomXmlParts;
   GetName(): string;
   GetSelection(): ApiRange;
+  GetRange(address: string): ApiRange;
   // The current user becomes the range's only editor.
   AddProtectedRange(title: string, reference: string): ApiProtectedRange;
   worksheet: InternalWorksheet;

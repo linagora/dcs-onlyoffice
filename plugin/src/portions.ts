@@ -51,7 +51,7 @@ export const EDITORS: Readonly<
     write: writeWorkbookLabellingCommand,
     pageMarkingOf: (snapshot) => sheetPageMarkingOf(snapshot.sheets),
     insertsPortions: true,
-    editsPortions: false,
+    editsPortions: true,
     selectsPortions: false,
     // The spreadsheet editor shows the cell settings at the first selection
     // after its side menu opened, once the panel had opened it: often as the

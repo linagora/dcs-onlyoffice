@@ -1,15 +1,12 @@
-import type { Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { documentLogEntries } from './support/deployment.ts';
-import { openDocument, openNewDocument } from './support/documents.ts';
+import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, removeUserProtectedRange } from './support/plugin.ts';
 import { forceSavedXlsx, shownPortions } from './support/portions.ts';
-import { cellValue, fillWorkbookPortionForm, insertWorkbookPortion, typeIntoCell } from './support/workbooks.ts';
+import { cellValue, fillWorkbookPortionForm, firstPortionId, insertWorkbookPortion, restrictedWorkbook, typeIntoCell } from './support/workbooks.ts';
 
-const WORKBOOK_TEMPLATE = 'exercise-northwind-logistics.xlsx';
-const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 const SPECIAL_FRANCE_CODE = 'DEMO-FR:2/1.1';
 const WITH_MORE_RESTRICTIVE_PORTIONS = 'DIFFUSION RESTREINTE – CONTIENT DES PORTIONS PLUS RESTRICTIVES';
@@ -22,22 +19,6 @@ const CELLS_OCCUPIED = 'The selected cells hold a value, a merge or another port
 const EMPTY_CELLS = 'F4:G4';
 const FILLED_CELLS = 'B4:C4';
 
-// A new DIFFUSION RESTREINTE workbook, open in the French officer's editor.
-async function restrictedWorkbook(page: Page): Promise<string> {
-  const documentId = await openNewDocument(page, WORKBOOK_TEMPLATE);
-  await pluginPanel(page).getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
-  await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
-  return documentId;
-}
-
-async function portionIdOf(page: Page): Promise<string> {
-  const id = await pluginPanel(page).getByTestId('portion-item').first().getAttribute('data-portion-id');
-  if (id === null) {
-    throw new Error('The panel lists no portion');
-  }
-  return id;
-}
-
 test('a portion inserted into empty cells is stored in a merged, marked placeholder under a range that lists no editor', async ({ page }) => {
   const documentId = await restrictedWorkbook(page);
   const text = markedText('Fictional convoy route, held in cells');
@@ -47,7 +28,7 @@ test('a portion inserted into empty cells is stored in a merged, marked placehol
   const panel = pluginPanel(page);
   await expect(panel.getByTestId('portion-text')).toHaveText([text]);
   await expect(panel.getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
-  const portionId = await portionIdOf(page);
+  const portionId = await firstPortionId(page);
   const saved = await forceSavedXlsx(page, documentId, (xlsx) => xlsx.portionParts.length === 1 && xlsx.bindings[0]?.signed === true);
   const [sheet] = saved.worksheets;
   expect(sheet?.userProtectedRanges).toEqual([{ name: portionId, reference: EMPTY_CELLS, users: [] }]);
@@ -127,7 +108,7 @@ test('a save that removes the range of a portion is logged as removing the porti
   const since = new Date();
   const documentId = await restrictedWorkbook(page);
   await insertWorkbookPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional portion whose range goes') }, EMPTY_CELLS);
-  const portionId = await portionIdOf(page);
+  const portionId = await firstPortionId(page);
   await forceSavedXlsx(page, documentId, (xlsx) => xlsx.worksheets[0]?.userProtectedRanges.length === 1);
 
   await removeUserProtectedRange(await pluginFrame(page), portionId);
