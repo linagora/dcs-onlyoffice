@@ -39,11 +39,15 @@ type BindingVerification = (
 // Where the portal serves a stored file.
 export type ServedTo = 'document-server' | 'download';
 
-// The label an uploaded file carries, and where it comes from: the
-// platform's base label part or an ADatP-4778 binding.
+// Where the label an uploaded file carries comes from: the platform's base
+// label part, an ADatP-4778 binding, or a sensitivity label that the label
+// mapping knows.
+const LABEL_SOURCES = ['base-label', 'binding', 'sensitivity-label'] as const;
+
+// The label an uploaded file carries, and where it comes from.
 export interface CarriedLabel {
   code: string;
-  source: 'base-label' | 'binding';
+  source: (typeof LABEL_SOURCES)[number];
 }
 
 // What the policy service reads in an uploaded file: the label it carries,
@@ -292,5 +296,6 @@ function readUploadReading(body: unknown): UploadReading | null {
   }
   const code: unknown = typeof label === 'object' && 'code' in label ? label.code : null;
   const source: unknown = typeof label === 'object' && label !== null && 'source' in label ? label.source : null;
-  return typeof code === 'string' && (source === 'base-label' || source === 'binding') ? { label: { code, source }, signature } : null;
+  const known = LABEL_SOURCES.find((candidate) => candidate === source);
+  return typeof code === 'string' && known !== undefined ? { label: { code, source: known }, signature } : null;
 }
