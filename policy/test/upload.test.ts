@@ -51,6 +51,38 @@ async function minimalDocx(tags: string[] = [], customXml: string[] = []): Promi
   return zip.generateAsync({ type: 'uint8array' });
 }
 
+// The demo policy's identifier, as its labels name it.
+const DEMO_POLICY_URI = 'urn:oid:2.25.166231019600111174217682845337071458325';
+
+// An ADatP-4774 originator label, as another labelling tool could write it.
+function originatorLabel(policy: string, uri: string, classification: string, categories = ''): string {
+  return (
+    `<slab:originatorConfidentialityLabel xmlns:slab="${LABEL_NAMESPACE}"><slab:ConfidentialityInformation>` +
+    `<slab:PolicyIdentifier URI="${uri}">${policy}</slab:PolicyIdentifier><slab:Classification>${classification}</slab:Classification>${categories}` +
+    '</slab:ConfidentialityInformation></slab:originatorConfidentialityLabel>'
+  );
+}
+
+// An ADatP-4778.2 binding of a document label to the main document part,
+// unsigned, as another labelling tool could write it.
+function bindingOf(labelXml: string): string {
+  return (
+    `<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}"><mb:MetadataBindingContainer><mb:MetadataBinding Id="mb-document">` +
+    `<mb:Metadata>${labelXml}</mb:Metadata><mb:DataReference URI="pack:///word/document.xml"/>` +
+    '</mb:MetadataBinding></mb:MetadataBindingContainer></mb:BindingInformation>'
+  );
+}
+
+// A package with one more Custom XML part, of the given name, related from
+// the main document as ECMA-376 Part 1 §15.2.5 requires.
+async function withRelatedCustomXml(docx: Uint8Array, part: string, xml: string): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(docx);
+  zip.file(part, xml);
+  const relationships = (await zip.file('word/_rels/document.xml.rels')?.async('string')) ?? '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+  zip.file('word/_rels/document.xml.rels', relationships.replace('</Relationships>', `<Relationship Id="rIdLabels" Type="${CUSTOM_XML_RELATIONSHIP}" Target="../${part}"/></Relationships>`));
+  return zip.generateAsync({ type: 'uint8array' });
+}
+
 // The reason a refusal gives, undefined for another answer.
 function reasonOf(json: unknown): unknown {
   return typeof json === 'object' && json !== null && 'reason' in json ? json.reason : undefined;
@@ -255,5 +287,21 @@ describe('the preparation of an uploaded document', () => {
     );
     const custom = (await (await JSZip.loadAsync(stored)).file('docProps/custom.xml')?.async('string')) ?? '';
     assert.match(custom, /MSIP_Label_10000000-0000-4000-8000-000000000002_Enabled/);
+  });
+
+it('replaces a binding in whichever Custom XML part holds it', async () => {
+    const docx = await withRelatedCustomXml(await minimalDocx(), 'customXml/labels.xml', bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'DIFFUSION RESTREINTE')));
+
+    const { docx: preparedDocx } = await prepared(docx, base(DIFFUSION_RESTREINTE));
+
+    assert.ok(preparedDocx !== null);
+    const zip = await JSZip.loadAsync(preparedDocx);
+    const bindings = [];
+    for (const name of Object.keys(zip.files).filter((file) => file.startsWith('customXml/') && !file.includes('_rels') && !file.includes('itemProps'))) {
+      if (((await zip.file(name)?.async('string')) ?? '').includes(BINDING_NAMESPACE)) {
+        bindings.push(name);
+      }
+    }
+    assert.deepEqual(bindings, ['customXml/labels.xml']);
   });
 });

@@ -5,7 +5,7 @@ import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
-import { CUSTOM_XML_ITEM, loadPackage } from './opc.ts';
+import { customXmlParts, loadPackage } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
@@ -198,7 +198,7 @@ export async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
   const bindings: PackageBinding[] = [];
   const unreadableBindings: string[] = [];
   let baseCode: string | null = null;
-  for (const part of Object.keys(zip.files).filter((file) => CUSTOM_XML_ITEM.test(file)).sort()) {
+  for (const part of await customXmlParts(zip)) {
     const xml = (await zip.file(part)?.async('string')) ?? '';
     const parsed = parseXml(xml);
     const root = parsed.ok ? parsed.root : null;

@@ -9,7 +9,7 @@ import {
   appendRelationship,
   CONTENT_TYPES_NAMESPACE,
   CONTENT_TYPES_PART,
-  CUSTOM_XML_ITEM,
+  customXmlParts,
   declareContentType,
   loadPackage,
   PACKAGE_RELATIONSHIPS_PART,
@@ -150,7 +150,7 @@ async function mainDocumentPart(zip: JSZip): Promise<string | null> {
 // one, else as a new part of the main document, with its properties part and
 // relationships, as ONLYOFFICE writes those of the panel.
 async function writeCustomXmlPart(zip: JSZip, mainPart: string, namespace: string, xml: string): Promise<void> {
-  for (const part of Object.keys(zip.files).filter((name) => CUSTOM_XML_ITEM.test(name))) {
+  for (const part of await customXmlParts(zip)) {
     const parsed = parseXml((await zip.file(part)?.async('string')) ?? '');
     if (parsed.ok && parsed.root.namespaceURI === namespace) {
       zip.file(part, xml);

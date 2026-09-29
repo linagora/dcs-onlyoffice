@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { Document } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 import { parseXml } from './xml.ts';
@@ -10,6 +11,13 @@ export const CONTENT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/packag
 // The Custom XML Data Storage parts of an Office document, as Office and
 // ONLYOFFICE name them.
 export const CUSTOM_XML_ITEM: RegExp = /^customXml\/item\d+\.xml$/;
+// The relationship to a Custom XML Data Storage part, Transitional and Strict
+// (ECMA-376 Part 1 §15.2.5).
+const CUSTOM_XML_RELATIONSHIPS: readonly string[] = [
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships/customXml',
+];
+const RELATIONSHIPS_PART = /^(?:(.*)\/)?_rels\/([^/]+)\.rels$/;
 
 // The package a body holds, null when it is no ZIP package.
 export async function loadPackage(body: Buffer): Promise<JSZip | null> {
@@ -66,4 +74,38 @@ export function declareContentType(types: Document, partName: string, contentTyp
   override.setAttribute('ContentType', contentType);
   root.appendChild(override);
   return true;
+}
+
+// The package part of that name, as the package spells it: part names match
+// without regard to case (ECMA-376 Part 2 §6.2.2.3).
+export function partNamed(zip: JSZip, name: string): string | null {
+  const wanted = name.toLowerCase();
+  return Object.keys(zip.files).find((file) => zip.files[file]?.dir === false && file.toLowerCase() === wanted) ?? null;
+}
+
+// A package's Custom XML Data Storage parts, whatever their names: the targets
+// of the customXml relationships of its parts, and the parts named as Office
+// and ONLYOFFICE name them.
+export async function customXmlParts(zip: JSZip): Promise<string[]> {
+  const parts = new Set(Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false && CUSTOM_XML_ITEM.test(name)));
+  for (const relationshipsPart of Object.keys(zip.files)) {
+    const match = RELATIONSHIPS_PART.exec(relationshipsPart);
+    const relationships = match === null ? null : await xmlPartOf(zip, relationshipsPart);
+    if (match === null || relationships === null) {
+      continue;
+    }
+    // Targets are relative to the part the relationships belong to.
+    const base = match[1] ?? '';
+    for (const relationship of Array.from(relationships.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship'))) {
+      const target = relationship.getAttribute('Target') ?? '';
+      if (!CUSTOM_XML_RELATIONSHIPS.includes(relationship.getAttribute('Type') ?? '') || relationship.getAttribute('TargetMode') === 'External' || target === '') {
+        continue;
+      }
+      const part = partNamed(zip, target.startsWith('/') ? target.slice(1) : path.posix.normalize(path.posix.join(base, target)));
+      if (part !== null) {
+        parts.add(part);
+      }
+    }
+  }
+  return [...parts].sort();
 }
