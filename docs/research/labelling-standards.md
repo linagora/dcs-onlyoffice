@@ -643,6 +643,50 @@ a DOCX would need a project convention, for example a `DataReference` to `pack:/
 an XPath `ds:Transforms` selecting a content control. That is **not standardized**; see
 [section 10](#10-open-questions).
 
+### 4.9 What the platform's binding references
+
+Additional parts "MAY be referenced" (pp. 5-3 to 5-5), and "DataReference elements SHALL be used to reference the
+files within the OPC package" (p. 5-3). After the parts of Tables 5-2 and 5-3 that a text document holds, the
+platform's whole-document binding references its other parts that can hold content (Implementation, #91):
+
+| Parts | What they hold |
+|---|---|
+| `word/people.xml` | The people who comment |
+| `word/commentsIds.xml`, `word/commentsExtensible.xml` | The comments' identifiers and their extensible form, which Word writes beside the comments |
+| `word/glossary/document.xml`, `word/glossary/styles.xml` | The glossary, which holds building blocks and the placeholders of content controls, and its styles |
+| `word/charts/chart<N>.xml`, `chartEx<N>.xml`, `colors<N>.xml`, `style<N>.xml` | Charts, the charts of Word 2016, and their colours and styles |
+| `word/drawings/*.xml` | Shapes drawn on charts |
+| `word/diagrams/*.xml` | SmartArt diagrams |
+| `word/embeddings/*`, `word/ink/*`, `word/activeX/*` | Embedded objects, ink, and ActiveX controls with their state |
+| `docProps/thumbnail.*` | The thumbnail, a picture of the first page |
+
+The theme, the font table, the settings, the web settings and the numbering definitions stay out: they hold
+presentation rather than content. A workbook's list is in
+[onlyoffice-spreadsheets.md 11.4](onlyoffice-spreadsheets.md#114-what-the-platforms-binding-references). In both
+formats, the binding then references:
+
+- every Custom XML part but its own, found by name under `customXml/` and through `customXml` relationships: the base
+  label's part and the portions' parts, with their properties parts. The binding part holds the signature, so it
+  cannot reference itself;
+- every relationship part (`_rels/*.rels`), and the content types, `[Content_Types].xml`, through which OPC reads the
+  package: a part added, removed or re-targeted changes them.
+
+Notes:
+
+- **Content types.** A reference to a part that is not XML states its content type, as Annex A requires: the one
+  the package declares, by an override for the part or the default for its extension, or else the one the
+  platform knows for the extension (Implementation, #91).
+- **Percent-encoding.** A URI path cannot hold `[` or `]`, which [RFC 3986][rfc3986] keeps for an IP literal in the
+  authority (§3.2.2, §3.3). The platform writes `pack:///%5BContent_Types%5D.xml`, percent-encoding each segment of a
+  part name, and decodes the address when it verifies. `xmlsec1` 1.3.12 looks a `--url-map` address up decoded
+  first: a map from the encoded address alone does not resolve it (Tested).
+- **Parts read by their names.** The platform reads Custom XML parts named `customXml/item<N>.xml`, as Office and
+  ONLYOFFICE name them, without a relationship; under the `xml` default of the content types, such a part needs none
+  of its own either. The policy service therefore reports, among the parts changed since signing, a part the binding
+  would reference but its signature does not name (Implementation, #91).
+- **Earlier signatures.** A file signed before these references is reported with them among the changed parts until
+  its next save signs it again (Implementation, #91).
+
 ---
 
 ## 5. Open XML SPIF (question 4)
@@ -1074,8 +1118,9 @@ Follow the XSDs, not the examples. Each item below was tested where marked.
     implementations are case-sensitive. Suggested approach: match case-insensitively on read, and emit the
     SPIF's spelling on write.
 13. **Parts beyond Tables 5-2 and 5-3** (`numbering.xml`, `settings.xml`, charts, embedded objects, glossary)
-    are optional in the profile ("MAY"), yet they can hold content. Decide whether to reference every
-    content-bearing part.
+    are optional in the profile ("MAY"), yet they can hold content. Answered: the platform references every part
+    that can hold content, and leaves out the theme, fonts, settings and numbering definitions
+    ([4.9](#49-what-the-platforms-binding-references); Implementation, #108 and #91).
 
 ---
 
@@ -1201,6 +1246,7 @@ e372c16e656dfa8571d4d8b834f32dc55f881d3c9a12daacf57ce1490da4a434  xmlspif.org/sc
 [4778]: https://www.jedi-sec.us/downloads/MISC_PDF/ADatP-4778%20EDA%20V1%20E.pdf
 [4778.1]: https://jedi-sec.us/downloads/MISC_PDF/ADatP-4778.1%20EDA%20V1%20E.pdf
 [4778.2]: https://storage.nisp.nw3.dk/ADatP-4778.2_EDA_V1_E.pdf
+[rfc3986]: https://www.rfc-editor.org/rfc/rfc3986
 [tn1491]: https://storage.nisp.nw3.dk/TN-1491_Edition2-Binding_Profiles_v1.0-Signed.pdf
 [nisp4774]: https://nisp.nw3.dk/coverdoc/nato-stanag4774.html
 [nisp4778]: https://nisp.nw3.dk/coverdoc/nato-stanag4778.html

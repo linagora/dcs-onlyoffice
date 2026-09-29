@@ -616,11 +616,16 @@ Observations:
 | `xl/chartsheets/sheet<N>.xml` | Chart sheets |
 | `xl/queryTables/queryTable<N>.xml`, `xl/connections.xml` | Queries and their connections |
 | `xl/embeddings/*` | Embedded objects |
+| `xl/activeX/*`, `xl/ctrlProps/*`, `xl/ink/*` | ActiveX and form controls, with their state, and ink (Implementation, #91) |
+| `docProps/thumbnail.*` | The thumbnail, a picture of the first sheet (Implementation, #91) |
 
 It leaves out the theme (`xl/theme/`), the calculation chain (`xl/calcChain.xml`) and printer settings
-(`xl/printerSettings/`), which hold no content, with the package's relationships, its content types and the Custom XML
-parts, as in a text document. References to parts that are not XML state their content type, as Annex A requires:
-pictures, embedded objects and legacy VML drawings, which Office does not write as well-formed XML. The binding the
+(`xl/printerSettings/`), which hold no content. As in a text document, it then references the Custom XML parts but the
+binding's own, the relationship parts and the content types
+([labelling-standards.md 4.9](labelling-standards.md#49-what-the-platforms-binding-references); Implementation,
+#91). References to parts that are not XML state their content type, as Annex A requires:
+pictures, embedded objects and legacy VML drawings, which Office does not write as well-formed XML; since #91, the
+content type the package declares for the part, and the one the platform knows for its extension otherwise. The binding the
 panel writes during an editing session, which each save signs again, names the parts ONLYOFFICE wrote for every
 workbook in [11.3](#113-what-onlyoffice-writes-against-the-table-tested): `xl/workbook.xml`, `xl/styles.xml`,
 `xl/sharedStrings.xml`, `xl/worksheets/sheet1.xml`, `docProps/core.xml` and `docProps/app.xml`.
