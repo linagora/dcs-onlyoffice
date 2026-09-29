@@ -300,16 +300,16 @@ The CI runs the type checks and the API tests, then starts the `standalone` stac
 
 ## Roadmap
 
-Iteration 4 is in progress: changing a portion's text and label, deleting portions, page markings, the journal of label changes, the signed ADatP-4778 binding and the check of stored files' signatures are done; the demo on a hosted stack comes next.
+Iteration 5 is done: the Microsoft Purview sensitivity label written at each save and read at upload, uploads, the one-command start and the demo walkthrough. Two checks by hand remain, the demo on a hosted stack with corporate accounts and a look in Microsoft Word at the sensitivity label of stored documents. Iteration 6, workbooks in the spreadsheet editor, comes next.
 
 | Iteration | Scope | Status |
 | --- | --- | --- |
 | 1 | Stack, single sign-on, portal, labelling panel, policy service | Done |
 | 2 | Protected portions without encryption, document label and ADatP-4778.2 binding, co-editing | Done |
 | 3 | Encryption of portions with OpenTDF and hybrid post-quantum key encapsulation, clearance directory, access decisions | Done |
-| 4 | Editing existing portions, portion versions, header and footer markings, signed ADatP-4778 binding | In progress |
-| 5 | Microsoft Purview label mapping, standalone packaging, demo script | Planned |
-| 6 | Spreadsheet editor | Planned |
+| 4 | Editing existing portions, portion versions, header and footer markings, signed ADatP-4778 binding | Done |
+| 5 | Microsoft Purview sensitivity labels, uploads, one-command start, demo walkthrough | Done |
+| 6 | Workbooks in the spreadsheet editor | Planned |
 
 ## Standards
 
