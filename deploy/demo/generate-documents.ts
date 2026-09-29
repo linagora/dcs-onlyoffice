@@ -141,7 +141,10 @@ async function buildLogisticsWorkbook(): Promise<Buffer> {
     ],
     [
       'xl/worksheets/sheet1.xml',
-      `${declaration}<worksheet xmlns="${spreadsheetml}"><cols><col min="1" max="1" width="8" customWidth="1"/><col min="2" max="3" width="26" customWidth="1"/><col min="4" max="4" width="12" customWidth="1"/></cols><sheetData>${sheetRows}</sheetData><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/><headerFooter><oddHeader>&amp;LExercise NORTHWIND 26 - fictional</oddHeader><oddFooter>&amp;RFictional workbook</oddFooter></headerFooter></worksheet>`,
+      // Printed on A4 (paper size 9) in landscape: the demo policy's widest page
+      // markings then leave the header's left section and the footer's right one
+      // clear, where they ran into them in portrait.
+      `${declaration}<worksheet xmlns="${spreadsheetml}"><cols><col min="1" max="1" width="8" customWidth="1"/><col min="2" max="3" width="26" customWidth="1"/><col min="4" max="4" width="12" customWidth="1"/></cols><sheetData>${sheetRows}</sheetData><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape"/><headerFooter><oddHeader>&amp;LExercise NORTHWIND 26 - fictional</oddHeader><oddFooter>&amp;RFictional workbook</oddFooter></headerFooter></worksheet>`,
     ],
   ];
   // The shared strings, now that the sheet has named them all.
