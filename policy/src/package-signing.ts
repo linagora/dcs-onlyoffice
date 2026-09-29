@@ -1,10 +1,11 @@
 import type { Element } from '@xmldom/xmldom';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import JSZip from 'jszip';
+import type JSZip from 'jszip';
 import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, packPartName } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
+import { CUSTOM_XML_ITEM, loadPackage } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
@@ -177,17 +178,6 @@ function soleBinding(labels: PackageLabels): { ok: true; binding: PackageBinding
   return { ok: true, binding: binding ?? null };
 }
 
-async function loadPackage(body: Buffer): Promise<JSZip | null> {
-  try {
-    return await JSZip.loadAsync(body);
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      return null;
-    }
-    throw error;
-  }
-}
-
 // The bindings, the base label and the portion labels in clear of a package:
 // the placeholders' tags hold the portion labels the panel computes the
 // document label from.
@@ -195,7 +185,7 @@ async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
   const bindings: PackageBinding[] = [];
   const unreadableBindings: string[] = [];
   let baseCode: string | null = null;
-  for (const part of Object.keys(zip.files).filter((file) => /^customXml\/item\d+\.xml$/.test(file)).sort()) {
+  for (const part of Object.keys(zip.files).filter((file) => CUSTOM_XML_ITEM.test(file)).sort()) {
     const xml = (await zip.file(part)?.async('string')) ?? '';
     const parsed = parseXml(xml);
     const root = parsed.ok ? parsed.root : null;

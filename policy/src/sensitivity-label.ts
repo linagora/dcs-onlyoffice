@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { type Document, XMLSerializer } from '@xmldom/xmldom';
+import { XMLSerializer } from '@xmldom/xmldom';
 import type JSZip from 'jszip';
 import { escapeXml } from './adatp4774.ts';
+import { appendRelationship, CONTENT_TYPES_PART, declareContentType, PACKAGE_RELATIONSHIPS_PART, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
 import { childElements, childrenNamed, parseXml } from './xml.ts';
 
 // A sensitivity label of a Microsoft 365 tenant: its id, and its unique name
@@ -29,10 +30,6 @@ export interface SensitivityLabelWriting {
 export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const CUSTOM_PROPERTIES_PART = 'docProps/custom.xml';
-const PACKAGE_RELATIONSHIPS_PART = '_rels/.rels';
-const CONTENT_TYPES_PART = '[Content_Types].xml';
-const RELATIONSHIPS_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/relationships';
-const CONTENT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/content-types';
 // The package relationship to the custom properties part, Transitional and
 // Strict (ECMA-376 Part 1 §15.2.12.2).
 const CUSTOM_PROPERTIES_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties';
@@ -127,7 +124,7 @@ async function customPropertiesPartOf(zip: JSZip): Promise<{ part: string; prese
 // The parts that the package relationships of the given types designate, as
 // their targets name them from the package root.
 async function relationshipTargets(zip: JSZip, types: string[]): Promise<string[]> {
-  const relationships = await documentOf(zip, PACKAGE_RELATIONSHIPS_PART);
+  const relationships = await xmlPartOf(zip, PACKAGE_RELATIONSHIPS_PART);
   return Array.from(relationships?.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship') ?? [])
     .filter((relationship) => types.includes(relationship.getAttribute('Type') ?? ''))
     .map((relationship) => (relationship.getAttribute('Target') ?? '').replace(/^(\.?\/)+/, ''))
@@ -159,46 +156,23 @@ function isTransitional(xml: string): boolean {
 // Declares a custom properties part: its content type, and its package
 // relationship unless it has one. Gives the parts it changed.
 async function declareCustomProperties(zip: JSZip, part: string, related: boolean): Promise<string[]> {
-  const relationships = await documentOf(zip, PACKAGE_RELATIONSHIPS_PART);
-  const types = await documentOf(zip, CONTENT_TYPES_PART);
-  const relationshipsRoot = relationships?.documentElement ?? null;
-  const typesRoot = types?.documentElement ?? null;
-  if (relationships === null || relationshipsRoot === null || types === null || typesRoot === null) {
+  const relationships = await xmlPartOf(zip, PACKAGE_RELATIONSHIPS_PART);
+  const types = await xmlPartOf(zip, CONTENT_TYPES_PART);
+  if (relationships === null || types === null || relationships.documentElement === null || types.documentElement === null) {
     return [];
   }
   const changed: string[] = [];
   const serializer = new XMLSerializer();
   if (!related) {
-    const ids = new Set(Array.from(relationships.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship')).map((relationship) => relationship.getAttribute('Id')));
-    let number = ids.size + 1;
-    while (ids.has(`rId${number}`)) {
-      number += 1;
-    }
-    const relationship = relationships.createElementNS(RELATIONSHIPS_NAMESPACE, 'Relationship');
-    relationship.setAttribute('Id', `rId${number}`);
-    relationship.setAttribute('Type', CUSTOM_PROPERTIES_RELATIONSHIP);
-    relationship.setAttribute('Target', part);
-    relationshipsRoot.appendChild(relationship);
+    appendRelationship(relationships, CUSTOM_PROPERTIES_RELATIONSHIP, part);
     zip.file(PACKAGE_RELATIONSHIPS_PART, serializer.serializeToString(relationships));
     changed.push(PACKAGE_RELATIONSHIPS_PART);
   }
-  const partName = `/${part}`;
-  const declared = Array.from(types.getElementsByTagNameNS(CONTENT_TYPES_NAMESPACE, 'Override')).some((override) => override.getAttribute('PartName') === partName);
-  if (!declared) {
-    const override = types.createElementNS(CONTENT_TYPES_NAMESPACE, 'Override');
-    override.setAttribute('PartName', partName);
-    override.setAttribute('ContentType', CUSTOM_PROPERTIES_TYPE);
-    typesRoot.appendChild(override);
+  if (declareContentType(types, `/${part}`, CUSTOM_PROPERTIES_TYPE)) {
     zip.file(CONTENT_TYPES_PART, serializer.serializeToString(types));
     changed.push(CONTENT_TYPES_PART);
   }
   return changed;
-}
-
-async function documentOf(zip: JSZip, part: string): Promise<Document | null> {
-  const xml = await zip.file(part)?.async('string');
-  const parsed = xml === undefined ? null : parseXml(xml);
-  return parsed?.ok === true ? parsed.root.ownerDocument : null;
 }
 
 // The properties of a custom properties part; none when it is no well-formed
