@@ -183,38 +183,38 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
-  // The panel reports each change of a portion it makes, of its text, its
-  // label or both, which the portal logs with the person who made it.
-  app.post<{ Params: DocumentParams }>('/documents/:id/portion-change', async (request, reply) => {
-    const document = await findDocument(config.documentsDirectory, request.params.id);
-    const change = readPortionChange(request.body);
-    if (document === null || change === null) {
-      return reply.code(document === null ? 404 : 400).send({ error: document === null ? 'Document not found' : 'Expected { portion, before, after }' });
-    }
-    const { user } = requireSession(request);
-    const decision = await documentAccess.decideOne(user, document);
-    if (!decision.open) {
-      return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
-    }
-    await labelJournal.recordPortionReport({ documentId: document.id, ...change }, user.id);
-    return reply.code(204).send();
+  // The panel reports what it does to portions, which the portal logs with
+  // the person who did it, from a person who may open the document.
+  const reportRoute = <Report extends object>(
+    report: string,
+    read: (body: unknown) => Report | null,
+    expected: string,
+    record: (entry: Report & { documentId: string }, user: string) => Promise<void> | void,
+  ): void => {
+    app.post<{ Params: DocumentParams }>(`/documents/:id/${report}`, async (request, reply) => {
+      const document = await findDocument(config.documentsDirectory, request.params.id);
+      const body = read(request.body);
+      if (document === null || body === null) {
+        return reply.code(document === null ? 404 : 400).send({ error: document === null ? 'Document not found' : `Expected ${expected}` });
+      }
+      const { user } = requireSession(request);
+      const decision = await documentAccess.decideOne(user, document);
+      if (!decision.open) {
+        return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
+      }
+      await record({ documentId: document.id, ...body }, user.id);
+      return reply.code(204).send();
+    });
+  };
+  // Each change of a portion, of its text, its label or both.
+  reportRoute('portion-change', readPortionChange, '{ portion, before, after }', async (change, user) => labelJournal.recordPortionReport(change, user));
+  // Each portion deleted.
+  reportRoute('portion-deletion', readPortionDeletion, '{ portion, before }', (deletion, user) => {
+    labelJournal.recordPortionDeletion(deletion, user);
   });
-
-  // The panel reports each portion it deletes, which the portal logs with the
-  // person who deleted it.
-  app.post<{ Params: DocumentParams }>('/documents/:id/portion-deletion', async (request, reply) => {
-    const document = await findDocument(config.documentsDirectory, request.params.id);
-    const deletion = readPortionDeletion(request.body);
-    if (document === null || deletion === null) {
-      return reply.code(document === null ? 404 : 400).send({ error: document === null ? 'Document not found' : 'Expected { portion, before }' });
-    }
-    const { user } = requireSession(request);
-    const decision = await documentAccess.decideOne(user, document);
-    if (!decision.open) {
-      return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
-    }
-    labelJournal.recordPortionDeletion({ documentId: document.id, ...deletion }, user.id);
-    return reply.code(204).send();
+  // Each protection of content already in the document, as a new portion.
+  reportRoute('existing-content-protection', readExistingContentProtection, '{ portion, after }', (protection, user) => {
+    labelJournal.recordExistingContentProtection(protection, user);
   });
 
   // The panel reports the base label changes it makes, which the portal logs
@@ -263,6 +263,15 @@ function readPortionDeletion(body: unknown): { portion: string; before: PortionS
   const { portion } = body;
   const before = readPortionState(body.before);
   return typeof portion === 'string' && before !== null ? { portion, before } : null;
+}
+
+function readExistingContentProtection(body: unknown): { portion: string; after: PortionState } | null {
+  if (typeof body !== 'object' || body === null || !('portion' in body) || !('after' in body)) {
+    return null;
+  }
+  const { portion } = body;
+  const after = readPortionState(body.after);
+  return typeof portion === 'string' && after !== null ? { portion, after } : null;
 }
 
 function readPortionState(value: unknown): PortionState | null {

@@ -14,12 +14,37 @@ export interface PortionBlockScope {
   placeholder: string;
 }
 
-// A portion the command writes, with its part: a new one, or a new version
-// of one the document holds; or one it deletes.
+// A portion the command writes, with its part: a new one, in the selected
+// cells or in place of selected cells whose content the panel protects; a new
+// version of one the document holds; or one it deletes.
 export type PortionWriteScope =
   | { kind: 'insertion'; id: string; alias: string; block: PortionBlockScope; xml: string }
+  | { kind: 'protection'; id: string; block: PortionBlockScope; xml: string; cells: SelectedCells }
   | { kind: 'change'; id: string; block: PortionBlockScope; xml: string }
   | { kind: 'deletion'; id: string };
+
+// Selected cells of a workbook whose content the panel protects: their sheet,
+// their address and their displayed values, row by row.
+export interface SelectedCells {
+  sheet: string;
+  address: string;
+  texts: string[][];
+}
+
+// Why the panel refuses to protect the selected cells: the author types in a
+// cell, or the selection holds several blocks of cells, more cells than a
+// portion's text can hold, a merge, a portion, a table or a pivot table, a
+// comment, a formula, or nothing.
+export type SelectionRefusal = 'cell-being-edited' | 'several-areas' | 'too-large' | 'merge-portion-or-table' | 'comment' | 'formula' | 'empty';
+
+// What reading the selection gives: the selected cells, or why the panel
+// refuses them.
+export type SelectionReading = { status: 'read'; cells: SelectedCells } | { status: 'refused'; reason: SelectionRefusal };
+
+// What reading the selection takes: the most cells it may hold.
+export interface SelectionReadingScope {
+  cellLimit: number;
+}
 
 export interface PageMarkingScope {
   tag: string;
@@ -90,5 +115,6 @@ export interface SelectionScope {
 
 // What a command that writes gives: whether it wrote, or, in a workbook,
 // that it refused selected cells that hold a value, a formula, a merge or a
-// portion, or that it wrote nothing while the author types in a cell.
-export type WriteOutcome = 'written' | 'not-written' | 'cells-occupied' | 'cell-being-edited';
+// portion, that the cells to protect changed since the panel read them, or
+// that it wrote nothing while the author types in a cell.
+export type WriteOutcome = 'written' | 'not-written' | 'cells-occupied' | 'selection-changed' | 'cell-being-edited';

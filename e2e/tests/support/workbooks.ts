@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { openNewDocument } from './documents.ts';
 import { editorFrame, pluginPanel } from './plugin.ts';
 import type { NewPortion } from './portions.ts';
@@ -14,6 +14,27 @@ export async function restrictedWorkbook(page: Page): Promise<string> {
   await pluginPanel(page).getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
   await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
   return documentId;
+}
+
+// The template's last two rows of supplies, already filled, and their
+// displayed values, rows of tab-separated cells as a copy from the grid gives
+// them: content that went through ONLYOFFICE in clear, which tests protect,
+// and which therefore carries no portion marker.
+export const SUPPLY_ROWS = {
+  reference: 'A7:D8',
+  text: '2\tLogistics group\tSpare parts (crates)\t40\n3\tExercise control cell\tWater (litres)\t5000',
+};
+
+// Selects cells, picks a label and asks the panel to protect the selection:
+// the confirmation it shows, with its warning and the content.
+export async function openProtectionConfirmation(page: Page, marking: string, reference: string): Promise<Locator> {
+  const panel = pluginPanel(page);
+  await selectCells(page, reference);
+  await panel.getByRole('radio', { name: marking, exact: true }).check();
+  await panel.getByRole('button', { name: 'Protect the selection' }).click();
+  const confirmation = panel.getByTestId('protection-confirmation');
+  await expect(confirmation).toBeVisible();
+  return confirmation;
 }
 
 // The id of the first portion the panel lists.

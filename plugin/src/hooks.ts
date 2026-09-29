@@ -280,31 +280,53 @@ export function usePortionReadings(portions: StoredPortion[], reader: PortionRea
 }
 
 const INSERT_ENTRY_ID = 'dcs-insert-portion';
+const PROTECT_ENTRY_ID = 'dcs-protect-selection';
 const INSERT_BUTTON_ID = 'dcs-insert-portion-button';
 
-// Entry points in the editor's own menus that lead to the panel's form.
-// `onRequest` must keep its identity across renders. The hook only wires the
-// editor, hence no return value.
-export function useInsertionEntryPoints(pluginReady: Promise<PluginInfo>, enabled: boolean, onRequest: () => void): void {
+// What an entry point of the editor's menus asks the panel for.
+export type EntryPointRequest = 'insertion' | 'protection';
+
+// Entry points in the editor's own menus that lead to the panel's form: to
+// insert a portion, and, where the panel protects selected content, to
+// protect the selection, in the context menu only. `onRequest` must keep its
+// identity across renders. The hook only wires the editor, hence no return
+// value.
+export function useMenuEntryPoints(
+  pluginReady: Promise<PluginInfo>,
+  enabled: boolean,
+  protectsSelection: boolean,
+  onRequest: (request: EntryPointRequest) => void,
+): void {
   useEffect(() => {
     if (!enabled) {
       return;
     }
     const wire = async (): Promise<void> => {
       await pluginReady;
-      const menuOffered = offerContextMenu(() => [{ id: INSERT_ENTRY_ID, text: messages.contextMenuEntry }], onRequest);
+      const entries = [
+        { id: INSERT_ENTRY_ID, text: messages.contextMenuEntry },
+        ...(protectsSelection ? [{ id: PROTECT_ENTRY_ID, text: messages.protectionContextMenuEntry }] : []),
+      ];
+      const menuOffered = offerContextMenu(
+        () => entries,
+        (id) => {
+          onRequest(id === PROTECT_ENTRY_ID ? 'protection' : 'insertion');
+        },
+      );
       const buttonAdded = await addInsertTabButton(
         { id: INSERT_BUTTON_ID, text: messages.toolbarButton, hint: messages.toolbarButtonHint, icon: 'resources/icon.svg' },
-        onRequest,
+        () => {
+          onRequest('insertion');
+        },
       );
       if (!menuOffered || !buttonAdded) {
-        logProblem('Adding the insertion entry points', new Error('The editor runtime offers no menu API'));
+        logProblem('Adding the menu entry points', new Error('The editor runtime offers no menu API'));
       }
     };
     wire().catch((error: unknown) => {
-      logProblem('Adding the insertion entry points', error);
+      logProblem('Adding the menu entry points', error);
     });
-  }, [pluginReady, enabled, onRequest]);
+  }, [pluginReady, enabled, protectsSelection, onRequest]);
 }
 
 // The editor's content-control events carry the control, whose tag names the

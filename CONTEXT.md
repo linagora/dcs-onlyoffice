@@ -41,8 +41,12 @@ A spreadsheet document, edited in ONLYOFFICE's spreadsheet editor, whose protect
 _Avoid_: spreadsheet (for the file), Excel file
 
 **Protected portion**:
-A part of a document whose text is typed in the labelling panel, never in the document itself, and which carries its own label; the document only shows its placeholder.
+A part of a document whose text is typed in the labelling panel, never in the document itself, or taken from content already in the document by a protection of existing content, and which carries its own label; the document only shows its placeholder.
 _Avoid_: secret paragraph, encrypted block, protected cell
+
+**Protection of existing content**:
+Making a protected portion of content already in the document, which its author selected, saw and confirmed, warned that it went through ONLYOFFICE in clear: the content is protected from then on only, and copies made before keep it.
+_Avoid_: retroactive protection, encryption in place
 
 **Placeholder**:
 What the document shows of a protected portion: its marking, where the portion sits, which authors cannot edit but through the labelling panel. In a text document it is a locked block; in a workbook, a merged range of locked cells.
@@ -83,7 +87,7 @@ The marking of the document label, repeated at the top and the bottom of every p
 _Avoid_: banner, header label
 
 **Journal**:
-The record of label changes: each change of a base label or of a protected portion, and each deletion of a protected portion, made in the panel, with who made it; each upload, with the label read from the file and the base label it got; and each save that lowers a label or removes a protected portion, with who took part in the editing session. It never holds a portion's text.
+The record of label changes: each change of a base label or of a protected portion, each deletion of a protected portion and each protection of existing content, made in the panel, with who made it; each upload, with the label read from the file and the base label it got; and each save that lowers a label or removes a protected portion, with who took part in the editing session. It never holds a portion's text.
 _Avoid_: audit trail, history
 
 **Envelope**:

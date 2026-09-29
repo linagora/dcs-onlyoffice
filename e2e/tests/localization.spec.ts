@@ -3,6 +3,7 @@ import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx } from './support/portions.ts';
+import { selectCells, SUPPLY_ROWS } from './support/workbooks.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 
@@ -39,4 +40,27 @@ test('with the editor in French, the panel, the Insert tab button and new portio
   expect(docx.contentControls).toEqual([
     { alias: 'Portion protégée', tag: expect.any(String), lock: 'sdtContentLocked', text: `${SPECIAL_FRANCE} – portion protégée` },
   ]);
+});
+
+test('with the spreadsheet editor in French, the panel offers and explains the protection of the selection in French', async ({ page }) => {
+  const documentId = await openNewDocument(page, 'exercise-northwind-logistics.xlsx');
+  await page.goto(`/documents/${documentId}/edit?lang=fr`);
+  await waitForEditorReady(page);
+  const panel = pluginPanel(page);
+  const protect = panel.getByRole('button', { name: 'Protéger la sélection' });
+
+  await selectCells(page, SUPPLY_ROWS.reference);
+  await protect.click();
+  const confirmation = panel.getByTestId('protection-confirmation');
+  await expect(confirmation.getByTestId('protection-warning')).toHaveText(
+    'Le contenu sélectionné est déjà passé en clair par ONLYOFFICE : il n’est protégé qu’à partir de maintenant, et les copies faites avant, comme les fichiers de travail de l’éditeur pour cette session, le gardent.',
+  );
+  await expect(confirmation.getByText('Choisissez une étiquette ci-dessus pour le protéger.')).toBeVisible();
+  await confirmation.getByRole('button', { name: 'Annuler' }).click();
+
+  await selectCells(page, 'H20');
+  await protect.click();
+  await expect(panel.getByTestId('protection-failure')).toHaveText(
+    'Les cellules sélectionnées sont vides : saisissez le texte de la portion et insérez-la.',
+  );
 });

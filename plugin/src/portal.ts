@@ -34,6 +34,13 @@ export async function reportPortionDeletion(documentId: string, portionId: strin
   await postReport(documentId, 'portion-deletion', { portion: portionId, before });
 }
 
+// Tells the portal about content already in the document that the panel
+// protected as a new portion, which the portal logs with the signed-in person
+// and the portion's label. The report never holds the content.
+export async function reportExistingContentProtection(documentId: string, portionId: string, after: PortionState): Promise<void> {
+  await postReport(documentId, 'existing-content-protection', { portion: portionId, after });
+}
+
 async function postReport(documentId: string, report: string, body: object): Promise<void> {
   const response = await fetch(`/documents/${encodeURIComponent(documentId)}/${report}`, {
     method: 'POST',

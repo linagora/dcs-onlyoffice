@@ -70,8 +70,9 @@ async function storedPackage(page: Page, documentId: string): Promise<PackageIns
 
 // Leaves the editor on every page that has the document open, then waits for
 // the Document Server to store it, which it does once the last editor has
-// left, with the number of portions the test expects.
-export async function leaveAndWaitForSave(editors: Page[], documentId: string, portionCount: number): Promise<void> {
+// left, with the number of portions the test expects, or with those
+// portions, by their ids, when a save made during the session held as many.
+export async function leaveAndWaitForSave(editors: Page[], documentId: string, portions: number | readonly string[]): Promise<void> {
   const [first] = editors;
   if (first === undefined) {
     throw new Error('No editor to leave');
@@ -81,9 +82,12 @@ export async function leaveAndWaitForSave(editors: Page[], documentId: string, p
   for (const editor of editors) {
     await editor.goto('/');
   }
-  await expect
-    .poll(async () => (await storedPackage(first, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
-    .toBe(portionCount);
+  const expectedIds = typeof portions === 'number' ? null : [...portions].sort();
+  const stored = async (): Promise<number | (string | null)[]> => {
+    const ids = (await storedPackage(first, documentId)).portionParts.map((part) => part.id).sort();
+    return expectedIds === null ? ids.length : ids;
+  };
+  await expect.poll(stored, { timeout: 90_000, intervals: [3_000] }).toEqual(expectedIds ?? portions);
 }
 
 // Force-saves until the stored file shows what the test waits for.

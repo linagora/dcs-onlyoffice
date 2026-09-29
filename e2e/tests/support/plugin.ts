@@ -48,6 +48,7 @@ interface SandboxApi {
       getUserProtectedRangeByName(name: string): { obj: SandboxUserProtectedRange } | null;
       editUserProtectedRanges(from: SandboxUserProtectedRange, to: null, addToHistory: true): unknown;
     };
+    GetRange(reference: string): { Merge(across: boolean): unknown; AddComment(text: string, author: string): unknown };
   };
   GetDocument(): {
     InsertContent(content: SandboxBlock[]): unknown;
@@ -434,6 +435,55 @@ export async function rewordPageMarking(frame: Frame, words: string): Promise<vo
         );
       }),
     words,
+  );
+}
+
+// Merges cells of a workbook's active sheet, bypassing the panel, as a
+// co-author does in the editor.
+export async function mergeCells(frame: Frame, reference: string): Promise<void> {
+  await changeCells(frame, { reference, comment: null });
+}
+
+// Comments on the first of the cells of a workbook's active sheet, bypassing
+// the panel, as a co-author does in the editor.
+export async function commentOnCells(frame: Frame, reference: string, comment: string): Promise<void> {
+  await changeCells(frame, { reference, comment });
+}
+
+async function changeCells(frame: Frame, change: { reference: string; comment: string | null }): Promise<void> {
+  await whilePanelCommandsHeld(frame, async () =>
+    frame.evaluate(
+      async (scope) =>
+        new Promise<void>((resolve, reject) => {
+          const runtime = window.Asc;
+          const callCommand = window.dcsWorkingCallCommand;
+          if (runtime === undefined || callCommand === undefined) {
+            reject(new Error('The plugin runtime has no callCommand'));
+            return;
+          }
+          runtime.scope = scope;
+          callCommand.call(
+            runtime.plugin,
+            () => {
+              // Runs in the editor's sandbox, with Api and Asc.scope only.
+              const { reference, comment } = Asc.scope as { reference: string; comment: string | null }; // SAFETY: the scope set just above
+              const cells = Api.GetActiveSheet().GetRange(reference);
+              if (comment === null) {
+                cells.Merge(false);
+              } else {
+                cells.AddComment(comment, 'Fictional co-author');
+              }
+              return true;
+            },
+            false,
+            true,
+            () => {
+              resolve();
+            },
+          );
+        }),
+      change,
+    ),
   );
 }
 

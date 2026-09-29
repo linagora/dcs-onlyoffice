@@ -35,6 +35,15 @@ export interface PortionDeletion {
   before: PortionState;
 }
 
+// Content already in a document that the panel protected as a new portion,
+// with its label and version: that content went through ONLYOFFICE in clear
+// before, as its author was warned.
+export interface ExistingContentProtection {
+  documentId: string;
+  portion: string;
+  after: PortionState;
+}
+
 // A DOCX a person brought into the portal as a new document: the base label
 // it got, the label the file carried, as a base label, and where that came
 // from, null for none, and whether the file's binding signature matched.
@@ -47,10 +56,11 @@ export interface DocumentUpload {
 
 // The journal of label changes, in the portal's log. Any editor can change a
 // label in the file, and the panel offers lower ones only to administrators:
-// the portal logs every lowering. The panel reports its own changes and
-// deletions, with the person who made them; a save that lowers a label or
-// removes a portion is logged too, with the users of its editing session,
-// whatever made the change. Removing the base label counts as lowering it.
+// the portal logs every lowering. The panel reports its own changes,
+// deletions and protections of existing content, with the person who made
+// them; a save that lowers a label or removes a portion is logged too, with
+// the users of its editing session, whatever made the change. Removing the
+// base label counts as lowering it.
 export class LabelJournal {
   #policyUrl: string;
   #log: FastifyBaseLogger;
@@ -72,6 +82,10 @@ export class LabelJournal {
 
   recordPortionDeletion(deletion: PortionDeletion, user: string): void {
     this.#log.info({ ...deletion, user }, 'Portion deleted in the panel');
+  }
+
+  recordExistingContentProtection(protection: ExistingContentProtection, user: string): void {
+    this.#log.info({ ...protection, user }, 'Existing content protected in the panel');
   }
 
   // An upload is logged as a change of the label the file carried, which
