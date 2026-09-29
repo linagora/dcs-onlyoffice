@@ -6,6 +6,8 @@ import type {
   HeaderFooterSnapshot,
   PortionBlockScope,
   PortionWriteScope,
+  SelectedParagraphs,
+  SelectionReading,
   WriteOutcome,
 } from './commands.ts';
 import type {
@@ -17,6 +19,7 @@ import type {
   ApiParagraph,
   ApiSection,
   HeaderFooterType,
+  InternalParagraphElement,
   OfficeApi,
 } from './office-api.ts';
 
@@ -27,10 +30,77 @@ import type {
 declare const Api: OfficeApi;
 declare const Asc: { scope: CommandScope };
 
-// One command writes a new portion, a portion's change or its deletion, if
-// there is one, with the document label and its page marking, so that a
-// single undo reverts all of them. Nothing is written when the portion to
-// change or delete is gone.
+// The whole paragraphs of the body that the selection touches, or the one
+// that holds the cursor, with their plain text, which the panel protects. A
+// paragraph where the selection only starts at its very end, or ends at its
+// very start, counts out. The panel refuses the paragraphs when they lie
+// outside the body, in a header, a footer, a note or a shape; when they hold
+// a table, an image or a shape, part of a portion, a page marking or another
+// locked content control; when they hold a comment, which would stay in
+// clear, or a footnote or an endnote, which would be lost; and when they hold
+// no text.
+export function readParagraphsCommand(): SelectionReading {
+  const document = Api.GetDocument();
+  // A comment starts and ends with a mark among a paragraph's elements, or
+  // among those of a hyperlink it holds, and a note has its reference among a
+  // run's elements, through the editor's internal model.
+  const holds = (elements: InternalParagraphElement[], mark: 'CommentId' | 'Footnote'): boolean =>
+    elements.some((element) => element[mark] !== undefined || (Array.isArray(element.Content) && holds(element.Content, mark)));
+  const range = document.GetRangeBySelect();
+  const current = document.GetCurrentParagraph();
+  // The editor gives no paragraph for a selection that holds a locked content
+  // control, such as a portion's block or a page marking.
+  const touched = range === null ? (current === null ? [] : [current]) : range.GetAllParagraphs();
+  if (touched === null) {
+    return { status: 'refused', reason: 'content-control' };
+  }
+  // The first and last paragraphs count only when the selection holds some of
+  // their text, by the positions of their characters in the document.
+  const selectsText = (paragraph: ApiParagraph, index: number): boolean => {
+    if (range === null || touched.length < 2 || (index !== 0 && index !== touched.length - 1)) {
+      return true;
+    }
+    const own = paragraph.GetRange();
+    return own !== null && own.GetStartPos() < range.GetEndPos() && own.GetEndPos() > range.GetStartPos();
+  };
+  const paragraphs = touched.filter(selectsText);
+  if (paragraphs.length === 0) {
+    return { status: 'refused', reason: 'empty-paragraphs' };
+  }
+  if (paragraphs.some((paragraph) => paragraph.GetParentTable() !== null)) {
+    return { status: 'refused', reason: 'table' };
+  }
+  if (paragraphs.some((paragraph) => paragraph.GetParentContentControl() !== null)) {
+    return { status: 'refused', reason: 'content-control' };
+  }
+  // Elements of the body itself, one after the other.
+  const position = paragraphs[0]?.GetPosInParent() ?? -1;
+  if (position === -1 || paragraphs.some((paragraph, offset) => document.GetElement(position + offset)?.GetInternalId() !== paragraph.GetInternalId())) {
+    return { status: 'refused', reason: 'outside-body' };
+  }
+  if (paragraphs.some((paragraph) => paragraph.GetAllDrawingObjects().length > 0)) {
+    return { status: 'refused', reason: 'drawing' };
+  }
+  if (paragraphs.some((paragraph) => holds(paragraph.Paragraph.Content, 'CommentId'))) {
+    return { status: 'refused', reason: 'commented-paragraphs' };
+  }
+  if (paragraphs.some((paragraph) => holds(paragraph.Paragraph.Content, 'Footnote'))) {
+    return { status: 'refused', reason: 'noted-paragraphs' };
+  }
+  // List numbering is the paragraphs' formatting, not their text.
+  const texts = paragraphs.map((paragraph) => paragraph.GetText({ Numbering: false, NewLineSeparator: '\n' }));
+  if (texts.every((text) => text.trim() === '')) {
+    return { status: 'refused', reason: 'empty-paragraphs' };
+  }
+  return { status: 'read', content: { kind: 'paragraphs', position, texts } };
+}
+
+// One command writes a new portion, where the cursor is or in place of the
+// paragraphs whose content the panel protects, a portion's change or its
+// deletion, if there is one, with the document label and its page marking, so
+// that a single undo reverts all of them. Nothing is written when the portion
+// to change or delete is gone, nor when the paragraphs to protect no longer
+// hold what the panel read.
 export function writeLabellingCommand(): WriteOutcome {
   const scope = Asc.scope;
   const document = Api.GetDocument();
@@ -70,10 +140,14 @@ export function writeLabellingCommand(): WriteOutcome {
     paragraph?.AddText(block.placeholder);
   };
 
-  const insertPortionBlock = (portion: Extract<PortionWriteScope, { kind: 'insertion' }>): void => {
-    const block = lockedBlock(portion.block.tag, portion.alias, (paragraph, control) => {
+  // An insertion and a protection make the portion's block alike.
+  const portionBlock = (portion: { alias: string; block: PortionBlockScope }): ApiBlockLvlSdt =>
+    lockedBlock(portion.block.tag, portion.alias, (paragraph, control) => {
       showPortionLabel(paragraph, control, portion.block);
     });
+
+  const insertPortionBlock = (portion: Extract<PortionWriteScope, { kind: 'insertion' }>): void => {
+    const block = portionBlock(portion);
     // Inserting at the cursor would split the paragraph that holds it. When
     // that paragraph has text and sits in the document body, the block goes
     // right after it; elsewhere (an empty paragraph, a table, a header) it
@@ -87,6 +161,40 @@ export function writeLabellingCommand(): WriteOutcome {
       document.InsertContent([block]);
     }
     parts.Add(portion.xml);
+  };
+
+  // Comments and notes have their marks among a paragraph's elements, as
+  // readParagraphsCommand finds them, since a command can share nothing with
+  // another.
+  const holds = (elements: InternalParagraphElement[], mark: 'CommentId' | 'Footnote'): boolean =>
+    elements.some((element) => element[mark] !== undefined || (Array.isArray(element.Content) && holds(element.Content, mark)));
+  // The paragraphs the author confirmed give way to the portion's block,
+  // where they stood: they must still stand there, with the same text, and
+  // hold nothing that the panel refuses, which a co-author may have added
+  // since. The block goes in before they go, since a body keeps at least one
+  // element.
+  const protectParagraphs = (protection: Extract<PortionWriteScope, { kind: 'protection' }>, paragraphs: SelectedParagraphs): boolean => {
+    // The paragraphs leave the body itself, even while changes are tracked:
+    // a tracked deletion would keep their text.
+    const unchanged = paragraphs.texts.every((text, offset) => {
+      const element = document.GetElement(paragraphs.position + offset);
+      return (
+        isParagraph(element) &&
+        element.GetText({ Numbering: false, NewLineSeparator: '\n' }) === text &&
+        element.GetAllDrawingObjects().length === 0 &&
+        !holds(element.Paragraph.Content, 'CommentId') &&
+        !holds(element.Paragraph.Content, 'Footnote')
+      );
+    });
+    if (!unchanged) {
+      return false;
+    }
+    document.AddElement(paragraphs.position, portionBlock(protection));
+    for (let removed = 0; removed < paragraphs.texts.length; removed += 1) {
+      document.RemoveElement(paragraphs.position + 1);
+    }
+    parts.Add(protection.xml);
+    return true;
   };
 
   // A portion's part, found by the portion id its root element names, however
@@ -196,6 +304,14 @@ export function writeLabellingCommand(): WriteOutcome {
 
   if (scope.portion?.kind === 'insertion') {
     insertPortionBlock(scope.portion);
+  }
+  if (scope.portion?.kind === 'protection') {
+    if (scope.portion.content.kind !== 'paragraphs') {
+      return 'not-written';
+    }
+    if (!protectParagraphs(scope.portion, scope.portion.content)) {
+      return 'selection-changed';
+    }
   }
   if (scope.portion?.kind === 'change' && !changePortionBlock(scope.portion)) {
     return 'not-written';

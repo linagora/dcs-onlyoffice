@@ -14,32 +14,62 @@ export interface PortionBlockScope {
   placeholder: string;
 }
 
-// A portion the command writes, with its part: a new one, in the selected
-// cells or in place of selected cells whose content the panel protects; a new
+// A portion the command writes, with its part: a new one, where the author
+// asked for it or in place of selected content that the panel protects; a new
 // version of one the document holds; or one it deletes.
 export type PortionWriteScope =
   | { kind: 'insertion'; id: string; alias: string; block: PortionBlockScope; xml: string }
-  | { kind: 'protection'; id: string; block: PortionBlockScope; xml: string; cells: SelectedCells }
+  | { kind: 'protection'; id: string; alias: string; block: PortionBlockScope; xml: string; content: SelectedContent }
   | { kind: 'change'; id: string; block: PortionBlockScope; xml: string }
   | { kind: 'deletion'; id: string };
 
-// Selected cells of a workbook whose content the panel protects: their sheet,
-// their address and their displayed values, row by row.
+// Selected content that the panel protects: a workbook's cells, or a text
+// document's paragraphs.
+export type SelectedContent = SelectedCells | SelectedParagraphs;
+
+// Selected cells of a workbook: their sheet, their address and their
+// displayed values, row by row.
 export interface SelectedCells {
+  kind: 'cells';
   sheet: string;
   address: string;
   texts: string[][];
 }
 
-// Why the panel refuses to protect the selected cells: the author types in a
-// cell, or the selection holds several blocks of cells, more cells than a
-// portion's text can hold, a merge, a portion, a table or a pivot table, a
-// comment, a formula, or nothing.
-export type SelectionRefusal = 'cell-being-edited' | 'several-areas' | 'too-large' | 'merge-portion-or-table' | 'comment' | 'formula' | 'empty';
+// Whole paragraphs of a text document's body, which follow each other: the
+// position of the first among the body's elements, and the plain text of each.
+export interface SelectedParagraphs {
+  kind: 'paragraphs';
+  position: number;
+  texts: string[];
+}
 
-// What reading the selection gives: the selected cells, or why the panel
-// refuses them.
-export type SelectionReading = { status: 'read'; cells: SelectedCells } | { status: 'refused'; reason: SelectionRefusal };
+// Why the panel refuses to protect selected content. In a workbook: the
+// author types in a cell, or the selection holds several blocks of cells,
+// more cells than a portion's text can hold, a merge, a portion, a table or a
+// pivot table, a comment, a formula, or nothing. In a text document: the
+// selection lies outside the document's body, or holds a table, an image or a
+// shape, a locked content control, a comment, a note, more than a portion's
+// text can hold, or no text.
+export type SelectionRefusal =
+  | 'cell-being-edited'
+  | 'several-areas'
+  | 'too-large'
+  | 'merge-portion-or-table'
+  | 'commented-cells'
+  | 'formula'
+  | 'empty-cells'
+  | 'outside-body'
+  | 'table'
+  | 'drawing'
+  | 'content-control'
+  | 'commented-paragraphs'
+  | 'noted-paragraphs'
+  | 'empty-paragraphs';
+
+// What reading the selection gives: the selected content, or why the panel
+// refuses it.
+export type SelectionReading = { status: 'read'; content: SelectedContent } | { status: 'refused'; reason: SelectionRefusal };
 
 // What reading the selection takes: the most cells it may hold.
 export interface SelectionReadingScope {
@@ -113,8 +143,8 @@ export interface SelectionScope {
   rangeTitle: string;
 }
 
-// What a command that writes gives: whether it wrote, or, in a workbook,
-// that it refused selected cells that hold a value, a formula, a merge or a
-// portion, that the cells to protect changed since the panel read them, or
-// that it wrote nothing while the author types in a cell.
+// What a command that writes gives: whether it wrote, or that the content to
+// protect changed since the panel read it, or, in a workbook, that it refused
+// selected cells that hold a value, a formula, a merge or a portion, or that
+// it wrote nothing while the author types in a cell.
 export type WriteOutcome = 'written' | 'not-written' | 'cells-occupied' | 'selection-changed' | 'cell-being-edited';

@@ -4,7 +4,7 @@ import { BOB, BOB_TERMS, saveTerms, yesterday } from '../tests/support/clearance
 import { dismissEditorTip, moveCursorToStart, openDocument, openedDocumentId, openNewDocument } from '../tests/support/documents.ts';
 import { DOCX_TYPE, pageMarkingTexts } from '../tests/support/docx.ts';
 import type { MarkedText } from '../tests/support/marker.ts';
-import { bubble, pluginPanel } from '../tests/support/plugin.ts';
+import { bubble, pluginFrame, pluginPanel, selectParagraphs } from '../tests/support/plugin.ts';
 import { insertPortion, leaveAndWaitForSave, storedDocx, storedFile } from '../tests/support/portions.ts';
 import { demoCertificate, verifyBindingSignature } from '../tests/support/signature.ts';
 import { fillUploadForm } from '../tests/support/uploads.ts';
@@ -27,6 +27,10 @@ const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 const RELEASABLE_TO_NATO = 'DIFFUSION RESTREINTE – DIFFUSION OTAN';
 const WITH_MORE_RESTRICTIVE_PORTIONS = `${DIFFUSION_RESTREINTE} – CONTIENT DES PORTIONS PLUS RESTRICTIVES`;
+// The uploaded report's paragraph on transport, by its position among the
+// body's elements, and its text: content that went through ONLYOFFICE in
+// clear, which the French officer protects.
+const REPORT_TRANSPORT = { position: 6, text: 'Two fictional convoys a day link the rear base and the command posts.' };
 // The demo SPIF's code for DIFFUSION RESTREINTE released to NATO.
 const RELEASABLE_TO_NATO_CODE = 'DEMO-FR:2/2.1';
 const WORKBOOK_TEMPLATE = 'exercise-northwind-logistics.xlsx';
@@ -65,7 +69,7 @@ export async function playDemo(people: DemoPeople, options: DemoOptions): Promis
   await playWorkbookPart(people, options);
 }
 
-// Steps 1 to 10, in a text document. It gives the allied officer his
+// Steps 1 to 11, in a text document. It gives the allied officer his
 // clearance back, which it ends, whatever happens.
 async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOptions): Promise<void> {
   const alicePanel = pluginPanel(alice);
@@ -172,9 +176,21 @@ async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOpt
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(RELEASABLE_TO_NATO);
     await options.capture(alice, '10-uploaded');
   });
+
+  await test.step('11. She protects a paragraph of the report already written, for French eyes only', async () => {
+    await selectParagraphs(await pluginFrame(alice), REPORT_TRANSPORT.position, REPORT_TRANSPORT.position);
+    await alicePanel.getByRole('radio', { name: SPECIAL_FRANCE, exact: true }).check();
+    await alicePanel.getByRole('button', { name: 'Protect the selection' }).click();
+    const confirmation = alicePanel.getByTestId('protection-confirmation');
+    await expect(confirmation.getByTestId('protection-preview')).toHaveText(REPORT_TRANSPORT.text);
+    await options.capture(alice, '11-paragraph-protection');
+    await confirmation.getByRole('button', { name: 'Protect the selection' }).click();
+    await expect(alicePanel.getByTestId('portion-text')).toHaveText([REPORT_TRANSPORT.text]);
+    await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(`${RELEASABLE_TO_NATO} – CONTIENT DES PORTIONS PLUS RESTRICTIVES`);
+  });
 }
 
-// Steps 11 to 19, in a workbook: the text document's steps from the base
+// Steps 12 to 20, in a workbook: the text document's steps from the base
 // label to the signed binding, with the protection of rows already filled,
 // the page marking showing in the print preview.
 async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions): Promise<void> {
@@ -184,16 +200,16 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
   const first = options.text('Fictional stock: 1,200 rations reach the forward depot on day 1.');
   const second = options.text('Fictional convoy: the fuel trucks leave the rear base on day 2.');
 
-  const documentId = await test.step('11. The French officer gives a new workbook its base label', async () => {
+  const documentId = await test.step('12. The French officer gives a new workbook its base label', async () => {
     const id = await openNewDocument(alice, WORKBOOK_TEMPLATE);
     await dismissEditorTip(alice, 15_000);
     await alicePanel.getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
-    await options.capture(alice, '11-workbook-base-label');
+    await options.capture(alice, '12-workbook-base-label');
     return id;
   });
 
-  const [firstId, secondId] = await test.step('12. She inserts two protected portions into cells', async () => {
+  const [firstId, secondId] = await test.step('13. She inserts two protected portions into cells', async () => {
     await insertWorkbookPortion(alice, { marking: DIFFUSION_RESTREINTE, text: first }, FIRST_CELLS);
     await insertWorkbookPortion(alice, { marking: DIFFUSION_RESTREINTE, text: second }, SECOND_CELLS);
     const ids = [await portionIdOf(alice, first), await portionIdOf(alice, second)] as const;
@@ -201,11 +217,11 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     await expect(aliceItem(ids[1]).getByTestId('portion-text')).toHaveText(second);
     // Away from the placeholders, which the bubble would cover.
     await selectCells(alice, 'B12');
-    await options.capture(alice, '12-workbook-portions');
+    await options.capture(alice, '13-workbook-portions');
     return ids;
   });
 
-  await test.step('13. The allied officer co-edits the workbook, and reads a portion over its placeholder', async () => {
+  await test.step('14. The allied officer co-edits the workbook, and reads a portion over its placeholder', async () => {
     await openDocument(bob, documentId);
     await dismissEditorTip(bob, 15_000);
     await expect(bobItem(firstId).getByTestId('portion-text')).toHaveText(first);
@@ -215,23 +231,23 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     }
     await selectCells(bob, FIRST_CELLS);
     await expect(bubble(bob).getByTestId('bubble-text')).toHaveText(first);
-    await options.capture(bob, '13-workbook-co-editing');
+    await options.capture(bob, '14-workbook-co-editing');
   });
 
-  await test.step('14. The French officer changes the first portion, which the allied officer sees', async () => {
+  await test.step('15. The French officer changes the first portion, which the allied officer sees', async () => {
     await aliceItem(firstId).getByRole('button', { name: 'Change', exact: true }).click();
     const textbox = aliceItem(firstId).getByRole('textbox', { name: 'Portion text' });
     await expect(textbox).toHaveValue(first);
     await expect(bobItem(firstId).getByTestId('portion-status')).toHaveText('Being changed by Alice Martin.');
     const changed = options.text('Fictional stock, changed: 1,500 rations reach the forward depot on day 1.');
     await textbox.fill(changed);
-    await options.capture(bob, '14-workbook-being-changed');
+    await options.capture(bob, '15-workbook-being-changed');
     await aliceItem(firstId).getByRole('button', { name: 'Save the change' }).click();
     await expect(bobItem(firstId).getByTestId('portion-text')).toHaveText(changed);
     await expect(bobItem(firstId).getByTestId('portion-status')).toHaveCount(0);
   });
 
-  await test.step('15. She raises it to SPECIAL FRANCE, which shuts the allied officer out', async () => {
+  await test.step('16. She raises it to SPECIAL FRANCE, which shuts the allied officer out', async () => {
     await aliceItem(firstId).getByRole('button', { name: 'Change', exact: true }).click();
     await expect(aliceItem(firstId).getByRole('textbox', { name: 'Portion text' })).toBeVisible();
     await aliceItem(firstId).getByRole('radio', { name: SPECIAL_FRANCE, exact: true }).check();
@@ -242,13 +258,13 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     // The bubble he read the portion in closes.
     await expect(bubble(bob).owner()).toHaveCount(0);
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
-    await options.capture(bob, '15-workbook-access-denied');
+    await options.capture(bob, '16-workbook-access-denied');
   });
 
-  await test.step('16. She deletes the second portion, whose cells empty', async () => {
+  await test.step('17. She deletes the second portion, whose cells empty', async () => {
     await aliceItem(secondId).getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(aliceItem(secondId).getByTestId('deletion-confirmation')).toBeVisible();
-    await options.capture(alice, '16-workbook-deletion');
+    await options.capture(alice, '17-workbook-deletion');
     await alicePanel.getByRole('button', { name: 'Delete the portion' }).click();
     await expect(aliceItem(secondId)).toHaveCount(0);
     await expect(bobItem(secondId)).toHaveCount(0);
@@ -256,10 +272,10 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
   });
 
-  const rowsId = await test.step('17. She protects two rows already filled for French eyes only, which the allied officer can no longer read', async () => {
+  const rowsId = await test.step('18. She protects two rows already filled for French eyes only, which the allied officer can no longer read', async () => {
     const confirmation = await openProtectionConfirmation(alice, SPECIAL_FRANCE, SUPPLY_ROWS.reference);
     await expect(confirmation.getByTestId('protection-preview')).toHaveText(SUPPLY_ROWS.text);
-    await options.capture(alice, '17-workbook-protection');
+    await options.capture(alice, '18-workbook-protection');
     await confirmation.getByRole('button', { name: 'Protect the selection' }).click();
     const id = await portionIdOf(alice, 'Logistics group');
     await expect(aliceItem(id).getByTestId('portion-text')).toHaveText(SUPPLY_ROWS.text);
@@ -270,18 +286,18 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     return id;
   });
 
-  await test.step('18. The page marking shows in the print preview', async () => {
+  await test.step('19. The page marking shows in the print preview', async () => {
     const header = `&LExercise NORTHWIND 26 - fictional${WITH_MORE_RESTRICTIVE_PORTIONS_CENTRE}`;
     const footer = `${WITH_MORE_RESTRICTIVE_PORTIONS_CENTRE}&RFictional workbook`;
     await expect
       .poll(() => editorHeadersAndFooters(alice))
       .toEqual([{ oddHeader: header, oddFooter: footer, evenHeader: header, evenFooter: footer, firstHeader: header, firstFooter: footer }]);
     await openPrintPreview(alice);
-    await options.capture(alice, '18-workbook-print-preview');
+    await options.capture(alice, '19-workbook-print-preview');
     await closePrintPreview(alice);
   });
 
-  await test.step('19. The stored workbook carries the page marking and a binding that xmlsec1 verifies', async () => {
+  await test.step('20. The stored workbook carries the page marking and a binding that xmlsec1 verifies', async () => {
     // The base label's save, made as the portions went in, held two portions too.
     await leaveAndWaitForSave([alice, bob], documentId, [firstId, rowsId]);
     const file = await storedFile(alice, documentId);

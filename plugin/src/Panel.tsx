@@ -1,7 +1,7 @@
 import type { JSX } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
 import type { BubbleContent } from './bubble-channel.ts';
-import type { SelectedCells, WriteOutcome } from './commands.ts';
+import type { SelectedContent, WriteOutcome } from './commands.ts';
 import { DocumentLabel } from './DocumentLabel.tsx';
 import { type EnvelopeClient, envelopeClientFor, unavailableOpener } from './envelopes.ts';
 import {
@@ -80,7 +80,6 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // The hint the insertion form gives, null when the panel offers none.
   const insertionHint = !readOnly && editor !== null && editor.insertsPortions ? editor.insertionHint : null;
   const offersPortions = insertionHint !== null;
-  const protectsSelection = offersPortions && editor !== null && editor.readSelection !== null;
   const othersLocks = usePortionLocks(documentId, userId);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
@@ -128,7 +127,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     }
   }, []);
   // The editor's menus only offer what the panel can carry out.
-  useMenuEntryPoints(pluginReady, offersPortions && offeredLabels !== null && offeredLabels.length > 0, protectsSelection, requestFromMenu);
+  useMenuEntryPoints(pluginReady, offersPortions && offeredLabels !== null && offeredLabels.length > 0, requestFromMenu);
 
   const selectPortion = (portion: StoredPortion): void => {
     editor?.selectPlaceholder(portion).catch((error: unknown) => {
@@ -163,9 +162,9 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     return result;
   };
 
-  const protect = async (label: LabelView, cells: SelectedCells): Promise<WriteResult> =>
+  const protect = async (label: LabelView, content: SelectedContent): Promise<WriteResult> =>
     writeNewPortion(async (others, client, editorType) => {
-      const written = await protectSelection({ label, cells }, others, client, editorType);
+      const written = await protectSelection({ label, content }, others, client, editorType);
       if (written.result.status === 'written' && documentId !== null) {
         reportExistingContentProtection(documentId, written.portionId, written.state).catch((error: unknown) => {
           logProblem('Reporting a protection of existing content', error);
@@ -173,9 +172,11 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       }
       return written.result;
     });
-  const protectionOffer: ProtectionOffer | null = protectsSelection
-    ? { requests: protectionRequests, onRead: async () => readSelection(editorTypeOf(await pluginReady)), onProtect: protect }
-    : null;
+  const protectionOffer: ProtectionOffer = {
+    requests: protectionRequests,
+    onRead: async () => readSelection(editorTypeOf(await pluginReady)),
+    onProtect: protect,
+  };
 
   const changeBaseLabel = async (code: string): Promise<WriteOutcome> => {
     if (policy === null) {

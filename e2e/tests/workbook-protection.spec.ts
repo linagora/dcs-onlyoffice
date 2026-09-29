@@ -83,7 +83,7 @@ test('cancelling a protection changes nothing, and cells the panel cannot protec
   await protect.click();
   await typeIntoCell(page, 'B8', 'Fictional control cell');
   await confirmation.getByRole('button', { name: 'Protect the selection' }).click();
-  await expect(failure).toHaveText('The selected cells changed since the panel read them, so nothing was protected: protect them again.');
+  await expect(failure).toHaveText('The selected content changed since the panel read it, so nothing was protected: protect it again.');
   await expect(confirmation).toHaveCount(0);
   await expect(panel.getByTestId('portion-item')).toHaveCount(0);
   expect(await cellValue(page, 'B8')).toBe('Fictional control cell');

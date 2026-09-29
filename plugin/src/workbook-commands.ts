@@ -99,7 +99,7 @@ export function readSelectionCommand(): SelectionReading {
     return { status: 'refused', reason: 'merge-portion-or-table' };
   }
   if (worksheet.aComments.some((comment) => !comment.asc_getDocumentFlag() && bbox.contains(comment.nCol, comment.nRow))) {
-    return { status: 'refused', reason: 'comment' };
+    return { status: 'refused', reason: 'commented-cells' };
   }
   let formula = false;
   selection.ForEach((cell) => {
@@ -111,9 +111,9 @@ export function readSelectionCommand(): SelectionReading {
   const text = selection.GetText();
   const texts = typeof text === 'string' ? [[text]] : text;
   if (texts.every((row) => row.every((value) => value.trim() === ''))) {
-    return { status: 'refused', reason: 'empty' };
+    return { status: 'refused', reason: 'empty-cells' };
   }
-  return { status: 'read', cells: { sheet: sheet.GetName(), address: selection.GetAddress(true, true, 'xlA1', false) ?? '', texts } };
+  return { status: 'read', content: { kind: 'cells', sheet: sheet.GetName(), address: selection.GetAddress(true, true, 'xlA1', false) ?? '', texts } };
 }
 
 // One command writes a new portion into the selected cells or in place of the
@@ -241,11 +241,14 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
     addPlaceholder(sheet, selection, portion);
   }
   if (portion !== null && portion.kind === 'protection') {
+    if (portion.content.kind !== 'cells') {
+      return 'not-written';
+    }
     // The cells the author confirmed, wherever the selection went since: they
     // must still show what the panel read, which the portion's envelope
     // holds, with nothing that the panel refuses, which a co-author may have
     // added since.
-    const { sheet: sheetName, address, texts } = portion.cells;
+    const { sheet: sheetName, address, texts } = portion.content;
     const cellsSheet = Api.GetSheets().find((candidate) => candidate.GetName() === sheetName) ?? null;
     if (cellsSheet === null) {
       return 'selection-changed';

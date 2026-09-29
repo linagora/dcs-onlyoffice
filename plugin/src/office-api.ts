@@ -15,10 +15,46 @@ export interface ApiParagraph {
   GetClassType(): 'paragraph';
   AddText(text: string): ApiRun;
   RemoveAllElements(): boolean;
-  GetText(): string;
+  // Its text, list numbering included unless `Numbering` is false.
+  GetText(options?: { Numbering?: boolean; NewLineSeparator?: string }): string;
   GetPosInParent(): number;
   GetInternalId(): string;
   SetJc(justification: 'left' | 'right' | 'center' | 'both'): boolean;
+  // The table or the content control that holds it, null when none does.
+  GetParentTable(): unknown;
+  GetParentContentControl(): unknown;
+  // Its images, shapes and charts.
+  GetAllDrawingObjects(): unknown[];
+  // Its whole text, null when it holds none.
+  GetRange(): ApiTextRange | null;
+  // The editor's own paragraph, which no public API reaches: its elements,
+  // runs and the marks where comments start and end among them.
+  Paragraph: InternalParagraph;
+}
+
+// A text document's paragraph in the editor's internal model: undocumented,
+// it may change with any version of ONLYOFFICE.
+export interface InternalParagraph {
+  Content: InternalParagraphElement[];
+}
+
+// A mark where a comment starts or ends holds the comment's id, and a note's
+// reference among a run's elements holds the note; runs, hyperlinks and the
+// other elements hold neither, but may hold elements.
+export interface InternalParagraphElement {
+  CommentId?: unknown;
+  Footnote?: unknown;
+  Content?: InternalParagraphElement[];
+}
+
+// A range of a text document's content.
+export interface ApiTextRange {
+  // The paragraphs it touches, whole; null when it holds a locked content
+  // control.
+  GetAllParagraphs(): ApiParagraph[] | null;
+  // Where it starts and ends among the document's characters.
+  GetStartPos(): number;
+  GetEndPos(): number;
 }
 
 export interface ApiTable {
@@ -86,7 +122,10 @@ export interface ApiCustomXmlParts {
 export interface ApiDocument {
   InsertContent(content: ApiBlockLvlSdt[]): boolean;
   AddElement(position: number, element: ApiBlockLvlSdt): boolean;
+  RemoveElement(position: number): boolean;
   GetElement(index: number): ApiDocumentElement | null;
+  // The selection, null when there is none.
+  GetRangeBySelect(): ApiTextRange | null;
   GetCurrentParagraph(): ApiParagraph | null;
   // Those of headers and footers too.
   GetAllContentControls(): ApiContentControl[];

@@ -287,14 +287,12 @@ const INSERT_BUTTON_ID = 'dcs-insert-portion-button';
 export type EntryPointRequest = 'insertion' | 'protection';
 
 // Entry points in the editor's own menus that lead to the panel's form: to
-// insert a portion, and, where the panel protects selected content, to
-// protect the selection, in the context menu only. `onRequest` must keep its
-// identity across renders. The hook only wires the editor, hence no return
-// value.
+// insert a portion, and, in the context menu only, to protect the selection.
+// `onRequest` must keep its identity across renders. The hook only wires the
+// editor, hence no return value.
 export function useMenuEntryPoints(
   pluginReady: Promise<PluginInfo>,
   enabled: boolean,
-  protectsSelection: boolean,
   onRequest: (request: EntryPointRequest) => void,
 ): void {
   useEffect(() => {
@@ -305,7 +303,7 @@ export function useMenuEntryPoints(
       await pluginReady;
       const entries = [
         { id: INSERT_ENTRY_ID, text: messages.contextMenuEntry },
-        ...(protectsSelection ? [{ id: PROTECT_ENTRY_ID, text: messages.protectionContextMenuEntry }] : []),
+        { id: PROTECT_ENTRY_ID, text: messages.protectionContextMenuEntry },
       ];
       const menuOffered = offerContextMenu(
         () => entries,
@@ -326,7 +324,7 @@ export function useMenuEntryPoints(
     wire().catch((error: unknown) => {
       logProblem('Adding the menu entry points', error);
     });
-  }, [pluginReady, enabled, protectsSelection, onRequest]);
+  }, [pluginReady, enabled, onRequest]);
 }
 
 // The editor's content-control events carry the control, whose tag names the
