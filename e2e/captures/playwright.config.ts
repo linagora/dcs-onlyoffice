@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { DOMAIN, RESOLVED_BY_BROWSERS } from '../tests/support/deployment.ts';
+import { CHROMIUM_RESOLVER_ARGS, DOMAIN } from '../tests/support/deployment.ts';
 
 // The README's screenshots (docs/screenshots), taken on the standalone stack
 // with pnpm --filter @dcs/e2e captures. They stay out of the end-to-end suite,
@@ -27,7 +27,7 @@ export default defineConfig({
         deviceScaleFactor: 2,
         // As in the suite: the stack's host names lead to the local reverse
         // proxy, with no hosts-file change.
-        launchOptions: { args: RESOLVED_BY_BROWSERS ? [] : [`--host-resolver-rules=MAP *.${DOMAIN} 127.0.0.1`] },
+        launchOptions: { args: CHROMIUM_RESOLVER_ARGS },
       },
     },
   ],
