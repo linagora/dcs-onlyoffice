@@ -60,9 +60,23 @@ export async function createDocumentFromTemplate(
   if (!DOCUMENT_ID_PATTERN.test(templateId) || !(await fileExists(docxPath(templatesDirectory, templateId)))) {
     return null;
   }
-  const id = `${templateId.slice(0, 80)}-${randomBytes(4).toString('hex')}`;
+  const id = newDocumentId(templateId);
   await copyFile(docxPath(templatesDirectory, templateId), docxPath(documentsDirectory, id));
   return findDocument(documentsDirectory, id);
+}
+
+// A new document's identifier: the name it comes from, in the characters an
+// identifier allows, with a random suffix.
+export function newDocumentId(name: string): string {
+  const stem = name
+    .replace(/\.docx$/i, '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .slice(0, 80)
+    .replace(/^-+|-+$/g, '');
+  return `${stem === '' ? 'document' : stem}-${randomBytes(4).toString('hex')}`;
 }
 
 // A forced save keeps the editing session open, so the key must not change:
