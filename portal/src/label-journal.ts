@@ -110,29 +110,35 @@ export class LabelJournal {
     }
   }
 
-  // Null when the policy service cannot tell.
   async #lowering(before: string | null, after: string | null): Promise<boolean | null> {
-    if (before === null || before === after) {
-      return false;
+    return isLowering(this.#policyUrl, before, after, this.#log);
+  }
+}
+
+// Whether a label replaces a more restrictive one, by the rules of its
+// security policy; removing a label lowers it. Null when the policy service
+// cannot tell.
+export async function isLowering(policyInternalUrl: string, before: string | null, after: string | null, log: FastifyBaseLogger): Promise<boolean | null> {
+  if (before === null || before === after) {
+    return false;
+  }
+  if (after === null) {
+    return true;
+  }
+  try {
+    const response = await fetch(new URL('/labels/lowering', policyInternalUrl), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: before, to: after }),
+      signal: AbortSignal.timeout(LOWERING_TIMEOUT_MS),
+    });
+    const body: unknown = await response.json();
+    if (!response.ok || typeof body !== 'object' || body === null || !('lowering' in body) || typeof body.lowering !== 'boolean') {
+      throw new Error(`the policy service answered ${response.status}`);
     }
-    if (after === null) {
-      return true;
-    }
-    try {
-      const response = await fetch(new URL('/labels/lowering', this.#policyUrl), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: before, to: after }),
-        signal: AbortSignal.timeout(LOWERING_TIMEOUT_MS),
-      });
-      const body: unknown = await response.json();
-      if (!response.ok || typeof body !== 'object' || body === null || !('lowering' in body) || typeof body.lowering !== 'boolean') {
-        throw new Error(`the policy service answered ${response.status}`);
-      }
-      return body.lowering;
-    } catch (error: unknown) {
-      this.#log.error({ before, after, err: error }, 'The policy service could not tell whether a label is lowered');
-      return null;
-    }
+    return body.lowering;
+  } catch (error: unknown) {
+    log.error({ before, after, err: error }, 'The policy service could not tell whether a label is lowered');
+    return null;
   }
 }
