@@ -17,7 +17,8 @@ const CUSTOM_XML_RELATIONSHIPS: readonly string[] = [
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml',
   'http://purl.oclc.org/ooxml/officeDocument/relationships/customXml',
 ];
-const RELATIONSHIPS_PART = /^(?:(.*)\/)?_rels\/([^/]+)\.rels$/;
+// A part's relationships part; the package's own is PACKAGE_RELATIONSHIPS_PART.
+export const RELATIONSHIPS_PART: RegExp = /^(?:(.*)\/)?_rels\/([^/]+)\.rels$/;
 const OFFICE_DOCUMENT_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
 
 // What a package holds, as its main part tells: a text document or a
@@ -114,6 +115,30 @@ export async function mainPartOf(zip: JSZip): Promise<{ part: string; kind: Pack
       ?.getAttribute('ContentType') ?? null;
   const kind = contentType === null ? null : (MAIN_PART_KINDS.get(contentType) ?? null);
   return kind === null ? null : { part: target, kind };
+}
+
+// The content type a package declares for each of its parts, as OPC maps
+// them: the override for the part's name, or else the default for its
+// extension, both matched without regard to case.
+export async function declaredContentTypes(zip: JSZip): Promise<Map<string, string>> {
+  const types = await xmlPartOf(zip, CONTENT_TYPES_PART);
+  const declarations = (localName: string, key: string): Map<string, string> =>
+    new Map(
+      Array.from(types?.getElementsByTagNameNS(CONTENT_TYPES_NAMESPACE, localName) ?? []).map((element) => [
+        (element.getAttribute(key) ?? '').toLowerCase(),
+        element.getAttribute('ContentType') ?? '',
+      ]),
+    );
+  const overrides = declarations('Override', 'PartName');
+  const defaults = declarations('Default', 'Extension');
+  const declared = new Map<string, string>();
+  for (const part of partNamesOf(zip)) {
+    const type = overrides.get(`/${part}`.toLowerCase()) ?? defaults.get(path.posix.extname(part).slice(1).toLowerCase());
+    if (type !== undefined && type !== '') {
+      declared.set(part, type);
+    }
+  }
+  return declared;
 }
 
 // The package part of that name, as the package spells it: part names match

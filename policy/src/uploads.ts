@@ -6,7 +6,7 @@ import type JSZip from 'jszip';
 import { escapeXml } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf, serializeDocumentBinding } from './adatp4778.ts';
 import { type LabelMapping, labelOfSensitivityLabel } from './label-mapping.ts';
-import { appendRelationship, CONTENT_TYPES_PART, customXmlParts, declareContentType, loadPackage, mainPartOf, type PackageKind, partNamesOf, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
+import { appendRelationship, CONTENT_TYPES_PART, customXmlParts, declareContentType, declaredContentTypes, loadPackage, mainPartOf, type PackageKind, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
 import { bindingLabelXml, bindingVerdict, DOCX_TYPE, type DocumentLabelOf, type PackageLabels, packageBody, readPackageLabels, XLSX_TYPE } from './package-signing.ts';
 import { removeLabelInformation } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
@@ -143,9 +143,10 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     }
     // The platform keeps sensitivity labels in custom properties only.
     await removeLabelInformation(zip, options.labelMapping?.tenant ?? null, options.now());
-    const parts = partNamesOf(zip);
     await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
-    await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts, kind)));
+    // A binding the upload holds is written again where it stands.
+    const parts = await bindablePartsOf(zip, labels.bindings[0]?.part ?? null);
+    await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, parts, await declaredContentTypes(zip)));
     return reply.type(PACKAGE_TYPES[kind]).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
   });
 }
@@ -190,9 +191,8 @@ async function carriedLabel(zip: JSZip, labels: PackageLabels, options: UploadOp
 }
 
 // Whether an uploaded file's binding signature matched the platform's
-// certificate. The signature does not cover the base label part: a signed
-// document label that the labels in clear no longer give was changed since
-// signing, and does not match either.
+// certificate over parts unchanged since signing, for the document label
+// that its labels in clear still give.
 async function signatureStatus(zip: JSZip, labels: PackageLabels, options: UploadOptions): Promise<SignatureStatus> {
   if (labels.bindings.length === 0) {
     return 'absent';

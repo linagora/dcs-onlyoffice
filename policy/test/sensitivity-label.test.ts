@@ -24,8 +24,13 @@ const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocumen
 // the sensitivity label properties ([MS-OI29500] §2.1.1724, §3.11.2).
 const USER_DEFINED_PROPERTIES = '{D5CDD505-2E9C-101B-9397-08002B2CF9AE}';
 // Parts ADatP-4778.2 Tables 5-2 and 5-3 require a whole-document binding to
-// reference, when the package holds them.
-const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
+// reference, when the package holds them; the relationship parts and the
+// content types; and the Custom XML parts, of which the demo templates hold
+// none but those the tests write. The binding references them all but its
+// own part, BINDING_PART, which holds the signature.
+const BINDABLE_PART =
+  /^(word\/(document|styles|footnotes|endnotes|comments)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml|(.+\/)?_rels\/[^/]*\.rels|\[Content_Types\]\.xml|customXml\/[^/]+)$/;
+const BINDING_PART = 'customXml/item1.xml';
 // Codes of the demo SPIF's labels.
 const DIFFUSION_RESTREINTE = 'DEMO-FR:2';
 const SPECIAL_FRANCE = 'DEMO-FR:2/1.1';
@@ -101,7 +106,7 @@ describe('the sensitivity label of a stored document', () => {
       payload: { base, portions, parts: Object.keys(zip.files).filter((name) => BINDABLE_PART.test(name)).sort() },
     });
     assert.equal(computed.statusCode, 200);
-    zip.file('customXml/item1.xml', (computed.json() as { xml: string }).xml); // SAFETY: the answer asserted just above
+    zip.file(BINDING_PART, (computed.json() as { xml: string }).xml); // SAFETY: the answer asserted just above
     zip.file('customXml/item2.xml', `<dcs:document xmlns:dcs="urn:linagora:dcs:document:1" base="${base}"/>`);
     return zip.generateAsync({ type: 'uint8array' });
   }
@@ -238,6 +243,14 @@ describe('the sensitivity label of a stored document', () => {
     });
     assert.equal(response.statusCode, 200);
     return response.json();
+  }
+
+  // The Sensitivity Label Information part the verdict on a stored package
+  // names.
+  async function labelInformationPartIn(docx: Uint8Array): Promise<unknown> {
+    const verdict = await verdictOf(docx);
+    assert.ok(typeof verdict === 'object' && verdict !== null && 'labelInformationPart' in verdict, 'expected a verdict');
+    return verdict.labelInformationPart;
   }
 
   // The sensitivity label properties of one label, by attribute name.
@@ -386,7 +399,7 @@ describe('the sensitivity label of a stored document', () => {
       const { answer, stored } = await signedAndStored(docx);
 
       const verification = await verifyWithXmlsec(stored, answer.signed.xml, certificate);
-      const bindable = Object.keys((await JSZip.loadAsync(stored)).files).filter((name) => BINDABLE_PART.test(name));
+      const bindable = Object.keys((await JSZip.loadAsync(stored)).files).filter((name) => BINDABLE_PART.test(name) && name !== BINDING_PART);
       assert.ok(verification.references.includes('docProps/custom.xml'));
       assert.deepEqual([verification.status, verification.manifest], [0, `${bindable.length}/${bindable.length}`]);
     }
@@ -536,13 +549,14 @@ describe('the sensitivity label of a stored document', () => {
     assert.deepEqual(answer.parts, []);
   });
 
-  it('names the Sensitivity Label Information part that a stored file holds, found by its relationship type', async () => {
+  it('names the Sensitivity Label Information part that a stored file holds, found by its relationship type, whose relationship and content type the signature catches', async () => {
     const stored = await storedPackage(await labelledDocument(DIFFUSION_RESTREINTE));
 
     assert.deepEqual(await verdictOf(stored), { status: 'valid', labelInformationPart: null });
-    // The signature covers neither the part nor its relationship: it holds.
     assert.deepEqual(await verdictOf(await withLabelInformation(stored, 'docMetadata/LabelInfo.xml')), {
-      status: 'valid',
+      status: 'altered',
+      reason: 'Parts changed since signing',
+      changedParts: ['[Content_Types].xml', '_rels/.rels'],
       labelInformationPart: 'docMetadata/LabelInfo.xml',
     });
   });
@@ -563,9 +577,9 @@ describe('the sensitivity label of a stored document', () => {
     zip.file('_rels/.rels', relationships.replace('<Relationship Id="rIdLabels"', '<Relationship Id="rIdGone" Type="http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels" Target="docMetadata/Gone.xml"/><Relationship Id="rIdLabels"'));
     const dangling = await zip.generateAsync({ type: 'uint8array' });
 
-    assert.deepEqual(await verdictOf(relative), { status: 'valid', labelInformationPart: 'docMetadata/LabelInfo.xml' });
-    assert.deepEqual(await verdictOf(dangling), { status: 'valid', labelInformationPart: 'docMetadata/LabelInfo.xml' });
-    assert.deepEqual(await verdictOf(unrelated), { status: 'valid', labelInformationPart: null });
+    assert.equal(await labelInformationPartIn(relative), 'docMetadata/LabelInfo.xml');
+    assert.equal(await labelInformationPartIn(dangling), 'docMetadata/LabelInfo.xml');
+    assert.equal(await labelInformationPartIn(unrelated), null);
   });
 
   it('names the Sensitivity Label Information part beside an altered verdict', async () => {
@@ -576,7 +590,7 @@ describe('the sensitivity label of a stored document', () => {
     assert.deepEqual(await verdictOf(await zip.generateAsync({ type: 'uint8array' })), {
       status: 'altered',
       reason: 'Parts changed since signing',
-      changedParts: ['docProps/app.xml'],
+      changedParts: ['[Content_Types].xml', '_rels/.rels', 'docProps/app.xml'],
       labelInformationPart: 'docMetadata/LabelInfo.xml',
     });
   });

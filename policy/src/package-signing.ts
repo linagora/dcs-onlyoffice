@@ -5,7 +5,7 @@ import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
-import { customXmlParts, loadPackage, mainPartOf, partNamesOf } from './opc.ts';
+import { customXmlParts, declaredContentTypes, loadPackage, mainPartOf, partNamesOf } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
@@ -91,12 +91,11 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // written first (ADR 0005).
     const mapped = options.sensitivityLabelOf(computed.code);
     const { writtenParts } = mapped === null ? { writtenParts: [] } : await writeSensitivityLabel(zip, mapped, options.now(), storedCustomProperties(request));
-    // The binding references every part of ADatP-4778.2 Tables 5-2 and 5-3
-    // that the package holds, the custom properties part written just now
-    // included: only the saved package tells which parts exist.
-    const parts = await partsOf(zip, bindablePartsOf(partNamesOf(zip), (await mainPartOf(zip))?.kind ?? 'text-document'));
+    // The binding references the parts the package holds, those written just
+    // now included: only the saved package tells which parts exist.
+    const parts = await partsOf(zip, await bindablePartsOf(zip, binding.part));
     return {
-      signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, options.signer, options.now()) },
+      signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, await declaredContentTypes(zip), options.signer, options.now()) },
       // The other parts written, which the portal stores with the binding.
       parts: await partsWritten(zip, writtenParts),
       replacement: before === computed.code ? null : { before, after: computed.code },
@@ -179,7 +178,7 @@ export async function bindingVerdict(zip: JSZip, labels: PackageLabels, certific
   }
   const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
   const names = partNamesOf(zip);
-  return verifyDocumentBinding(bindingXml, await partsOf(zip, names), certificate);
+  return verifyDocumentBinding(bindingXml, await partsOf(zip, names), await bindablePartsOf(zip, sole.binding.part), certificate);
 }
 
 // The package's one binding, null when it holds neither a binding nor a base

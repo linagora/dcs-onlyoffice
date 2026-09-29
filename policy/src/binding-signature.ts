@@ -80,12 +80,19 @@ function signedInfoBytes(signedInfo: BinaryLike): Uint8Array {
 }
 
 // The document label binding of a package, signed as ADatP-4778.2 Annexes A
-// and B lay out. Its DataReferences name the given package parts, which go
-// into a Manifest with their SHA-384 digests: signature libraries do not read
-// pack:/// addresses, so a verifier digests those parts again itself. The
-// signature also covers the MetadataBinding, whose label it vouches for, and
-// the signing time. It goes first in the BindingInformation element.
-export function signedDocumentBinding(labelXml: string, parts: ReadonlyMap<string, Uint8Array>, signer: BindingSigner, now: Date): string {
+// and B lay out. Its DataReferences name the given package parts, with the
+// content types the package declares, and the parts go into a Manifest with
+// their SHA-384 digests: signature libraries do not read pack:/// addresses,
+// so a verifier digests those parts again itself. The signature also covers
+// the MetadataBinding, whose label it vouches for, and the signing time. It
+// goes first in the BindingInformation element.
+export function signedDocumentBinding(
+  labelXml: string,
+  parts: ReadonlyMap<string, Uint8Array>,
+  contentTypes: ReadonlyMap<string, string>,
+  signer: BindingSigner,
+  now: Date,
+): string {
   const references = Array.from(
     parts,
     ([name, bytes]) => `<Reference URI="${escapeXml(packUri(name))}"><DigestMethod Algorithm="${SHA384}"/><DigestValue>${sha384(bytes)}</DigestValue></Reference>`,
@@ -119,7 +126,7 @@ export function signedDocumentBinding(labelXml: string, parts: ReadonlyMap<strin
     digestAlgorithm: SHA384,
     type: `${SIGNATURE_NAMESPACE}SignatureProperties`,
   });
-  signature.computeSignature(serializeDocumentBinding(labelXml, [...parts.keys()]), {
+  signature.computeSignature(serializeDocumentBinding(labelXml, [...parts.keys()], contentTypes), {
     attrs: { Id: SIGNATURE_ID },
     location: { reference: '/*', action: 'prepend' },
   });
@@ -132,8 +139,10 @@ export function signedDocumentBinding(labelXml: string, parts: ReadonlyMap<strin
 // signature's algorithms alone, the configured certificate rather than the
 // one in KeyInfo, and references to the MetadataBinding, the Manifest and the
 // signing time. The package parts the signed Manifest names are then digested
-// again.
-export function verifyDocumentBinding(bindingXml: string, parts: ReadonlyMap<string, Uint8Array>, certificate: string): BindingVerification {
+// again. A part among `bindable`, those the binding would reference now, that
+// the Manifest does not name counts as changed too: it was added since
+// signing, or an earlier signature left it out.
+export function verifyDocumentBinding(bindingXml: string, parts: ReadonlyMap<string, Uint8Array>, bindable: readonly string[], certificate: string): BindingVerification {
   const parsed = parseXml(bindingXml);
   if (!parsed.ok) {
     return bindingAltered('The binding is not well-formed XML');
@@ -154,14 +163,19 @@ export function verifyDocumentBinding(bindingXml: string, parts: ReadonlyMap<str
   if (manifest === null || verifier.getReferences().map((reference) => reference.uri).join(' ') !== expectedReferences.join(' ')) {
     return bindingAltered('The signature does not hold');
   }
-  const changedParts = childrenNamed(manifest, SIGNATURE_NAMESPACE, 'Reference').flatMap((reference) => {
+  const references = childrenNamed(manifest, SIGNATURE_NAMESPACE, 'Reference').map((reference) => {
     const uri = reference.getAttribute('URI') ?? '';
-    const name = packPartName(uri);
+    return { reference, uri, name: packPartName(uri) };
+  });
+  const digestChanged = references.flatMap(({ reference, uri, name }) => {
     const part = name === null ? null : (parts.get(name) ?? null);
     const method = childrenNamed(reference, SIGNATURE_NAMESPACE, 'DigestMethod')[0]?.getAttribute('Algorithm');
     const digest = childrenNamed(reference, SIGNATURE_NAMESPACE, 'DigestValue')[0]?.textContent?.trim();
     return method === SHA384 && part !== null && sha384(part) === digest ? [] : [name ?? uri];
   });
+  const named = new Set(references.map(({ name }) => name));
+  const unreferenced = bindable.filter((part) => !named.has(part));
+  const changedParts = [...digestChanged, ...unreferenced].sort();
   return changedParts.length === 0 ? { status: 'valid' } : { status: 'altered', reason: 'Parts changed since signing', changedParts };
 }
 
