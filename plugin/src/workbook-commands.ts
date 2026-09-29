@@ -1,4 +1,12 @@
-import type { CommandScope, DocumentSnapshot, PortionBlockScope, SelectionScope, WriteOutcome } from './commands.ts';
+import type {
+  CommandScope,
+  DocumentSnapshot,
+  PortionBlockScope,
+  SelectionReading,
+  SelectionReadingScope,
+  SelectionScope,
+  WriteOutcome,
+} from './commands.ts';
 import type { ApiRange, ApiWorksheet, InternalUserProtectedRange, SpreadsheetApi } from './office-api.ts';
 
 // The commands the panel runs in the spreadsheet editor. As those of the
@@ -6,7 +14,7 @@ import type { ApiRange, ApiWorksheet, InternalUserProtectedRange, SpreadsheetApi
 // sandbox, where it may only use `Api` and `Asc.scope`.
 
 declare const Api: SpreadsheetApi;
-declare const Asc: { scope: CommandScope & SelectionScope };
+declare const Asc: { scope: CommandScope & SelectionScope & SelectionReadingScope };
 
 // What a workbook holds of the panel's parts, its user protected ranges, on
 // every sheet, which the portions' placeholders are, the centre section of
@@ -59,15 +67,66 @@ export function readWorkbookCommand(): DocumentSnapshot {
   };
 }
 
-// One command writes a new portion into the selected cells, a portion's change
-// or its deletion, if there is one, with the document label's parts and the
-// page marking of every sheet, in one step of the editor's history. The
-// placeholder merges the cells, shows the portion's marking in its label's
-// colour, bold and bordered, and is a user protected range titled with the
-// portion's id, which no one may edit through the editor (ADR 0006). Selected
-// cells that hold a value, a formula, a merge or another portion are refused,
-// and nothing is written; nor is anything when the portion to change or
-// delete is gone, or when the editor refuses to remove its range.
+// The selected cells whose content the panel protects, with their displayed
+// values, as a copy from the grid gives them. The panel refuses them while
+// the author types in a cell, since the editor holds back what they type;
+// when the selection holds several blocks of cells, more cells than a
+// portion's text can hold, a merge, a portion, a table or a pivot table,
+// which clearing the cells would break, a comment, which would stay in clear,
+// or a formula, which the author turns into its value first; and when the
+// cells hold nothing at all.
+export function readSelectionCommand(): SelectionReading {
+  const sheet = Api.GetActiveSheet();
+  if (sheet.worksheet.workbook.oApi.asc_getCellEditMode()) {
+    return { status: 'refused', reason: 'cell-being-edited' };
+  }
+  const selection = sheet.GetSelection();
+  if (selection.GetAreas().GetCount() > 1) {
+    return { status: 'refused', reason: 'several-areas' };
+  }
+  // Counted before anything is read: a selected column holds a million cells.
+  if (selection.GetCellsCount() > Asc.scope.cellLimit) {
+    return { status: 'refused', reason: 'too-large' };
+  }
+  const { bbox } = selection.range;
+  const worksheet = sheet.worksheet;
+  if (
+    selection.range.hasMerged() !== null ||
+    worksheet.isUserProtectedRangesIntersection(bbox, null, true) ||
+    worksheet.autoFilters.isIntersectionTable(bbox) === true ||
+    worksheet.getPivotTablesIntersectingRange(bbox).length > 0
+  ) {
+    return { status: 'refused', reason: 'merge-portion-or-table' };
+  }
+  if (worksheet.aComments.some((comment) => !comment.asc_getDocumentFlag() && bbox.contains(comment.nCol, comment.nRow))) {
+    return { status: 'refused', reason: 'comment' };
+  }
+  let formula = false;
+  selection.ForEach((cell) => {
+    formula ||= cell.GetFormula().startsWith('=');
+  });
+  if (formula) {
+    return { status: 'refused', reason: 'formula' };
+  }
+  const text = selection.GetText();
+  const texts = typeof text === 'string' ? [[text]] : text;
+  if (texts.every((row) => row.every((value) => value.trim() === ''))) {
+    return { status: 'refused', reason: 'empty' };
+  }
+  return { status: 'read', cells: { sheet: sheet.GetName(), address: selection.GetAddress(true, true, 'xlA1', false) ?? '', texts } };
+}
+
+// One command writes a new portion into the selected cells or in place of the
+// cells whose content the panel protects, a portion's change or its deletion,
+// if there is one, with the document label's parts and the page marking of
+// every sheet, in one step of the editor's history. The placeholder merges
+// the cells, shows the portion's marking in its label's colour, bold and
+// bordered, and is a user protected range titled with the portion's id, which
+// no one may edit through the editor (ADR 0006). Selected cells that hold a
+// value, a formula, a merge or another portion are refused, and nothing is
+// written; nor is anything when the cells to protect no longer show what the
+// panel read, when the portion to change or delete is gone, or when the
+// editor refuses to remove its range.
 export function writeWorkbookLabellingCommand(): WriteOutcome {
   const scope = Asc.scope;
   const sheet = Api.GetActiveSheet();
@@ -94,7 +153,7 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
       cells.SetBorders(edge, 'Medium', color);
     }
   };
-  if (portion !== null && portion.kind !== 'insertion') {
+  if (portion !== null && (portion.kind === 'change' || portion.kind === 'deletion')) {
     // The portion's placeholder, a range titled with its id on any sheet,
     // and its part, found by the id its root element names however the
     // editor serialises it, as the text editor's command finds it, since a
@@ -145,26 +204,67 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
       Reflect.deleteProperty(protectedRange, 'isUserCanEdit');
     }
   }
+  // Cells that hold a merge or a portion's range, whoever may edit it, and
+  // cells that hold a formula, even one whose result is empty, take no
+  // portion.
+  const holdsMergeOrPortion = (cellsSheet: ApiWorksheet, cells: ApiRange): boolean =>
+    cells.range.hasMerged() !== null || cellsSheet.worksheet.isUserProtectedRangesIntersection(cells.range.bbox, null, true);
+  const holdsFormula = (cells: ApiRange): boolean => {
+    let formula = false;
+    cells.ForEach((cell) => {
+      formula ||= cell.GetFormula().startsWith('=');
+    });
+    return formula;
+  };
+  // An insertion and a protection make the placeholder alike, in empty cells.
+  const addPlaceholder = (cellsSheet: ApiWorksheet, cells: ApiRange, added: { id: string; block: PortionBlockScope; xml: string }): void => {
+    cells.Merge(false);
+    showMarking(cells, added.block);
+    // A sheet's name is quoted in a reference, its quotes doubled.
+    const reference = `'${cellsSheet.GetName().replace(/'/g, "''")}'!${cells.GetAddress(true, true, 'xlA1', false) ?? ''}`;
+    const created = cellsSheet.AddProtectedRange(added.id, reference);
+    for (const editor of created.GetAllUsers() ?? []) {
+      created.DeleteUser(editor.GetId());
+    }
+    parts.Add(added.xml);
+  };
   if (portion !== null && portion.kind === 'insertion') {
     const selection = sheet.GetSelection();
-    let occupied = selection.range.hasMerged() !== null || sheet.worksheet.isUserProtectedRangesIntersection(selection.range.bbox, null, true);
-    // A formula counts even when its result is empty.
+    let occupied = holdsMergeOrPortion(sheet, selection) || holdsFormula(selection);
     selection.ForEach((cell) => {
       const value = cell.GetValue();
-      occupied ||= cell.GetFormula().startsWith('=') || (value !== '' && value !== null && value !== undefined);
+      occupied ||= value !== '' && value !== null && value !== undefined;
     });
     if (occupied) {
       return 'cells-occupied';
     }
-    selection.Merge(false);
-    showMarking(selection, portion.block);
-    // A sheet's name is quoted in a reference, its quotes doubled.
-    const reference = `'${sheet.GetName().replace(/'/g, "''")}'!${selection.GetAddress(true, true, 'xlA1', false) ?? ''}`;
-    const created = sheet.AddProtectedRange(portion.id, reference);
-    for (const editor of created.GetAllUsers() ?? []) {
-      created.DeleteUser(editor.GetId());
+    addPlaceholder(sheet, selection, portion);
+  }
+  if (portion !== null && portion.kind === 'protection') {
+    // The cells the author confirmed, wherever the selection went since: they
+    // must still show what the panel read, which the portion's envelope
+    // holds, with nothing that the panel refuses, which a co-author may have
+    // added since.
+    const { sheet: sheetName, address, texts } = portion.cells;
+    const cellsSheet = Api.GetSheets().find((candidate) => candidate.GetName() === sheetName) ?? null;
+    if (cellsSheet === null) {
+      return 'selection-changed';
     }
-    parts.Add(portion.xml);
+    const confirmed = cellsSheet.GetRange(address);
+    const shown = confirmed.GetText();
+    const { bbox } = confirmed.range;
+    const worksheet = cellsSheet.worksheet;
+    const unchanged =
+      JSON.stringify(typeof shown === 'string' ? [[shown]] : shown) === JSON.stringify(texts) &&
+      worksheet.autoFilters.isIntersectionTable(bbox) !== true &&
+      worksheet.getPivotTablesIntersectingRange(bbox).length === 0 &&
+      !worksheet.aComments.some((comment) => !comment.asc_getDocumentFlag() && bbox.contains(comment.nCol, comment.nRow));
+    if (!unchanged || holdsMergeOrPortion(cellsSheet, confirmed) || holdsFormula(confirmed)) {
+      return 'selection-changed';
+    }
+    // Their data validation and conditional formatting go with their content.
+    confirmed.Clear();
+    addPlaceholder(cellsSheet, confirmed, portion);
   }
   for (const replacement of scope.replacements) {
     for (const existing of parts.GetByNamespace(replacement.namespace)) {

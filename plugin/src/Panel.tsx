@@ -1,13 +1,14 @@
 import type { JSX } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
 import type { BubbleContent } from './bubble-channel.ts';
-import type { WriteOutcome } from './commands.ts';
+import type { SelectedCells, WriteOutcome } from './commands.ts';
 import { DocumentLabel } from './DocumentLabel.tsx';
 import { type EnvelopeClient, envelopeClientFor, unavailableOpener } from './envelopes.ts';
 import {
+  type EntryPointRequest,
   useDocumentLabel,
   useDocumentState,
-  useInsertionEntryPoints,
+  useMenuEntryPoints,
   useLoadable,
   usePortionBubble,
   type PortionNotice,
@@ -28,10 +29,19 @@ import {
   fetchLabelOfAdatp4774,
   type LabelView,
 } from './policy.ts';
-import { documentIdOf, reportBaseLabelChange } from './portal.ts';
-import { PortionDeletionForm, PortionForm } from './PortionForm.tsx';
+import { documentIdOf, reportBaseLabelChange, reportExistingContentProtection } from './portal.ts';
+import { PortionDeletionForm, PortionForm, type ProtectionOffer } from './PortionForm.tsx';
 import { PortionList, shownLabelOf } from './PortionList.tsx';
-import { EDITORS, insertPortion, type StoredPortion, writeDocumentLabel, type WriteResult } from './portions.ts';
+import {
+  EDITORS,
+  insertPortion,
+  type OtherLabels,
+  protectSelection,
+  readSelection,
+  type StoredPortion,
+  writeDocumentLabel,
+  type WriteResult,
+} from './portions.ts';
 import { type PortionReading, PortionReader } from './readings.ts';
 
 // One empty list, so that the portions' readings do not restart on every render.
@@ -57,6 +67,8 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   );
   const { state: documentState, activePortionId, selectionChanges, rereadProblem, refresh } = useDocumentState(pluginReady);
   const [insertionRequested, setInsertionRequested] = useState(false);
+  // How many times the editor's context menu asked to protect the selection.
+  const [protectionRequests, setProtectionRequests] = useState(0);
   const editorInfo = useLoadable<{ type: EditorType; documentId: string | null; userId: string | null }>(async () => {
     const info = await pluginReady;
     return { type: editorTypeOf(info), documentId: documentIdOf(info), userId: typeof info.userId === 'string' ? info.userId : null };
@@ -68,6 +80,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // The hint the insertion form gives, null when the panel offers none.
   const insertionHint = !readOnly && editor !== null && editor.insertsPortions ? editor.insertionHint : null;
   const offersPortions = insertionHint !== null;
+  const protectsSelection = offersPortions && editor !== null && editor.readSelection !== null;
   const othersLocks = usePortionLocks(documentId, userId);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
@@ -107,11 +120,15 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   );
   const documentLabel = useDocumentLabel(labelRequest, documentState, !readOnly, editorType);
 
-  const requestInsertion = useCallback((): void => {
-    setInsertionRequested(true);
+  const requestFromMenu = useCallback((request: EntryPointRequest): void => {
+    if (request === 'insertion') {
+      setInsertionRequested(true);
+    } else {
+      setProtectionRequests((count) => count + 1);
+    }
   }, []);
-  // The editor's menus only offer an insertion the panel can carry out.
-  useInsertionEntryPoints(pluginReady, offersPortions && offeredLabels !== null && offeredLabels.length > 0, requestInsertion);
+  // The editor's menus only offer what the panel can carry out.
+  useMenuEntryPoints(pluginReady, offersPortions && offeredLabels !== null && offeredLabels.length > 0, protectsSelection, requestFromMenu);
 
   const selectPortion = (portion: StoredPortion): void => {
     editor?.selectPlaceholder(portion).catch((error: unknown) => {
@@ -119,7 +136,12 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     });
   };
 
-  const insert = async (label: LabelView, text: string): Promise<WriteResult> => {
+  // A new portion is sealed with the envelopes and computed with the
+  // document's other labels, read afresh; the panel reads the document again
+  // once it is written.
+  const writeNewPortion = async (
+    write: (others: OtherLabels, client: EnvelopeClient, editorType: EditorType) => Promise<WriteResult>,
+  ): Promise<WriteResult> => {
     if (envelopes.status === 'failed') {
       return { status: 'not-encrypted', reason: envelopes.reason };
     }
@@ -127,18 +149,33 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
       return { status: 'not-written' };
     }
     const current = await refresh();
-    const result = await insertPortion(
-      { label, text },
-      { baseLabelCode, portionLabelCodes: current.portions.map((portion) => portion.labelCode) },
-      envelopes.value,
-      editorTypeOf(await pluginReady),
-    );
+    const others = { baseLabelCode, portionLabelCodes: current.portions.map((portion) => portion.labelCode) };
+    const result = await write(others, envelopes.value, editorTypeOf(await pluginReady));
     await refresh();
+    return result;
+  };
+
+  const insert = async (label: LabelView, text: string): Promise<WriteResult> => {
+    const result = await writeNewPortion(async (others, client, editorType) => insertPortion({ label, text }, others, client, editorType));
     if (result.status === 'written') {
       setInsertionRequested(false);
     }
     return result;
   };
+
+  const protect = async (label: LabelView, cells: SelectedCells): Promise<WriteResult> =>
+    writeNewPortion(async (others, client, editorType) => {
+      const written = await protectSelection({ label, cells }, others, client, editorType);
+      if (written.result.status === 'written' && documentId !== null) {
+        reportExistingContentProtection(documentId, written.portionId, written.state).catch((error: unknown) => {
+          logProblem('Reporting a protection of existing content', error);
+        });
+      }
+      return written.result;
+    });
+  const protectionOffer: ProtectionOffer | null = protectsSelection
+    ? { requests: protectionRequests, onRead: async () => readSelection(editorTypeOf(await pluginReady)), onProtect: protect }
+    : null;
 
   const changeBaseLabel = async (code: string): Promise<WriteOutcome> => {
     if (policy === null) {
@@ -205,7 +242,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
               {offeredLabels !== null && offeredLabels.length > 0 && (
                 <PortionForm
                   labels={offeredLabels}
-                  purpose={{ kind: 'insertion', requested: insertionRequested, hint: insertionHint }}
+                  purpose={{ kind: 'insertion', requested: insertionRequested, hint: insertionHint, protection: protectionOffer }}
                   onSubmit={insert}
                 />
               )}

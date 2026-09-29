@@ -95,8 +95,26 @@ legend,
   resize: vertical;
 }
 
-.portion-form button {
+.portion-form button,
+.selection-protection button {
   margin-top: 8px;
+}
+
+.selection-protection .portion-form p {
+  margin: 8px 0 0;
+}
+
+/* The cells' values as the portion holds them: rows of tab-separated cells. */
+.protection-preview {
+  box-sizing: border-box;
+  max-height: 12em;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-divider, #dfdfdf);
+  font: inherit;
+  white-space: pre-wrap;
+  tab-size: 4;
 }
 
 .portion-list {

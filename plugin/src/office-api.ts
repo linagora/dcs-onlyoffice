@@ -158,13 +158,19 @@ export interface InternalWorksheet {
   // Whether a range intersects a user protected range; with `notCheckUser`,
   // whoever may edit it.
   isUserProtectedRangesIntersection(range: unknown, userId: null, notCheckUser: true): boolean;
+  // The sheet's comments: on a cell given from 0, unless on the whole
+  // document.
+  aComments: { nCol: number; nRow: number; asc_getDocumentFlag(): boolean }[];
+  // true when a range intersects a table, null otherwise.
+  autoFilters: { isIntersectionTable(range: unknown): true | null };
+  getPivotTablesIntersectingRange(range: unknown): unknown[];
   // The editor itself, which tells whether its user types in a cell: a call
   // that a command's `Api` does not offer.
   workbook: { oApi: { asc_getCellEditMode(): boolean } };
 }
 
 export interface InternalRange {
-  bbox: unknown;
+  bbox: { contains(column: number, row: number): boolean };
   // The merged area it intersects, null when none.
   hasMerged(): unknown;
 }
@@ -172,6 +178,12 @@ export interface InternalRange {
 export interface ApiRange {
   // A single cell's value, or a row of values per row of the range.
   GetValue(): unknown;
+  // A single cell's displayed value, formatted, or a row of them per row of
+  // the range.
+  GetText(): string | string[][];
+  GetCellsCount(): number;
+  // The blocks of cells of a selection.
+  GetAreas(): { GetCount(): number };
   // A single cell's formula, starting with "=", or its value.
   GetFormula(): string;
   // Calls back with each of the range's cells that holds anything.
@@ -179,7 +191,8 @@ export interface ApiRange {
   SetValue(value: string): boolean;
   Merge(across: boolean): boolean;
   UnMerge(): boolean;
-  // Clears the values and the formats.
+  // Clears the values and the formats, with the comments, the data
+  // validation and the conditional formatting.
   Clear(): unknown;
   SetBold(bold: boolean): unknown;
   SetWrap(wrap: boolean): unknown;

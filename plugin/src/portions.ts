@@ -5,6 +5,10 @@ import type {
   HeaderFooterSnapshot,
   PortionBlockScope,
   PortionWriteScope,
+  SelectedCells,
+  SelectionReading,
+  SelectionReadingScope,
+  SelectionRefusal,
   SelectionScope,
   SheetSnapshot,
   WriteOutcome,
@@ -14,13 +18,21 @@ import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
 import { callEditorMethod, type EditorType, runCommand } from './onlyoffice.ts';
 import { type DocumentLabel, type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, fetchLabelAttributes, type LabelView } from './policy.ts';
-import { placeholderAtActiveCellCommand, readWorkbookCommand, selectPlaceholderCommand, writeWorkbookLabellingCommand } from './workbook-commands.ts';
+import type { PortionState } from './portal.ts';
+import {
+  placeholderAtActiveCellCommand,
+  readSelectionCommand,
+  readWorkbookCommand,
+  selectPlaceholderCommand,
+  writeWorkbookLabellingCommand,
+} from './workbook-commands.ts';
 
 // What the panel does in each editor: the commands that read the labels and
 // write them, what the page marking the document shows is, whether it inserts
-// protected portions and changes and deletes them, how it selects a portion's
-// placeholder and learns which one holds the selection, and what the editor
-// does to the panel as the document loads.
+// protected portions and changes and deletes them, how it reads the selected
+// content it protects, how it selects a portion's placeholder and learns which
+// one holds the selection, and what the editor does to the panel as the
+// document loads.
 export const EDITORS: Readonly<
   Record<
     EditorType,
@@ -30,6 +42,8 @@ export const EDITORS: Readonly<
       pageMarkingOf: (snapshot: DocumentSnapshot) => ShownPageMarking | null;
       insertsPortions: boolean;
       editsPortions: boolean;
+      // null where the panel protects no selected content.
+      readSelection: (() => SelectionReading) | null;
       selectPlaceholder: (portion: StoredPortion) => Promise<void>;
       // Reads which portion's placeholder holds the selection, at each change
       // of the selection, where the editor tells it through no event of its
@@ -48,6 +62,7 @@ export const EDITORS: Readonly<
     pageMarkingOf: (snapshot) => textPageMarkingOf(snapshot.headersAndFooters),
     insertsPortions: true,
     editsPortions: true,
+    readSelection: null,
     selectPlaceholder: async (portion) => {
       await callEditorMethod('SelectContentControl', [portion.internalId]);
     },
@@ -61,6 +76,7 @@ export const EDITORS: Readonly<
     pageMarkingOf: (snapshot) => sheetPageMarkingOf(snapshot.sheets),
     insertsPortions: true,
     editsPortions: true,
+    readSelection: readSelectionCommand,
     selectPlaceholder: async (portion) => {
       const scope = { rangeTitle: portion.id } satisfies SelectionScope;
       const selected = await runCommand(selectPlaceholderCommand, scope, false, (result) => (typeof result === 'boolean' ? result : null));
@@ -76,6 +92,15 @@ export const EDITORS: Readonly<
     insertionHint: messages.cellInsertionHint,
   },
 };
+
+// Every change of a portion sends its whole part through co-editing, twice:
+// a bounded text keeps it far below the Document Server's message limit.
+export const PORTION_TEXT_LIMIT = 20_000;
+
+// Characters count, not UTF-16 code units: an emoji counts once.
+export function exceedsPortionTextLimit(text: string): boolean {
+  return Array.from(text).length > PORTION_TEXT_LIMIT;
+}
 
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 export const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
@@ -140,6 +165,19 @@ export interface NewPortion {
   text: string;
 }
 
+// Selected content to protect as a new portion, under a label.
+export interface SelectionToProtect {
+  label: LabelView;
+  cells: SelectedCells;
+}
+
+// What writing a new portion gave, with the portion's id and first state.
+export interface NewPortionWrite {
+  portionId: string;
+  state: PortionState;
+  result: WriteResult;
+}
+
 // The document's other labels: its base label and the labels of its other
 // portions, from which, with a written portion's label, the document label
 // is computed.
@@ -164,6 +202,7 @@ export type WriteResult =
   | { status: 'not-encrypted'; reason: string }
   | { status: 'changed-meanwhile' }
   | { status: 'cells-occupied' }
+  | { status: 'selection-changed' }
   | { status: 'cell-being-edited' }
   | { status: 'not-written' };
 
@@ -178,14 +217,8 @@ export interface PortionChange {
 // The text is sealed before anything reaches the document: a text that cannot
 // be encrypted is not inserted.
 export async function insertPortion(portion: NewPortion, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<WriteResult> {
-  const sealed = await sealPortion(portion.label, portion.text, others, envelopes);
-  if (sealed.status === 'not-encrypted') {
-    return sealed;
-  }
-  const id = crypto.randomUUID();
-  const xml = buildPortionPart({ id, version: 1, labelCode: portion.label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
-  const insertion: PortionWriteScope = { kind: 'insertion', id, alias: messages.portionAlias, block: portionBlockScope(id, portion.label), xml };
-  return writeLabelling(insertion, sealed.documentLabel, others, editor);
+  const { result } = await writeNewPortion(portion, others, envelopes, editor, (fields) => ({ kind: 'insertion', alias: messages.portionAlias, ...fields }));
+  return result;
 }
 
 // The new text is sealed before anything reaches the document: a text that
@@ -199,6 +232,64 @@ export async function changePortion(change: PortionChange, others: OtherLabels, 
   }
   const xml = buildPortionPart({ id: portion.id, version: nextVersion(portion), labelCode: label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
   return writeLabelling({ kind: 'change', id: portion.id, block: portionBlockScope(portion.id, label), xml }, sealed.documentLabel, others, editor);
+}
+
+// Reads the selected content the panel protects, or why it refuses it; null
+// in an editor where it protects none, or when the editor did not answer as
+// expected.
+export async function readSelection(editor: EditorType): Promise<SelectionReading | null> {
+  const command = EDITORS[editor].readSelection;
+  if (command === null) {
+    return null;
+  }
+  // Each cell but the first adds a separator to the text: more cells than a
+  // portion's text holds characters would not fit.
+  const scope = { cellLimit: PORTION_TEXT_LIMIT } satisfies SelectionReadingScope;
+  const reading = await runCommand(command, scope, false, parseSelectionReading);
+  return reading?.status === 'read' && exceedsPortionTextLimit(textOfCells(reading.cells)) ? { status: 'refused', reason: 'too-large' } : reading;
+}
+
+// The text of selected cells, as their portion holds it: rows of cells
+// separated by tabs, as a copy from the grid gives them, and as spreadsheets
+// read them back: a cell that holds a tab, a line break or a quote is quoted,
+// its quotes doubled.
+export function textOfCells(cells: SelectedCells): string {
+  const field = (value: string): string => (/[\t\n\r"]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value);
+  return cells.texts.map((row) => row.map(field).join('\t')).join('\n');
+}
+
+// The content of the selected cells is sealed under the label as the text of
+// a new portion, whose placeholder takes their place: nothing reaches the
+// document when it cannot be encrypted, nor when the cells no longer show
+// what the panel read. What the cells held went through ONLYOFFICE in clear
+// before: the panel warned the author before they confirmed.
+export async function protectSelection(
+  protection: SelectionToProtect,
+  others: OtherLabels,
+  envelopes: EnvelopeClient,
+  editor: EditorType,
+): Promise<NewPortionWrite> {
+  const { label, cells } = protection;
+  return writeNewPortion({ label, text: textOfCells(cells) }, others, envelopes, editor, (fields) => ({ kind: 'protection', cells, ...fields }));
+}
+
+// A new portion's first version, which `placed` puts where it goes.
+async function writeNewPortion(
+  portion: NewPortion,
+  others: OtherLabels,
+  envelopes: EnvelopeClient,
+  editor: EditorType,
+  placed: (fields: { id: string; block: PortionBlockScope; xml: string }) => PortionWriteScope,
+): Promise<NewPortionWrite> {
+  const portionId = crypto.randomUUID();
+  const state = { label: portion.label.code, version: 1 };
+  const sealed = await sealPortion(portion.label, portion.text, others, envelopes);
+  if (sealed.status === 'not-encrypted') {
+    return { portionId, state, result: sealed };
+  }
+  const xml = buildPortionPart({ id: portionId, version: state.version, labelCode: state.label, labelXml: sealed.labelXml, envelope: sealed.envelope });
+  const scope = placed({ id: portionId, block: portionBlockScope(portionId, portion.label), xml });
+  return { portionId, state, result: await writeLabelling(scope, sealed.documentLabel, others, editor) };
 }
 
 // Deletes a portion and its part, with the document label and the page
@@ -244,8 +335,10 @@ async function writeLabelling(portion: PortionWriteScope, documentLabel: Documen
   return written === null ? { status: 'not-written' } : { status: written };
 }
 
+const WRITE_OUTCOMES = ['written', 'not-written', 'cells-occupied', 'selection-changed', 'cell-being-edited'] as const satisfies readonly WriteOutcome[];
+
 function parseWriteOutcome(result: unknown): WriteOutcome | null {
-  return result === 'written' || result === 'not-written' || result === 'cells-occupied' || result === 'cell-being-edited' ? result : null;
+  return WRITE_OUTCOMES.find((outcome) => outcome === result) ?? null;
 }
 
 // Rewrites the document label and its page marking from the base label and
@@ -550,6 +643,34 @@ function parseSnapshot(result: unknown): DocumentSnapshot | null {
     sheets: sheets.map(parseSheet),
     cellBeingEdited: cellBeingEdited === true,
   };
+}
+
+const SELECTION_REFUSALS = [
+  'cell-being-edited',
+  'several-areas',
+  'too-large',
+  'merge-portion-or-table',
+  'comment',
+  'formula',
+  'empty',
+] as const satisfies readonly SelectionRefusal[];
+
+function parseSelectionReading(result: unknown): SelectionReading | null {
+  if (typeof result !== 'object' || result === null || !('status' in result)) {
+    return null;
+  }
+  if (result.status === 'refused') {
+    const reason = SELECTION_REFUSALS.find((refusal) => 'reason' in result && result.reason === refusal);
+    return reason === undefined ? null : { status: 'refused', reason };
+  }
+  if (result.status !== 'read' || !('cells' in result) || typeof result.cells !== 'object' || result.cells === null) {
+    return null;
+  }
+  const { sheet, address, texts } = result.cells as Record<string, unknown>; // SAFETY: object checked above
+  const isRow = (row: unknown): row is string[] => Array.isArray(row) && row.every((value) => typeof value === 'string');
+  return typeof sheet === 'string' && typeof address === 'string' && Array.isArray(texts) && texts.every(isRow)
+    ? { status: 'read', cells: { sheet, address, texts } }
+    : null;
 }
 
 // A sheet the editor did not answer as expected counts as one without the
