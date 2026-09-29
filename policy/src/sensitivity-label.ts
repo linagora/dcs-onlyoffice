@@ -64,13 +64,11 @@ interface CustomProperty {
 // saves carry the label as the editing session opened, not as last stored.
 // A Strict custom properties part is left as it is.
 export async function writeSensitivityLabel(zip: JSZip, mapped: MappedSensitivityLabel, now: Date, stored: string | null): Promise<SensitivityLabelWriting> {
-  const located = await customPropertiesPartOf(zip);
-  const part = located?.part ?? CUSTOM_PROPERTIES_PART;
-  const content = located?.present === true ? ((await zip.file(part)?.async('string')) ?? '') : null;
-  if (content !== null && !isTransitional(content)) {
-    return { customPropertiesPart: part, writtenParts: [] };
+  const custom = await customPropertiesOf(zip);
+  if (!custom.transitional) {
+    return { customPropertiesPart: custom.part, writtenParts: [] };
   }
-  const existing = content === null ? [] : propertiesOf(content);
+  const existing = custom.properties;
   // The tenant's labels go, and any other group of the label written, which
   // would otherwise leave two properties of the same name.
   const replaced = labelIdsOfTenant(existing, mapped.tenant);
@@ -79,35 +77,78 @@ export async function writeSensitivityLabel(zip: JSZip, mapped: MappedSensitivit
   }
   const kept = existing.filter((property) => property.label === null || !replaced.has(property.label.id));
   if (mapped.label === null && kept.length === existing.length) {
-    return { customPropertiesPart: content === null ? null : part, writtenParts: [] };
+    return { customPropertiesPart: custom.present ? custom.part : null, writtenParts: [] };
   }
-  const earlier = stored === null ? existing : propertiesOf(stored);
-  const labelProperties = mapped.label === null ? [] : labelPropertiesXml(mapped.tenant, mapped.label, enabledLabel(earlier, mapped.label.id, mapped.tenant), now, kept);
-  zip.file(
-    part,
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="${CUSTOM_PROPERTIES_NAMESPACE}" xmlns:vt="${VARIANT_TYPES_NAMESPACE}">${[...kept.map((property) => property.xml), ...labelProperties].join('')}</Properties>`,
-  );
-  return { customPropertiesPart: part, writtenParts: [part, ...(await declareCustomProperties(zip, part, located !== null))] };
+  const earlier = enabledLabel(stored === null ? existing : propertiesOf(stored), mapped.label?.id ?? '', mapped.tenant);
+  const labelProperties =
+    mapped.label === null
+      ? []
+      : labelPropertiesXml(mapped.tenant, { ...mapped.label, method: 'Privileged', contentBits: '0' }, earlier, now, nextPid(kept));
+  return { customPropertiesPart: custom.part, writtenParts: await writeCustomProperties(zip, custom, [...kept.map((property) => property.xml), ...labelProperties]) };
 }
 
-// The seven properties of a sensitivity label ([MS-OI29500] §3.11.2), after
-// the kept properties' pids. A label that stays keeps when it was set and the
-// action that set it.
-function labelPropertiesXml(tenant: string, label: SensitivityLabel, earlier: Map<string, string> | null, now: Date, kept: CustomProperty[]): string[] {
-  const firstPid = Math.max(1, ...kept.map((property) => property.pid)) + 1;
-  const values: [string, string][] = [
+// A sensitivity label to write as properties: its id, its unique name when
+// known, its method and the content marking applied.
+interface LabelAttributes {
+  id: string;
+  name: string | null;
+  method: string;
+  contentBits: string;
+}
+
+// The properties of a sensitivity label ([MS-OI29500] §3.11.2), from a pid
+// on. A label that stays keeps when it was set and the action that set it.
+function labelPropertiesXml(tenant: string, label: LabelAttributes, earlier: Map<string, string> | null, now: Date, firstPid: number): string[] {
+  const values: [string, string | null][] = [
     ['Enabled', 'true'],
     ['SetDate', earlier?.get('setdate') || now.toISOString().replace(/\.\d{3}Z$/, 'Z')],
-    ['Method', 'Privileged'],
+    ['Method', label.method],
     ['Name', label.name],
     ['SiteId', tenant],
     ['ActionId', earlier?.get('actionid') || randomUUID()],
-    ['ContentBits', '0'],
+    ['ContentBits', label.contentBits],
   ];
-  return values.map(
-    ([attribute, value], index) =>
-      `<property fmtid="${USER_DEFINED_PROPERTIES}" pid="${firstPid + index}" name="MSIP_Label_${label.id}_${attribute}"><vt:lpwstr>${escapeXml(value)}</vt:lpwstr></property>`,
+  return values
+    .flatMap(([attribute, value]) => (value === null ? [] : [[attribute, value] as const]))
+    .map(
+      ([attribute, value], index) =>
+        `<property fmtid="${USER_DEFINED_PROPERTIES}" pid="${firstPid + index}" name="MSIP_Label_${label.id}_${attribute}"><vt:lpwstr>${escapeXml(value)}</vt:lpwstr></property>`,
+    );
+}
+
+// The pid after the kept properties'.
+function nextPid(kept: CustomProperty[]): number {
+  return Math.max(1, ...kept.map((property) => property.pid)) + 1;
+}
+
+// A package's custom properties: the part its relationship designates, or
+// the customary one; whether the relationship and the part are there; and
+// its properties, which this module reads and writes only in a Transitional
+// part.
+async function customPropertiesOf(zip: JSZip): Promise<CustomProperties> {
+  const located = await customPropertiesPartOf(zip);
+  const part = located?.part ?? CUSTOM_PROPERTIES_PART;
+  const content = located?.present === true ? ((await zip.file(part)?.async('string')) ?? '') : null;
+  const transitional = content === null || isTransitional(content);
+  return { part, related: located !== null, present: content !== null, transitional, properties: content === null || !transitional ? [] : propertiesOf(content) };
+}
+
+interface CustomProperties {
+  part: string;
+  related: boolean;
+  present: boolean;
+  transitional: boolean;
+  properties: CustomProperty[];
+}
+
+// Writes a Transitional custom properties part and declares it; gives the
+// parts written.
+async function writeCustomProperties(zip: JSZip, custom: CustomProperties, properties: string[]): Promise<string[]> {
+  zip.file(
+    custom.part,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="${CUSTOM_PROPERTIES_NAMESPACE}" xmlns:vt="${VARIANT_TYPES_NAMESPACE}">${properties.join('')}</Properties>`,
   );
+  return [custom.part, ...(await declareCustomProperties(zip, custom.part, custom.related))];
 }
 
 // The custom properties part that the package relationship designates, and
