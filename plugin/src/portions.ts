@@ -17,7 +17,15 @@ import { readDocumentCommand, readParagraphsCommand, writeLabellingCommand } fro
 import type { EnvelopeClient } from './envelopes.ts';
 import { messages } from './messages.ts';
 import { callEditorMethod, type EditorType, runCommand } from './onlyoffice.ts';
-import { type DocumentLabel, type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, fetchLabelAttributes, type LabelView } from './policy.ts';
+import {
+  type DocumentLabel,
+  type DocumentLabelRequest,
+  fetchAdatp4774,
+  fetchDocumentLabel,
+  fetchLabelAttributes,
+  type LabelView,
+  type PackageKind,
+} from './policy.ts';
 import type { PortionState } from './portal.ts';
 import {
   placeholderAtActiveCellCommand,
@@ -37,6 +45,8 @@ export const EDITORS: Readonly<
   Record<
     EditorType,
     {
+      // The format of the documents it edits.
+      packageKind: PackageKind;
       read: () => DocumentSnapshot;
       write: () => WriteOutcome;
       pageMarkingOf: (snapshot: DocumentSnapshot) => ShownPageMarking | null;
@@ -57,6 +67,7 @@ export const EDITORS: Readonly<
   >
 > = {
   word: {
+    packageKind: 'text-document',
     read: readDocumentCommand,
     write: writeLabellingCommand,
     pageMarkingOf: (snapshot) => textPageMarkingOf(snapshot.headersAndFooters),
@@ -71,6 +82,7 @@ export const EDITORS: Readonly<
     insertionHint: messages.insertionHint,
   },
   cell: {
+    packageKind: 'workbook',
     read: readWorkbookCommand,
     write: writeWorkbookLabellingCommand,
     pageMarkingOf: (snapshot) => sheetPageMarkingOf(snapshot.sheets),
@@ -226,7 +238,7 @@ export async function insertPortion(portion: NewPortion, others: OtherLabels, en
 // the document label and the page marking change with it.
 export async function changePortion(change: PortionChange, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<WriteResult> {
   const { label, portion } = change;
-  const sealed = await sealPortion(label, change.text, others, envelopes);
+  const sealed = await sealPortion(label, change.text, others, envelopes, editor);
   if (sealed.status === 'not-encrypted') {
     return sealed;
   }
@@ -282,7 +294,7 @@ async function writeNewPortion(
 ): Promise<NewPortionWrite> {
   const portionId = crypto.randomUUID();
   const state = { label: portion.label.code, version: 1 };
-  const sealed = await sealPortion(portion.label, portion.text, others, envelopes);
+  const sealed = await sealPortion(portion.label, portion.text, others, envelopes, editor);
   if (sealed.status === 'not-encrypted') {
     return { portionId, state, result: sealed };
   }
@@ -291,10 +303,16 @@ async function writeNewPortion(
   return { portionId, state, result: await writeLabelling(scope, sealed.documentLabel, others, editor) };
 }
 
+// The document label that a request gives, with a binding over the parts of
+// the format the editor edits.
+export async function documentLabelIn(editor: EditorType, request: DocumentLabelRequest): Promise<DocumentLabel> {
+  return fetchDocumentLabel(request, EDITORS[editor].packageKind);
+}
+
 // Deletes a portion and its part, with the document label and the page
 // marking that the document's other labels give.
 export async function deletePortion(portion: StoredPortion, policy: string, others: OtherLabels, editor: EditorType): Promise<WriteResult> {
-  const documentLabel = await fetchDocumentLabel({ policy, ...others });
+  const documentLabel = await documentLabelIn(editor, { policy, ...others });
   return writeLabelling({ kind: 'deletion', id: portion.id }, documentLabel, others, editor);
 }
 
@@ -309,11 +327,11 @@ type SealedPortion =
 
 // Seals a portion's text under its label, and computes the document label
 // that the portion's label gives the document.
-async function sealPortion(label: LabelView, text: string, others: OtherLabels, envelopes: EnvelopeClient): Promise<SealedPortion> {
+async function sealPortion(label: LabelView, text: string, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<SealedPortion> {
   const [labelXml, attributes, documentLabel] = await Promise.all([
     fetchAdatp4774(label.policy, label.code),
     fetchLabelAttributes(label.policy, label.code),
-    fetchDocumentLabel({ policy: label.policy, baseLabelCode: others.baseLabelCode, portionLabelCodes: [...others.portionLabelCodes, label.code] }),
+    documentLabelIn(editor, { policy: label.policy, baseLabelCode: others.baseLabelCode, portionLabelCodes: [...others.portionLabelCodes, label.code] }),
   ]);
   const sealed = await envelopes.seal(text, { xml: labelXml, attributes });
   return sealed.status === 'failed' ? { status: 'not-encrypted', reason: sealed.reason } : { status: 'sealed', labelXml, envelope: sealed.envelope, documentLabel };
@@ -343,7 +361,7 @@ function parseWriteOutcome(result: unknown): WriteOutcome | null {
 // Rewrites the document label and its page marking from the base label and
 // the portions' labels.
 export async function writeDocumentLabel(request: DocumentLabelRequest, editor: EditorType): Promise<WriteOutcome> {
-  const documentLabel = await fetchDocumentLabel(request);
+  const documentLabel = await documentLabelIn(editor, request);
   const done = await runCommand(
     EDITORS[editor].write,
     { portion: null, ...documentLabelScope(documentLabel, request.baseLabelCode) },

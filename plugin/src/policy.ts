@@ -117,12 +117,15 @@ export interface DocumentLabelRequest {
   portionLabelCodes: string[];
 }
 
+// The format of a document, whose parts its binding references.
+export type PackageKind = 'text-document' | 'workbook';
+
 // Document label computed from the base label and the portions' labels, with
-// its ADatP-4778.2 binding part.
-export async function fetchDocumentLabel(request: DocumentLabelRequest): Promise<DocumentLabel> {
+// its ADatP-4778.2 binding part, over the parts of the document's format.
+export async function fetchDocumentLabel(request: DocumentLabelRequest, packageKind: PackageKind): Promise<DocumentLabel> {
   const body = await postJson(
     `${RELAY}/policies/${encodeURIComponent(request.policy)}/document-label`,
-    { base: request.baseLabelCode, portions: request.portionLabelCodes },
+    { base: request.baseLabelCode, portions: request.portionLabelCodes, packageKind },
     'The policy service could not compute the document label',
   );
   if (
