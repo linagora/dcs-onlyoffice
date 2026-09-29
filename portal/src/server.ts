@@ -189,7 +189,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     report: string,
     read: (body: unknown) => Report | null,
     expected: string,
-    record: (entry: Report & { documentId: string }, user: string) => Promise<void>,
+    record: (entry: Report & { documentId: string }, user: string) => Promise<void> | void,
   ): void => {
     app.post<{ Params: DocumentParams }>(`/documents/:id/${report}`, async (request, reply) => {
       const document = await findDocument(config.documentsDirectory, request.params.id);
@@ -209,8 +209,12 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   // Each change of a portion, of its text, its label or both.
   reportRoute('portion-change', readPortionChange, '{ portion, before, after }', async (change, user) => labelJournal.recordPortionReport(change, user));
   // Each portion deleted.
-  reportRoute('portion-deletion', readPortionDeletion, '{ portion, before }', async (deletion, user) => {
+  reportRoute('portion-deletion', readPortionDeletion, '{ portion, before }', (deletion, user) => {
     labelJournal.recordPortionDeletion(deletion, user);
+  });
+  // Each protection of content already in the document, as a new portion.
+  reportRoute('existing-content-protection', readExistingContentProtection, '{ portion, after }', (protection, user) => {
+    labelJournal.recordExistingContentProtection(protection, user);
   });
 
   // The panel reports the base label changes it makes, which the portal logs
@@ -259,6 +263,15 @@ function readPortionDeletion(body: unknown): { portion: string; before: PortionS
   const { portion } = body;
   const before = readPortionState(body.before);
   return typeof portion === 'string' && before !== null ? { portion, before } : null;
+}
+
+function readExistingContentProtection(body: unknown): { portion: string; after: PortionState } | null {
+  if (typeof body !== 'object' || body === null || !('portion' in body) || !('after' in body)) {
+    return null;
+  }
+  const { portion } = body;
+  const after = readPortionState(body.after);
+  return typeof portion === 'string' && after !== null ? { portion, after } : null;
 }
 
 function readPortionState(value: unknown): PortionState | null {
