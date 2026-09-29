@@ -109,3 +109,22 @@ export async function customXmlParts(zip: JSZip): Promise<string[]> {
   }
   return [...parts].sort();
 }
+
+// Removes a parsed relationships part's relationships of a type.
+export function removeRelationships(relationships: Document, type: string): void {
+  for (const relationship of Array.from(relationships.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship'))) {
+    if (relationship.getAttribute('Type') === type) {
+      relationship.parentNode?.removeChild(relationship);
+    }
+  }
+}
+
+// Removes a part's content type Override from the parsed content types part;
+// part names match without regard to case (ECMA-376 Part 2 §6.2.2.3).
+export function undeclareContentType(types: Document, partName: string): void {
+  for (const override of Array.from(types.getElementsByTagNameNS(CONTENT_TYPES_NAMESPACE, 'Override'))) {
+    if ((override.getAttribute('PartName') ?? '').toLowerCase() === partName.toLowerCase()) {
+      override.parentNode?.removeChild(override);
+    }
+  }
+}

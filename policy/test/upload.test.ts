@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -90,6 +91,61 @@ async function customXmlTexts(zip: JSZip): Promise<Map<string, string>> {
     parts.set(name, (await zip.file(name)?.async('string')) ?? '');
   }
   return parts;
+}
+
+// The example label mapping's fictional tenant and sensitivity labels
+// (deploy/spif), and another tenant.
+const DEMO_TENANT = '00000000-0000-0000-0000-000000000000';
+const OTHER_TENANT = '11111111-2222-3333-4444-555555555555';
+const SENSITIVITY_LABELS = { diffusionRestreinte: '10000000-0000-4000-8000-000000000002', nato: '10000000-0000-4000-8000-000000000003' } as const;
+const LABEL_LIST_NAMESPACE = 'http://schemas.microsoft.com/office/2020/mipLabelMetadata';
+const LABEL_INFORMATION_RELATIONSHIP = 'http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels';
+// When Word set a label, in the format of [MS-OI29500] §3.11.2.
+const WORD_SET_DATE = '2018-09-24T21:38:47-0800';
+
+// A tenant's label properties, as [MS-OI29500] §3.11.2 shows Word writing them.
+function wordLabelProperties(labelId: string, tenant: string, firstPid: number, options: { enabled?: string; actionId?: string } = {}): string {
+  const values = [
+    ['Enabled', options.enabled ?? 'true'],
+    ['SetDate', WORD_SET_DATE],
+    ['Method', 'Standard'],
+    ['Name', 'Fictional label'],
+    ['SiteId', tenant],
+    ['ActionId', options.actionId ?? randomUUID()],
+    ['ContentBits', '0'],
+  ];
+  return values
+    .map(([attribute, value], index) => `<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="${firstPid + index}" name="MSIP_Label_${labelId}_${attribute}"><vt:lpwstr>${value}</vt:lpwstr></property>`)
+    .join('');
+}
+
+// A Sensitivity Label Information element, as the examples of
+// [MS-OFFCRYPTO] §3.12 write it, ids braced; a removed one as they write it.
+function wordLabelElement(labelId: string, tenant: string, removed = false): string {
+  return removed
+    ? `<clbl:label id="{${tenant}}" enabled="0" method="" siteId="{${tenant}}" removed="1" />`
+    : `<clbl:label id="{${labelId}}" enabled="1" method="Privileged" siteId="{${tenant}}" contentBits="0" removed="0" />`;
+}
+
+// A package with custom properties, or a Sensitivity Label Information part,
+// or both, each with its relationship and content type, as Word writes them.
+async function withLabelMetadata(docx: Uint8Array, metadata: { properties: string | null; labelList: string | null }): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(docx);
+  let relationships = (await zip.file('_rels/.rels')?.async('string')) ?? '';
+  let types = (await zip.file('[Content_Types].xml')?.async('string')) ?? '';
+  if (metadata.properties !== null) {
+    zip.file('docProps/custom.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">${metadata.properties}</Properties>`);
+    relationships = relationships.replace('</Relationships>', '<Relationship Id="rIdCustom" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" Target="docProps/custom.xml"/></Relationships>');
+    types = types.replace('</Types>', '<Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/></Types>');
+  }
+  if (metadata.labelList !== null) {
+    zip.file('docMetadata/LabelInfo.xml', `<?xml version="1.0" encoding="utf-8" standalone="yes"?><clbl:labelList xmlns:clbl="${LABEL_LIST_NAMESPACE}">${metadata.labelList}</clbl:labelList>`);
+    relationships = relationships.replace('</Relationships>', `<Relationship Id="rIdLabels" Type="${LABEL_INFORMATION_RELATIONSHIP}" Target="docMetadata/LabelInfo.xml"/></Relationships>`);
+    types = types.replace('</Types>', '<Override PartName="/docMetadata/LabelInfo.xml" ContentType="application/vnd.ms-office.classificationlabels+xml"/></Types>');
+  }
+  zip.file('_rels/.rels', relationships);
+  zip.file('[Content_Types].xml', types);
+  return zip.generateAsync({ type: 'uint8array' });
 }
 
 // The reason a refusal gives, undefined for another answer.
@@ -396,6 +452,186 @@ describe('uploads', () => {
       const { json } = await read(await zip.generateAsync({ type: 'uint8array' }));
 
       assert.deepEqual(json, { label: { code: 'DEMO-FR:1', source: 'base-label' }, signature: 'not-matched' });
+    });
+  });
+
+  describe('the reading of a Word file\'s sensitivity label', () => {
+    async function readWith(metadata: { properties: string | null; labelList: string | null }): Promise<unknown> {
+      return (await read(await withLabelMetadata(await minimalDocx(), metadata))).json;
+    }
+
+    it('reads the mapped tenant\'s label from its Sensitivity Label Information element, whatever the case of its ids', async () => {
+      // Stale custom properties give another label: the element decides.
+      const json = await readWith({
+        properties: wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 2),
+        labelList: wordLabelElement(SENSITIVITY_LABELS.nato.toUpperCase(), DEMO_TENANT.toUpperCase()),
+      });
+
+      assert.deepEqual(json, { label: { code: 'DEMO-FR:2/2.1', source: 'sensitivity-label' }, signature: 'absent' });
+    });
+
+    it('reads the mapped tenant\'s label from custom properties alone', async () => {
+      const json = await readWith({ properties: wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 2), labelList: null });
+
+      assert.deepEqual(json, { label: { code: DIFFUSION_RESTREINTE, source: 'sensitivity-label' }, signature: 'absent' });
+    });
+
+    it('reads the mapped tenant\'s label from custom properties when the part has no element for the tenant', async () => {
+      const json = await readWith({ properties: wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 2), labelList: wordLabelElement(randomUUID(), OTHER_TENANT) });
+
+      assert.deepEqual(json, { label: { code: DIFFUSION_RESTREINTE, source: 'sensitivity-label' }, signature: 'absent' });
+    });
+
+    for (const [kind, metadata] of [
+      ['an element that marks the tenant\'s label removed, whatever the custom properties say', { properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2), labelList: wordLabelElement('', DEMO_TENANT, true) }],
+      ['a sensitivity label that the mapping does not know', { properties: wordLabelProperties(randomUUID(), DEMO_TENANT, 2), labelList: null }],
+      ['a disabled sensitivity label', { properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2, { enabled: 'false' }), labelList: null }],
+      ['two sensitivity labels that the mapping knows', { properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2) + wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 9), labelList: null }],
+      ['two elements for the tenant', { properties: null, labelList: wordLabelElement(SENSITIVITY_LABELS.nato, DEMO_TENANT) + wordLabelElement(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT) }],
+      ['another tenant\'s sensitivity label', { properties: wordLabelProperties(SENSITIVITY_LABELS.nato, OTHER_TENANT, 2), labelList: wordLabelElement(SENSITIVITY_LABELS.nato, OTHER_TENANT) }],
+    ] as const) {
+      it(`reads no label from ${kind}`, async () => {
+        assert.deepEqual(await readWith(metadata), { label: null, signature: 'absent' });
+      });
+    }
+
+    it('reads the platform\'s base label rather than a sensitivity label', async () => {
+      const docx = await withLabelMetadata(await minimalDocx([], [`<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="DEMO-FR:1" label="DEMO-FR:1"/>`]), {
+        properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2),
+        labelList: null,
+      });
+
+      assert.deepEqual((await read(docx)).json, { label: { code: 'DEMO-FR:1', source: 'base-label' }, signature: 'absent' });
+    });
+
+    it('reads no sensitivity label without a label mapping', async () => {
+      const unmapped = await buildPolicyServer({
+        spifDirectory: DEMO_SPIFS,
+        bindingSignature: { secret: SECRET, signer: { privateKey: await readFile(path.join(keys, 'signer.key'), 'utf8'), certificate } },
+      });
+      try {
+        const docx = await withLabelMetadata(await minimalDocx(), { properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2), labelList: null });
+        const response = await unmapped.inject({ method: 'POST', url: '/uploads/read', headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` }, payload: Buffer.from(docx) });
+
+        assert.deepEqual(response.json(), { label: null, signature: 'absent' });
+      } finally {
+        await unmapped.close();
+      }
+    });
+
+    it('reads no label from a sensitivity label that the mapping pairs with several labels, nor from it and another', async () => {
+      const [paired, single] = [randomUUID(), randomUUID()];
+      const mappingFile = path.join(keys, 'several.label-mapping.json');
+      await writeFile(
+        mappingFile,
+        JSON.stringify({
+          tenant: DEMO_TENANT,
+          labels: { 'DEMO-FR:1': { id: paired, name: 'Fictional-Paired' }, 'DEMO-FR:2': { id: paired, name: 'Fictional-Paired' }, 'DEMO-FR:2/2.1': { id: single, name: 'Fictional-Single' } },
+        }),
+      );
+      const several = await buildPolicyServer({
+        spifDirectory: DEMO_SPIFS,
+        labelMappingFile: mappingFile,
+        bindingSignature: { secret: SECRET, signer: { privateKey: await readFile(path.join(keys, 'signer.key'), 'utf8'), certificate } },
+      });
+      try {
+        const readUnder = async (properties: string): Promise<unknown> => {
+          const docx = await withLabelMetadata(await minimalDocx(), { properties, labelList: null });
+          return (await several.inject({ method: 'POST', url: '/uploads/read', headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` }, payload: Buffer.from(docx) })).json();
+        };
+
+        assert.deepEqual(await readUnder(wordLabelProperties(paired, DEMO_TENANT, 2)), { label: null, signature: 'absent' });
+        assert.deepEqual(await readUnder(wordLabelProperties(paired, DEMO_TENANT, 2) + wordLabelProperties(single, DEMO_TENANT, 9)), { label: null, signature: 'absent' });
+        assert.deepEqual(await readUnder(wordLabelProperties(single, DEMO_TENANT, 2)), { label: { code: 'DEMO-FR:2/2.1', source: 'sensitivity-label' }, signature: 'absent' });
+      } finally {
+        await several.close();
+      }
+    });
+  });
+
+  describe('the removal of the Sensitivity Label Information part', () => {
+    // The custom properties of a stored package, by name.
+    async function propertyValues(stored: Uint8Array): Promise<Map<string, string>> {
+      const xml = (await (await JSZip.loadAsync(stored)).file('docProps/custom.xml')?.async('string')) ?? '<none/>';
+      const properties = Array.from(new DOMParser().parseFromString(xml, 'text/xml').getElementsByTagName('property'));
+      return new Map(properties.map((property) => [property.getAttribute('name') ?? '', property.textContent ?? '']));
+    }
+
+    async function preparedAndSigned(metadata: { properties: string | null; labelList: string | null }): Promise<{ stored: Uint8Array; bindingXml: string }> {
+      const { docx } = await prepared(await withLabelMetadata(await minimalDocx(), metadata), base('DEMO-FR:2/2.1'));
+      assert.ok(docx !== null);
+      return signedAndStored(docx);
+    }
+
+    it('removes the part, and keeps every organisation\'s label in custom properties', async () => {
+      const [applied, stale, removed] = [randomUUID(), randomUUID(), randomUUID()];
+      const THIRD_TENANT = '22222222-3333-4444-5555-666666666666';
+      const { stored, bindingXml } = await preparedAndSigned({
+        // Stale properties for each tenant that has an element.
+        properties:
+          wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 2) +
+          wordLabelProperties(stale, OTHER_TENANT, 9) +
+          wordLabelProperties(removed, THIRD_TENANT, 16),
+        labelList: wordLabelElement(SENSITIVITY_LABELS.nato, DEMO_TENANT) + wordLabelElement(applied, OTHER_TENANT) + wordLabelElement('', THIRD_TENANT, true),
+      });
+
+      const zip = await JSZip.loadAsync(stored);
+      assert.equal(zip.file('docMetadata/LabelInfo.xml'), null);
+      assert.doesNotMatch((await zip.file('_rels/.rels')?.async('string')) ?? '', /classificationlabels/);
+      assert.doesNotMatch((await zip.file('[Content_Types].xml')?.async('string')) ?? '', /LabelInfo/);
+      const values = await propertyValues(stored);
+      const names = [...values.keys()];
+      // The mapped tenant's label, as the platform writes it.
+      assert.equal(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_Name`), 'DCS-Diffusion-Restreinte-OTAN');
+      assert.equal(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_Method`), 'Privileged');
+      assert.ok(!names.some((name) => name.includes(SENSITIVITY_LABELS.diffusionRestreinte)));
+      // The other tenant's label, which only its element gave.
+      assert.deepEqual(
+        names.filter((name) => name.includes(applied)).map((name) => name.slice(`MSIP_Label_${applied}_`.length)),
+        ['Enabled', 'SetDate', 'Method', 'SiteId', 'ActionId', 'ContentBits'],
+      );
+      assert.equal(values.get(`MSIP_Label_${applied}_SiteId`), OTHER_TENANT);
+      assert.equal(values.get(`MSIP_Label_${applied}_Method`), 'Privileged');
+      assert.ok(!names.some((name) => name.includes(stale)));
+      // The third tenant's removed label does not come back.
+      assert.ok(!names.some((name) => name.includes(removed)));
+      assert.equal((await verifyWithXmlsec(stored, bindingXml, certificate)).status, 0);
+    });
+
+    it('keeps the date and the action id that custom properties alone gave the mapped tenant\'s label, while it stays', async () => {
+      const actionId = randomUUID();
+
+      const { stored } = await preparedAndSigned({ properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2, { actionId }), labelList: null });
+
+      const values = await propertyValues(stored);
+      assert.deepEqual([values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_SetDate`), values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_ActionId`)], [WORD_SET_DATE, actionId]);
+    });
+
+    for (const [kind, labelList] of [
+      ['applies the same label', wordLabelElement(SENSITIVITY_LABELS.nato, DEMO_TENANT)],
+      ['removed the label', wordLabelElement('', DEMO_TENANT, true)],
+    ] as const) {
+      it(`renews them when the tenant's element, which ${kind}, decided`, async () => {
+        const actionId = randomUUID();
+
+        const { stored } = await preparedAndSigned({ properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2, { actionId }), labelList });
+
+        const values = await propertyValues(stored);
+        assert.notEqual(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_SetDate`), WORD_SET_DATE);
+        assert.notEqual(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_ActionId`), actionId);
+        assert.equal(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_Enabled`), 'true');
+      });
+    }
+
+    it('leaves the properties of a tenant with several elements as they are', async () => {
+      const [first, second] = [randomUUID(), randomUUID()];
+      const properties = wordLabelProperties(first, OTHER_TENANT, 2);
+
+      const { stored } = await preparedAndSigned({ properties, labelList: wordLabelElement(first, OTHER_TENANT) + wordLabelElement(second, OTHER_TENANT) });
+
+      const values = await propertyValues(stored);
+      assert.equal(values.get(`MSIP_Label_${first}_Name`), 'Fictional label');
+      assert.ok(![...values.keys()].some((name) => name.includes(second)));
     });
   });
 });

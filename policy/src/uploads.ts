@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type JSZip from 'jszip';
 import { escapeXml } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf, serializeDocumentBinding } from './adatp4778.ts';
+import { type LabelMapping, labelOfSensitivityLabel } from './label-mapping.ts';
 import {
   appendRelationship,
   CONTENT_TYPES_NAMESPACE,
@@ -17,6 +18,7 @@ import {
   xmlPartOf,
 } from './opc.ts';
 import { bindingLabelXml, bindingVerdict, type DocumentLabelOf, type PackageLabels, packageBody, readPackageLabels } from './package-signing.ts';
+import { removeLabelInformation } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -52,8 +54,9 @@ export type UploadRefusal =
 export type ReadLabel = { ok: true; code: string } | { ok: false; refusal: 'foreign-label' | 'invalid-label' };
 
 // Where the label an uploaded file carries comes from: the platform's base
-// label part, or the document label of an ADatP-4778 binding.
-export type LabelSource = 'base-label' | 'binding';
+// label part, the document label of an ADatP-4778 binding, or a sensitivity
+// label that the label mapping knows.
+export type LabelSource = 'base-label' | 'binding' | 'sensitivity-label';
 
 // The label an uploaded file carries, and where it comes from, or why the
 // platform cannot take it.
@@ -90,6 +93,9 @@ export interface UploadOptions {
   // A valid label code without the informative categories that only a
   // document label takes.
   baseLabelOf: (code: string) => string;
+  // Null without a label mapping, which leaves sensitivity labels unread.
+  labelMapping: LabelMapping | null;
+  now: () => Date;
 }
 
 // The portal passes each uploaded file to the policy service twice. First it
@@ -98,9 +104,11 @@ export interface UploadOptions {
 // Then the policy service writes the platform's parts into it as the panel
 // writes them: the base label part, and the binding of the document label
 // computed from that base label and the portion labels in clear, which
-// references the parts the package holds. The portal then has the binding
-// signed, as at a save. Both refuse what cannot become a document. The DOCX
-// body parser comes from acceptPackages.
+// references the parts the package holds. It also removes the Sensitivity
+// Label Information part, which Office could read instead of the label the
+// platform writes (ADR 0005). The portal then has the binding signed, as at
+// a save. Both routes refuse what cannot become a document. The DOCX body
+// parser comes from acceptPackages.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
   app.post('/uploads/read', async (request, reply) => {
     const received = packageBody(request, options.secret);
@@ -111,7 +119,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     if (!uploaded.ok) {
       return refuse(reply, uploaded.refusal);
     }
-    const carried = carriedLabel(uploaded.labels, options);
+    const carried = await carriedLabel(uploaded.zip, uploaded.labels, options);
     if (carried !== null && !carried.ok) {
       return refuse(reply, carried.refusal);
     }
@@ -144,6 +152,8 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     if (!computed.ok) {
       return refuse(reply, 'portion-labels');
     }
+    // The platform keeps sensitivity labels in custom properties only.
+    await removeLabelInformation(zip, options.labelMapping?.tenant ?? null, options.now());
     const parts = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
     await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
     await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts)));
@@ -171,19 +181,21 @@ async function uploadedPackage(body: Buffer): Promise<{ ok: true; zip: JSZip; ma
 
 // The label an uploaded file carries: the platform's base label part, else
 // the document label of its binding, found in whichever Custom XML part holds
-// it, as a base label; null when it carries none.
-function carriedLabel(labels: PackageLabels, options: UploadOptions): CarriedLabel | null {
+// it, as a base label, else the label that the label mapping pairs with its
+// sensitivity label; null when it carries none.
+async function carriedLabel(zip: JSZip, labels: PackageLabels, options: UploadOptions): Promise<CarriedLabel | null> {
   if (labels.baseCode !== null) {
     const read = options.readLabelCode(labels.baseCode);
     return read.ok ? { ...read, source: 'base-label' } : read;
   }
   const [binding] = labels.bindings;
   const xml = binding === undefined ? null : bindingLabelXml(binding);
-  if (xml === null) {
-    return null;
+  if (xml !== null) {
+    const read = options.readLabelXml(xml);
+    return read.ok ? { ok: true, code: options.baseLabelOf(read.code), source: 'binding' } : read;
   }
-  const read = options.readLabelXml(xml);
-  return read.ok ? { ok: true, code: options.baseLabelOf(read.code), source: 'binding' } : read;
+  const mapped = options.labelMapping === null ? null : await labelOfSensitivityLabel(options.labelMapping, zip);
+  return mapped === null ? null : { ok: true, code: mapped, source: 'sensitivity-label' };
 }
 
 // Whether an uploaded file's binding signature matched the platform's

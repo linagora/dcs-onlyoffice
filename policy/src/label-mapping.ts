@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { readField, readTextField } from './guards.ts';
-import { GUID, type MappedSensitivityLabel, normalizedGuid, type SensitivityLabel } from './sensitivity-label.ts';
+import type JSZip from 'jszip';
+import { appliedSensitivityLabels, GUID, type MappedSensitivityLabel, normalizedGuid, type SensitivityLabel } from './sensitivity-label.ts';
 
 // The label mapping of one Microsoft 365 tenant: the sensitivity label of each
 // label of the security policy that has one, by label code.
@@ -51,4 +52,17 @@ export async function loadLabelMapping(file: string, canonicalCode: (code: strin
 // The sensitivity label a mapping pairs with a label code.
 export function mappedSensitivityLabel(mapping: LabelMapping, code: string): MappedSensitivityLabel {
   return { tenant: mapping.tenant, label: mapping.labels.get(code) ?? null };
+}
+
+// The label of the security policy, by code, that the mapping pairs with the
+// sensitivity label a package applies for the mapping's tenant. None when the
+// package applies no label the mapping knows, or several, as an old client
+// could write a parent and a child, or when the mapping pairs that label with
+// several labels of the security policy.
+export async function labelOfSensitivityLabel(mapping: LabelMapping, zip: JSZip): Promise<string | null> {
+  const known = (await appliedSensitivityLabels(zip, mapping.tenant))
+    .map((id) => [...mapping.labels].filter(([, label]) => label.id === id).map(([code]) => code))
+    .filter((codes) => codes.length > 0);
+  const [codes, ...others] = known;
+  return codes?.length === 1 && others.length === 0 ? (codes[0] ?? null) : null;
 }

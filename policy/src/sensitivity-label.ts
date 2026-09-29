@@ -2,7 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { XMLSerializer } from '@xmldom/xmldom';
 import type JSZip from 'jszip';
 import { escapeXml } from './adatp4774.ts';
-import { appendRelationship, CONTENT_TYPES_PART, declareContentType, PACKAGE_RELATIONSHIPS_PART, partNamed, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
+import {
+  appendRelationship,
+  CONTENT_TYPES_PART,
+  declareContentType,
+  PACKAGE_RELATIONSHIPS_PART,
+  partNamed,
+  RELATIONSHIPS_NAMESPACE,
+  removeRelationships,
+  undeclareContentType,
+  xmlPartOf,
+} from './opc.ts';
 import { childElements, childrenNamed, parseXml } from './xml.ts';
 
 // A sensitivity label of a Microsoft 365 tenant: its id, and its unique name
@@ -38,6 +48,8 @@ const CUSTOM_PROPERTIES_TYPE = 'application/vnd.openxmlformats-officedocument.cu
 // The package relationship to the Sensitivity Label Information part
 // ([MS-OI29500] §3.4.1.5).
 const LABEL_INFORMATION_RELATIONSHIP = 'http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels';
+// The root of a Sensitivity Label Information part ([MS-OFFCRYPTO] §2.6.4).
+const LABEL_LIST_NAMESPACE = 'http://schemas.microsoft.com/office/2020/mipLabelMetadata';
 const CUSTOM_PROPERTIES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties';
 const VARIANT_TYPES_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
 // Office reads the sensitivity label properties among the user-defined ones
@@ -64,13 +76,11 @@ interface CustomProperty {
 // saves carry the label as the editing session opened, not as last stored.
 // A Strict custom properties part is left as it is.
 export async function writeSensitivityLabel(zip: JSZip, mapped: MappedSensitivityLabel, now: Date, stored: string | null): Promise<SensitivityLabelWriting> {
-  const located = await customPropertiesPartOf(zip);
-  const part = located?.part ?? CUSTOM_PROPERTIES_PART;
-  const content = located?.present === true ? ((await zip.file(part)?.async('string')) ?? '') : null;
-  if (content !== null && !isTransitional(content)) {
-    return { customPropertiesPart: part, writtenParts: [] };
+  const custom = await customPropertiesOf(zip);
+  if (!custom.transitional) {
+    return { customPropertiesPart: custom.part, writtenParts: [] };
   }
-  const existing = content === null ? [] : propertiesOf(content);
+  const existing = custom.properties;
   // The tenant's labels go, and any other group of the label written, which
   // would otherwise leave two properties of the same name.
   const replaced = labelIdsOfTenant(existing, mapped.tenant);
@@ -79,35 +89,78 @@ export async function writeSensitivityLabel(zip: JSZip, mapped: MappedSensitivit
   }
   const kept = existing.filter((property) => property.label === null || !replaced.has(property.label.id));
   if (mapped.label === null && kept.length === existing.length) {
-    return { customPropertiesPart: content === null ? null : part, writtenParts: [] };
+    return { customPropertiesPart: custom.present ? custom.part : null, writtenParts: [] };
   }
-  const earlier = stored === null ? existing : propertiesOf(stored);
-  const labelProperties = mapped.label === null ? [] : labelPropertiesXml(mapped.tenant, mapped.label, enabledLabel(earlier, mapped.label.id, mapped.tenant), now, kept);
-  zip.file(
-    part,
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="${CUSTOM_PROPERTIES_NAMESPACE}" xmlns:vt="${VARIANT_TYPES_NAMESPACE}">${[...kept.map((property) => property.xml), ...labelProperties].join('')}</Properties>`,
-  );
-  return { customPropertiesPart: part, writtenParts: [part, ...(await declareCustomProperties(zip, part, located !== null))] };
+  const earlier = enabledLabel(stored === null ? existing : propertiesOf(stored), mapped.label?.id ?? '', mapped.tenant);
+  const labelProperties =
+    mapped.label === null
+      ? []
+      : labelPropertiesXml(mapped.tenant, { ...mapped.label, method: 'Privileged', contentBits: '0' }, earlier, now, nextPid(kept));
+  return { customPropertiesPart: custom.part, writtenParts: await writeCustomProperties(zip, custom, [...kept.map((property) => property.xml), ...labelProperties]) };
 }
 
-// The seven properties of a sensitivity label ([MS-OI29500] §3.11.2), after
-// the kept properties' pids. A label that stays keeps when it was set and the
-// action that set it.
-function labelPropertiesXml(tenant: string, label: SensitivityLabel, earlier: Map<string, string> | null, now: Date, kept: CustomProperty[]): string[] {
-  const firstPid = Math.max(1, ...kept.map((property) => property.pid)) + 1;
-  const values: [string, string][] = [
+// A sensitivity label to write as properties: its id, its unique name when
+// known, its method and the content marking applied.
+interface LabelAttributes {
+  id: string;
+  name: string | null;
+  method: string;
+  contentBits: string;
+}
+
+// The properties of a sensitivity label ([MS-OI29500] §3.11.2), from a pid
+// on. A label that stays keeps when it was set and the action that set it.
+function labelPropertiesXml(tenant: string, label: LabelAttributes, earlier: Map<string, string> | null, now: Date, firstPid: number): string[] {
+  const values: [string, string | null][] = [
     ['Enabled', 'true'],
     ['SetDate', earlier?.get('setdate') || now.toISOString().replace(/\.\d{3}Z$/, 'Z')],
-    ['Method', 'Privileged'],
+    ['Method', label.method],
     ['Name', label.name],
     ['SiteId', tenant],
     ['ActionId', earlier?.get('actionid') || randomUUID()],
-    ['ContentBits', '0'],
+    ['ContentBits', label.contentBits],
   ];
-  return values.map(
-    ([attribute, value], index) =>
-      `<property fmtid="${USER_DEFINED_PROPERTIES}" pid="${firstPid + index}" name="MSIP_Label_${label.id}_${attribute}"><vt:lpwstr>${escapeXml(value)}</vt:lpwstr></property>`,
+  return values
+    .flatMap(([attribute, value]) => (value === null ? [] : [[attribute, value] as const]))
+    .map(
+      ([attribute, value], index) =>
+        `<property fmtid="${USER_DEFINED_PROPERTIES}" pid="${firstPid + index}" name="MSIP_Label_${label.id}_${attribute}"><vt:lpwstr>${escapeXml(value)}</vt:lpwstr></property>`,
+    );
+}
+
+// The pid after the kept properties'.
+function nextPid(kept: CustomProperty[]): number {
+  return Math.max(1, ...kept.map((property) => property.pid)) + 1;
+}
+
+// A package's custom properties: the part its relationship designates, or
+// the customary one; whether the relationship and the part are there; and
+// its properties, which this module reads and writes only in a Transitional
+// part.
+async function customPropertiesOf(zip: JSZip): Promise<CustomProperties> {
+  const located = await customPropertiesPartOf(zip);
+  const part = located?.part ?? CUSTOM_PROPERTIES_PART;
+  const content = located?.present === true ? ((await zip.file(part)?.async('string')) ?? '') : null;
+  const transitional = content === null || isTransitional(content);
+  return { part, related: located !== null, present: content !== null, transitional, properties: content === null || !transitional ? [] : propertiesOf(content) };
+}
+
+interface CustomProperties {
+  part: string;
+  related: boolean;
+  present: boolean;
+  transitional: boolean;
+  properties: CustomProperty[];
+}
+
+// Writes a Transitional custom properties part and declares it; gives the
+// parts written.
+async function writeCustomProperties(zip: JSZip, custom: CustomProperties, properties: string[]): Promise<string[]> {
+  zip.file(
+    custom.part,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="${CUSTOM_PROPERTIES_NAMESPACE}" xmlns:vt="${VARIANT_TYPES_NAMESPACE}">${properties.join('')}</Properties>`,
   );
+  return [custom.part, ...(await declareCustomProperties(zip, custom.part, custom.related))];
 }
 
 // The custom properties part that the package relationship designates, and
@@ -137,6 +190,91 @@ async function relationshipTargets(zip: JSZip, types: string[]): Promise<string[
 export async function labelInformationPartOf(zip: JSZip): Promise<string | null> {
   const parts = (await relationshipTargets(zip, [LABEL_INFORMATION_RELATIONSHIP])).map((target) => partNamed(zip, target));
   return parts.find((part) => part !== null) ?? null;
+}
+
+// What a tenant's element in the Sensitivity Label Information part says: the
+// label applied, null for a removed or disabled one, or "unreadable" when the
+// tenant has several elements, which [MS-OFFCRYPTO] §2.6.5.4 forbids.
+type TenantLabel = LabelAttributes | null | 'unreadable';
+
+// The elements of a package's Sensitivity Label Information part, by tenant,
+// ids lowercase without braces; none without the part.
+async function labelInformationOf(zip: JSZip): Promise<Map<string, TenantLabel>> {
+  const part = await labelInformationPartOf(zip);
+  const root = part === null ? null : ((await xmlPartOf(zip, part))?.documentElement ?? null);
+  const labels = new Map<string, TenantLabel>();
+  if (root === null || root.namespaceURI !== LABEL_LIST_NAMESPACE || root.localName !== 'labelList') {
+    return labels;
+  }
+  for (const element of childrenNamed(root, LABEL_LIST_NAMESPACE, 'label')) {
+    const tenant = normalizedGuid(element.getAttribute('siteId') ?? '');
+    const id = normalizedGuid(element.getAttribute('id') ?? '');
+    const applied = isTrue(element.getAttribute('enabled')) && !isTrue(element.getAttribute('removed')) && GUID.test(id);
+    const label = applied ? { id, name: null, method: element.getAttribute('method') || 'Standard', contentBits: element.getAttribute('contentBits') || '0' } : null;
+    labels.set(tenant, labels.has(tenant) ? 'unreadable' : label);
+  }
+  return labels;
+}
+
+// The ids of a tenant's sensitivity labels that a file applies, as
+// [MS-OFFCRYPTO] §2.6.3 reads them: the tenant's element in the Sensitivity
+// Label Information part decides when there is one; otherwise the tenant's
+// enabled label properties do.
+export async function appliedSensitivityLabels(zip: JSZip, tenant: string): Promise<string[]> {
+  const element = (await labelInformationOf(zip)).get(tenant);
+  if (element !== undefined) {
+    return element === null || element === 'unreadable' ? [] : [element.id];
+  }
+  const { properties } = await customPropertiesOf(zip);
+  return [...labelIdsOfTenant(properties, tenant)].filter((id) => enabledLabel(properties, id, tenant) !== null);
+}
+
+// Removes the Sensitivity Label Information part, with its relationship and
+// its content type: the platform keeps sensitivity labels in custom
+// properties only (ADR 0005). Each tenant's element there decided its label
+// ([MS-OFFCRYPTO] §2.6.3), so the tenant's label properties, stale, go too,
+// lest a label the element removed come back; and the label an element
+// applies, for a tenant other than the mapped one, is written as properties,
+// as §2.6.3 converts one, so that every organisation keeps its label. The
+// mapped tenant's label is signing's to write; a tenant with several elements
+// keeps its properties as they are.
+export async function removeLabelInformation(zip: JSZip, mappedTenant: string | null, now: Date): Promise<void> {
+  const part = await labelInformationPartOf(zip);
+  if (part === null) {
+    return;
+  }
+  const decided = [...(await labelInformationOf(zip))].filter((entry): entry is [string, LabelAttributes | null] => entry[1] !== 'unreadable');
+  const custom = await customPropertiesOf(zip);
+  if (decided.length > 0 && custom.transitional) {
+    const stale = new Set(decided.flatMap(([tenant]) => [...labelIdsOfTenant(custom.properties, tenant)]));
+    const kept = custom.properties.filter((property) => property.label === null || !stale.has(property.label.id));
+    const converted: string[] = [];
+    for (const [tenant, label] of decided) {
+      if (label !== null && tenant !== mappedTenant) {
+        converted.push(...labelPropertiesXml(tenant, label, null, now, nextPid(kept) + converted.length));
+      }
+    }
+    if (kept.length < custom.properties.length || converted.length > 0) {
+      await writeCustomProperties(zip, custom, [...kept.map((property) => property.xml), ...converted]);
+    }
+  }
+  const serializer = new XMLSerializer();
+  const relationships = await xmlPartOf(zip, PACKAGE_RELATIONSHIPS_PART);
+  if (relationships !== null) {
+    removeRelationships(relationships, LABEL_INFORMATION_RELATIONSHIP);
+    zip.file(PACKAGE_RELATIONSHIPS_PART, serializer.serializeToString(relationships));
+  }
+  const types = await xmlPartOf(zip, CONTENT_TYPES_PART);
+  if (types !== null) {
+    undeclareContentType(types, `/${part}`);
+    zip.file(CONTENT_TYPES_PART, serializer.serializeToString(types));
+  }
+  zip.remove(part);
+}
+
+// An xsd:boolean that holds true.
+function isTrue(value: string | null): boolean {
+  return value === '1' || value?.toLowerCase() === 'true';
 }
 
 // Whether a custom properties part is in the Transitional namespaces, the only
