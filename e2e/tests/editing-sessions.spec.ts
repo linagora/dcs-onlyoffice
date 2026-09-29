@@ -16,30 +16,35 @@ function disconnection(page: Page): Locator {
 // whenever it connects. When the base label comes to exclude someone who
 // holds one, the session ends, so that the document moves to a new key that
 // the configuration does not name.
-test('a base label that excludes someone holding an editor configuration ends the editing session', async ({ page, browser }) => {
-  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
-  const key = await editorDocumentKey(page);
-  const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
-  await openDocument(bob, documentId);
-  const bobConfig = await editorPageConfig(bob);
+for (const { kind, template } of [
+  { kind: 'text document', template: 'exercise-northwind.docx' },
+  { kind: 'workbook', template: 'exercise-northwind-logistics.xlsx' },
+]) {
+  test(`a base label that excludes someone holding an editor configuration ends the editing session of a ${kind}`, async ({ page, browser }) => {
+    const documentId = await openNewDocument(page, template);
+    const key = await editorDocumentKey(page);
+    const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
+    await openDocument(bob, documentId);
+    const bobConfig = await editorPageConfig(bob);
 
-  await pluginPanel(page).getByLabel('Base label').selectOption({ label: SPECIAL_FRANCE });
+    await pluginPanel(page).getByLabel('Base label').selectOption({ label: SPECIAL_FRANCE });
 
-  await expect(disconnection(bob)).toBeVisible();
-  await expect(disconnection(page)).toBeVisible();
-  await openDocument(page, documentId);
-  expect(await editorDocumentKey(page)).not.toBe(key);
+    await expect(disconnection(bob)).toBeVisible();
+    await expect(disconnection(page)).toBeVisible();
+    await openDocument(page, documentId);
+    expect(await editorDocumentKey(page)).not.toBe(key);
 
-  // bob's earlier configuration names a key whose version was saved: the
-  // Document Server asks for a new configuration, which the portal no longer
-  // signs for him, and opens nothing.
-  await openWithEarlierConfig(bob, bobConfig);
-  await expect.poll(() => earlierEditorEvents(bob)).toEqual(['onRequestRefreshFile']);
-  // Nor does the document open later.
-  await bob.waitForTimeout(3_000);
-  expect(await earlierEditorEvents(bob)).toEqual(['onRequestRefreshFile']);
-  await bob.context().close();
-});
+    // bob's earlier configuration names a key whose version was saved: the
+    // Document Server asks for a new configuration, which the portal no
+    // longer signs for him, and opens nothing.
+    await openWithEarlierConfig(bob, bobConfig);
+    await expect.poll(() => earlierEditorEvents(bob)).toEqual(['onRequestRefreshFile']);
+    // Nor does the document open later.
+    await bob.waitForTimeout(3_000);
+    expect(await earlierEditorEvents(bob)).toEqual(['onRequestRefreshFile']);
+    await bob.context().close();
+  });
+}
 
 // Whoever joins a session is decided again: a clearance revoked since the
 // configuration was signed no longer lets its holder in.
