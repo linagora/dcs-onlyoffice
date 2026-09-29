@@ -1,6 +1,6 @@
 # Demo walkthrough
 
-The demo scenario, step by step, on the standalone stack and its fictional accounts. Alice Martin, a French officer and an administrator, is cleared for every label of the demo security policy; Bob Walker, an allied officer, for every label but DIFFUSION RESTREINTE – SPÉCIAL FRANCE. The document, its portions and every text below are fictional.
+The demo scenario, step by step, on the standalone stack and its fictional accounts: in a text document, then, from step 11, in a workbook. Alice Martin, a French officer and an administrator, is cleared for every label of the demo security policy; Bob Walker, an allied officer, for every label but DIFFUSION RESTREINTE – SPÉCIAL FRANCE. The documents, their portions and every text below are fictional.
 
 `pnpm --filter @dcs/e2e demo` replays the same scenario and records a video of each person's browser, `alice.webm` and `bob.webm`, under `e2e/test-results/demo`; the CI replays it after the end-to-end suite and keeps the videos for 14 days, as the `demo-videos` artefact of each run. The pictures below come from the same scenario, taken with `pnpm --filter @dcs/e2e captures` on a fresh stack.
 
@@ -69,6 +69,52 @@ On the home page, Alice uploads a Word file that a Microsoft 365 tenant labelled
 ![The upload form, with the file and the label the file carries](screenshots/walkthrough/10-upload.png)
 
 ![The uploaded document, with the base label DIFFUSION RESTREINTE – DIFFUSION OTAN](screenshots/walkthrough/10-uploaded.png)
+
+## 11. A workbook
+
+The same scenario goes on in a workbook. Alice creates one from the `exercise-northwind-logistics.xlsx` template, which opens in ONLYOFFICE's spreadsheet editor with the same labelling panel, and gives it the base label DIFFUSION RESTREINTE.
+
+![The spreadsheet editor, with the labelling panel and the document label DIFFUSION RESTREINTE](screenshots/walkthrough/11-workbook-base-label.png)
+
+## 12. Portions in cells
+
+Alice selects empty cells, picks a label and types a text in the panel, as in the text document: the panel merges the cells into a placeholder that shows the portion's marking in its label's colour, and locks it, so that no one can type into it. The text goes, encrypted, into the portion's envelope. She inserts a second portion into other empty cells.
+
+![Two portions in cells, listed in the panel with their texts](screenshots/walkthrough/12-workbook-portions.png)
+
+## 13. Co-editing a workbook
+
+Bob opens the workbook: his panel reads both portions. When he selects a placeholder, the panel highlights its portion, and a bubble shows him its text over the placeholder.
+
+![Bob's editor, where the bubble shows the portion whose placeholder he selected](screenshots/walkthrough/13-workbook-co-editing.png)
+
+## 14. A change the co-author sees
+
+Alice changes the first portion under its portion lock, as in the text document: Bob's panel shows the portion being changed, and by whom, then its new text.
+
+![Bob's panel, which shows the portion being changed by Alice Martin](screenshots/walkthrough/14-workbook-being-changed.png)
+
+## 15. A raise to SPÉCIAL FRANCE
+
+Alice raises the first portion to DIFFUSION RESTREINTE – SPÉCIAL FRANCE: its placeholder shows the new marking, and Bob's panel shows "Access denied". The document label reads DIFFUSION RESTREINTE – CONTIENT DES PORTIONS PLUS RESTRICTIVES.
+
+![Bob's editor, where the placeholder shows SPÉCIAL FRANCE and the panel "Access denied"](screenshots/walkthrough/15-workbook-access-denied.png)
+
+## 16. A deletion
+
+Alice deletes the second portion: it leaves both panels, and its cells are empty again, for anyone to type into.
+
+![The confirmation of a portion's deletion in a workbook](screenshots/walkthrough/16-workbook-deletion.png)
+
+## 17. The page marking of a workbook
+
+A workbook's page marking goes into the centre of every sheet's headers and footers, first and even pages included: the spreadsheet editor shows it only when printing, in the print preview (**File**, **Print**) and in a PDF, while the panel shows the document label on screen.
+
+![The print preview, with the page marking at the top and the bottom of the page](screenshots/walkthrough/17-workbook-print-preview.png)
+
+## 18. The signed binding of a workbook
+
+Once both leave the editor, the stored workbook carries the page marking and a binding signed as a text document's, over the parts that ADatP-4778.2 lists for a workbook: `xmlsec1` verifies it the same way, as [step 8](#8-the-signed-binding) tells. This step has no picture.
 
 ## The journal
 

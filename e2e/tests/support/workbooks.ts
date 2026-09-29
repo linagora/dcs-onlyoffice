@@ -153,6 +153,21 @@ export async function leaveCell(page: Page): Promise<void> {
   });
 }
 
+// Opens the print preview of the active sheet, from the File menu: the only
+// place, with printing and PDF, where the spreadsheet editor draws headers
+// and footers.
+export async function openPrintPreview(page: Page): Promise<void> {
+  const editor = page.frameLocator('iframe[name="frameEditor"]');
+  await editor.getByText('File', { exact: true }).first().click();
+  await editor.getByText('Print', { exact: true }).first().click();
+  await expect(editor.getByText(/^Sheet: /)).toBeVisible();
+}
+
+// Leaves the print preview for the grid.
+export async function closePrintPreview(page: Page): Promise<void> {
+  await page.frameLocator('iframe[name="frameEditor"]').getByText('Back', { exact: true }).first().click();
+}
+
 // Undoes the author's last action, as Ctrl+Z does in the grid, away from the
 // placeholders the tests write.
 export async function undoInWorkbook(page: Page): Promise<void> {
