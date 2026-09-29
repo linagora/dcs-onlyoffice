@@ -30,7 +30,7 @@ import {
 import { documentIdOf, reportBaseLabelChange } from './portal.ts';
 import { PortionDeletionForm, PortionForm } from './PortionForm.tsx';
 import { PortionList, shownLabelOf } from './PortionList.tsx';
-import { insertPortion, type StoredPortion, writeDocumentLabel, type WriteResult } from './portions.ts';
+import { EDITORS, insertPortion, type StoredPortion, writeDocumentLabel, type WriteResult } from './portions.ts';
 import { type PortionReading, PortionReader } from './readings.ts';
 
 // One empty list, so that the portions' readings do not restart on every render.
@@ -56,15 +56,14 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   );
   const { state: documentState, activePortionId, rereadProblem, refresh } = useDocumentState(pluginReady);
   const [insertionRequested, setInsertionRequested] = useState(false);
-  const editor = useLoadable<{ type: EditorType; documentId: string | null; userId: string | null }>(async () => {
+  const editorInfo = useLoadable<{ type: EditorType; documentId: string | null; userId: string | null }>(async () => {
     const info = await pluginReady;
     return { type: editorTypeOf(info), documentId: documentIdOf(info), userId: typeof info.userId === 'string' ? info.userId : null };
   }, [pluginReady]);
-  const editorType = editor.status === 'loaded' ? editor.value.type : null;
-  const documentId = editor.status === 'loaded' ? editor.value.documentId : null;
-  const userId = editor.status === 'loaded' ? editor.value.userId : null;
-  // Protected portions are only offered in text documents.
-  const offersPortions = !readOnly && editorType === 'word';
+  const editorType = editorInfo.status === 'loaded' ? editorInfo.value.type : null;
+  const documentId = editorInfo.status === 'loaded' ? editorInfo.value.documentId : null;
+  const userId = editorInfo.status === 'loaded' ? editorInfo.value.userId : null;
+  const offersPortions = !readOnly && editorType !== null && EDITORS[editorType].offersPortions;
   const othersLocks = usePortionLocks(documentId, userId);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];

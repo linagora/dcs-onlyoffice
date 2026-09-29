@@ -1,5 +1,5 @@
+import type { CommandScope, DocumentSnapshot } from './commands.ts';
 import type { SpreadsheetApi } from './office-api.ts';
-import type { CommandScope, DocumentSnapshot } from './portions.ts';
 
 // The commands the panel runs in the spreadsheet editor. As those of the
 // text editor, each is serialised with toString() and runs in the editor's

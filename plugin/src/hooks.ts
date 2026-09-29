@@ -22,6 +22,7 @@ import {
   changePortion,
   deletePortion,
   type DocumentState,
+  EDITORS,
   nextVersion,
   type OtherLabels,
   parsePortionTag,
@@ -139,7 +140,7 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
 // other's portion, and the last writer wins: whoever may write and notices
 // that the stored label or its page marking is stale rewrites both. So does
 // the first author to open a labelled document that has no page marking yet.
-// In a workbook, where the panel reads no page marking, only the stored label
+// Where the panel reads no page marking, in a workbook, only the stored label
 // counts. Nothing is written until the editor is known.
 export function useDocumentLabel(
   request: DocumentLabelRequest | null,
@@ -161,7 +162,8 @@ export function useDocumentLabel(
       setLabel(computed.label);
       const storedLabelCode = stored?.documentLabelCode ?? null;
       const pageMarking = stored?.pageMarking ?? null;
-      const staleMarking = editor === 'word' && (pageMarking?.labelCode !== computed.label.code || pageMarking.text !== computed.label.marking.text);
+      const staleMarking =
+        editor !== null && EDITORS[editor].readsPageMarking && (pageMarking?.labelCode !== computed.label.code || pageMarking.text !== computed.label.marking.text);
       if (canWrite && editor !== null && storedLabelCode !== null && (storedLabelCode !== computed.label.code || staleMarking)) {
         await writeDocumentLabel(request, editor);
       }
