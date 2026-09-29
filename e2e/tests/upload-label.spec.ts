@@ -86,6 +86,22 @@ test('a file that another tool labelled gets its label', async ({ page }) => {
     .toEqual([uploadEntry({ base: CODES.diffusionRestreinte, read: { code: CODES.diffusionRestreinte, source: 'binding' }, signature: 'absent', lowering: false })]);
 });
 
+// The platform's own base label part, but under a name another tool could
+// give it: the portal decides who opens the document from it too.
+test('a base label part of any name decides who opens the uploaded document', async ({ page, browser }) => {
+  const basePart = `<dcs:document xmlns:dcs="urn:linagora:dcs:document:1" base="${CODES.diffusionRestreinte}" label="${CODES.diffusionRestreinte}"/>`;
+  const buffer = await withCustomXmlPart(await readFile(TEMPLATE), basePart, 'urn:linagora:dcs:document:1', 'customXml/labels.xml');
+
+  expect(await upload(page, { name: 'Fictional report with a renamed part.docx', mimeType: DOCX_TYPE, buffer }, 'carried')).toBe(303);
+
+  const documentId = await openedDocumentId(page);
+  await expect(pluginPanel(page).getByLabel('Base label')).toHaveValue(CODES.diffusionRestreinte);
+  const chloe = await signedInPage(browser, DEMO_ACCOUNTS.chloe);
+  const answer = await chloe.goto(`/documents/${documentId}/edit`);
+  expect(answer?.status()).toBe(403);
+  await chloe.context().close();
+});
+
 test('a file that carries a label may be raised', async ({ page }) => {
   expect(await upload(page, await labelledByAnotherTool(), { marking: SPECIAL_FRANCE })).toBe(303);
 
