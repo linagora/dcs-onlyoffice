@@ -43,11 +43,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install xmlsec1
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xmlsec1
-      - name: Create the stack configuration
-        run: deploy/scripts/init-env.sh
-      - name: Start the stack
-        working-directory: deploy
-        run: docker compose --profile standalone up -d --build --wait --wait-timeout 600
+      - name: Start the stack in one command, from the fresh checkout
+        run: deploy/scripts/start.sh
       - name: Check that provisioning OpenTDF again changes nothing
         working-directory: deploy
         run: |
