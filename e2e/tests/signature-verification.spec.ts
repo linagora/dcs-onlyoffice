@@ -7,7 +7,7 @@ import { BINDING_NAMESPACE } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, storedFile } from './support/portions.ts';
-import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { changedSinceSigning, demoCertificate, verifyBindingSignature } from './support/signature.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -47,13 +47,15 @@ test('a stored file changed outside the portal is logged when it is served, and 
   await openDocument(page, documentId);
 
   await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
-  const logged = (servedTo: string): unknown =>
-    expect.objectContaining({ servedTo, reason: 'Parts changed since signing', changedParts: ['docProps/app.xml'] });
-  await expect.poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId)).toContainEqual(logged('document-server'));
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
+    .toContainEqual(changedSinceSigning('document-server', ['docProps/app.xml']));
 
   await storedFile(page, documentId);
 
-  await expect.poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId)).toContainEqual(logged('download'));
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
+    .toContainEqual(changedSinceSigning('download', ['docProps/app.xml']));
 });
 
 test('a file stored before signing existed is logged as unsigned, opens, and is signed at its next save', async ({ page }) => {

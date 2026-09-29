@@ -16,7 +16,6 @@ import {
 import type { EnvelopeClient } from './envelopes.ts';
 import {
   type DocumentLabelRequest,
-  fetchDocumentLabel,
   fetchPortionLabelChoices,
   fetchPortionLocks,
   type LabelView,
@@ -31,6 +30,7 @@ import {
   changePortion,
   deletePortion,
   type DocumentState,
+  documentLabelIn,
   EDITORS,
   nextVersion,
   type OtherLabels,
@@ -209,7 +209,9 @@ export function useDocumentLabel(
     }
     let cancelled = false;
     const compute = async (): Promise<void> => {
-      const computed = await fetchDocumentLabel(request);
+      // Until the editor is known, the label only shows: its binding, over
+      // a text document's parts, goes nowhere.
+      const computed = await documentLabelIn(editor ?? 'word', request);
       if (cancelled) {
         return;
       }

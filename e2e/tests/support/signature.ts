@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DOMParser } from '@xmldom/xmldom';
+import { expect } from '@playwright/test';
 import JSZip from 'jszip';
 import { deploymentSetting } from './deployment.ts';
 import { BINDING_NAMESPACE, SIGNATURE_NAMESPACE } from './docx.ts';
@@ -11,6 +12,12 @@ export interface XmlsecVerification {
   status: number | null;
   // "Manifests References (ok/all)", as xmlsec1 reports it.
   manifest: string | null;
+}
+
+// What the portal logs when it serves, to the Document Server or for a
+// download, a stored file whose parts changed since signing.
+export function changedSinceSigning(servedTo: 'document-server' | 'download', changedParts: string[]): unknown {
+  return expect.objectContaining({ servedTo, reason: 'Parts changed since signing', changedParts });
 }
 
 // The demo certificate init-env.sh generated, as deploy/.env holds it.

@@ -544,6 +544,37 @@ describe('ADatP-4778.2 document label part', () => {
       'pack:///docProps/app.xml',
     ]);
   });
+
+  // The binding the panel writes during an editing session, which each save
+  // signs again, names the parts ONLYOFFICE always saves in the document's
+  // format.
+  it("references the parts of the document's format when none are listed", async () => {
+    const referencesOf = async (packageKind: string): Promise<string[]> => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/policies/EXAMPLE/document-label',
+        payload: { base: 'EXAMPLE:1', portions: [], packageKind },
+      });
+      return [...xmlOf(response.json()).matchAll(/DataReference URI="([^"]+)"/g)].map((match) => match[1] ?? '');
+    };
+
+    assert.deepEqual(await referencesOf('workbook'), [
+      'pack:///xl/workbook.xml',
+      'pack:///xl/styles.xml',
+      'pack:///xl/sharedStrings.xml',
+      'pack:///xl/worksheets/sheet1.xml',
+      'pack:///docProps/core.xml',
+      'pack:///docProps/app.xml',
+    ]);
+    assert.deepEqual(await referencesOf('text-document'), [
+      'pack:///word/document.xml',
+      'pack:///word/styles.xml',
+      'pack:///word/footnotes.xml',
+      'pack:///word/endnotes.xml',
+      'pack:///docProps/core.xml',
+      'pack:///docProps/app.xml',
+    ]);
+  });
 });
 
 describe('policy service start-up', () => {
