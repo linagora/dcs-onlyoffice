@@ -44,7 +44,16 @@ with_secret() {
   esac
 }
 
+# Without OpenSSL, the secrets would be left empty.
+require_openssl() {
+  if ! command -v openssl > /dev/null 2>&1; then
+    echo "OpenSSL generates the secrets of $ENV_FILE: install it, then run this command again" >&2
+    exit 1
+  fi
+}
+
 if [ ! -e "$ENV_FILE" ]; then
+  require_openssl
   while IFS= read -r line || [ -n "$line" ]; do
     with_secret "$line"
   done < "$EXAMPLE" > "$ENV_FILE"
@@ -88,6 +97,7 @@ filled() {
 }
 
 if [ -n "$missing" ]; then
+  require_openssl
   {
     while IFS= read -r line || [ -n "$line" ]; do
       filled "$line"
