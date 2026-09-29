@@ -19,14 +19,13 @@ Requirements: Docker with Compose v2, Node.js 22.18 or later, pnpm 10 (`corepack
 
 ```sh
 pnpm install
-deploy/scripts/init-env.sh                                # writes deploy/.env
-(cd deploy && docker compose up -d --build --wait)        # the standalone stack on dcs.test
+deploy/scripts/start.sh                                   # the standalone stack on dcs.localhost
 pnpm --filter @dcs/e2e exec playwright install chromium firefox
 ```
 
-- **Sign in.** Point the stack's host names to your machine, as the [README](README.md#run-the-stack-locally) shows, then open https://portail.dcs.test and sign in with a fictional account: `alice`, `bob`, `chloe`, `dan` or `erin`, whose password is the login. `alice` is an administrator. The end-to-end tests need no hosts file: their browsers resolve the host names on their own.
+- **Sign in.** Open https://portail.dcs.localhost, which Chrome and Firefox reach without any change (another browser needs the host names in `/etc/hosts`, as the [README](README.md#run-the-stack-locally) shows), and sign in with a fictional account: `alice`, `bob`, `chloe`, `dan` or `erin`, whose password is the login. `alice` is an administrator. The end-to-end tests need no hosts file, under the `DOMAIN` of `deploy/.env`: under `.localhost`, their browsers resolve the host names by themselves; under another domain, the test configuration leads the names to the local reverse proxy.
 - **Rebuild after a change.** The portal and the policy service run their TypeScript sources directly with Node.js type stripping, and the portal's image also builds the plugin: after a change to any of the three, rebuild their images with `docker compose up -d --build`.
-- **Configuration upgrades.** Running `deploy/scripts/init-env.sh` again on an existing `deploy/.env` sets the secrets that are missing or empty, such as those a new version introduces, and changes nothing else; other new settings have defaults in the Compose file. The signed binding brought three: the demo key that signs bindings, its certificate and the secret the portal and the policy service share. A `deploy/.env` created before portion locks existed lacks `PORTION_LOCK_LEASE_SECONDS=20`, which the test of an abandoned lock needs, and one created before sensitivity labels lacks `LABEL_MAPPING_FILE=/spif/demo-fr.label-mapping.json`, which their tests need: add them, then restart the stack.
+- **Configuration upgrades.** Running `deploy/scripts/init-env.sh` again on an existing `deploy/.env` sets the secrets that are missing or empty, such as those a new version introduces, and changes nothing else; other new settings have defaults in the Compose file. The signed binding brought three: the demo key that signs bindings, its certificate and the secret the portal and the policy service share. A `deploy/.env` created before portion locks existed lacks `PORTION_LOCK_LEASE_SECONDS=20`, which the test of an abandoned lock needs, and one created before sensitivity labels lacks `LABEL_MAPPING_FILE=/spif/demo-fr.label-mapping.json`, which their tests need: add them, then restart the stack. A `deploy/.env` created before the stack moved to `dcs.localhost` keeps its `dcs.test` host names, and the tests follow it.
 
 ## Checks
 

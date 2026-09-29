@@ -144,10 +144,10 @@ flowchart LR
     end
 
     browser -->|"HTTPS"| proxy
-    proxy -->|"portail.dcs.test"| portal
-    proxy -->|"docs.dcs.test"| onlyoffice
-    proxy -->|"tdf.dcs.test"| opentdf
-    proxy -->|"idp.dcs.test"| idp
+    proxy -->|"portail.dcs.localhost"| portal
+    proxy -->|"docs.dcs.localhost"| onlyoffice
+    proxy -->|"tdf.dcs.localhost"| opentdf
+    proxy -->|"idp.dcs.localhost"| idp
     portal -->|"relayed calls, access decisions"| policy
     portal -->|"relayed calls, with the access token"| opentdf
     portal -->|"commands, saved files"| onlyoffice
@@ -163,7 +163,7 @@ flowchart LR
     provision -.->|"KAS key, attributes, subject mappings"| opentdf
 ```
 
-Each public service has a host name of its own under `DOMAIN`, `dcs.test` by default: `portail.`, `docs.` and `tdf.`, plus `idp.` for the local identity provider. In the `standalone` profile, the local reverse proxy also answers these names inside the Compose network, so that the portal, OpenTDF and the provisioning job reach the identity provider at the address browsers use. In the hosted mode, an existing reverse proxy and an external OpenID Connect provider take the place of the `standalone` profile's services ([docs/hosting.md](docs/hosting.md)).
+Each public service has a host name of its own under `DOMAIN`, `dcs.localhost` by default: `portail.`, `docs.` and `tdf.`, plus `idp.` for the local identity provider. In the `standalone` profile, the local reverse proxy also answers these names inside the Compose network, so that the portal, OpenTDF and the provisioning job reach the identity provider at the address browsers use. In the hosted mode, an existing reverse proxy and an external OpenID Connect provider take the place of the `standalone` profile's services ([docs/hosting.md](docs/hosting.md)).
 
 The policy service, PostgreSQL and the local identity provider publish no port. The portal, ONLYOFFICE Docs and OpenTDF publish one port each on `BIND_ADDRESS`, loopback by default, for the reverse proxy of the hosted mode; the local reverse proxy listens on port 443 of `PROXY_BIND`. Both reverse proxies refuse the portal's `/internal/` path, which only the Document Server may call from the Compose network.
 
@@ -196,30 +196,28 @@ Third-party images are pinned to exact versions in [`deploy/docker-compose.yml`]
 
 ### Run the stack locally
 
-Requirements: Docker with Compose v2. The tests also need Node.js 22.18 or later and pnpm 10. The `standalone` stack runs entirely on your machine, with fictional accounts, a fictional security policy and fictional documents.
+Requirements: Docker with Compose v2, and OpenSSL, which generates the secrets. The tests also need Node.js 22.18 or later and pnpm 10. The `standalone` stack runs entirely on your machine, with fictional accounts, a fictional security policy and fictional documents.
 
 ```sh
 git clone https://github.com/linagora/dcs-onlyoffice.git
 cd dcs-onlyoffice
-deploy/scripts/init-env.sh           # writes deploy/.env from deploy/.env.example, with fresh secrets
-cd deploy
-docker compose up -d --build --wait  # builds the stack's images, starts it and waits until it is healthy
+deploy/scripts/start.sh
 ```
 
-The generated configuration enables the `standalone` profile: a local reverse proxy with its own certificate authority, and a local LemonLDAP::NG identity provider with fictional accounts. Point the host names to your machine, for example in `/etc/hosts`:
+The script writes `deploy/.env` from `deploy/.env.example` with fresh secrets on its first run; later runs reuse it, and only set the secrets an upgrade brings. Then it builds the stack's images, starts the stack, waits until it is healthy, and prints the addresses and the accounts. The configuration enables the `standalone` profile, the only one the script starts: a local reverse proxy with its own certificate authority, and a local LemonLDAP::NG identity provider with fictional accounts, on the domain `dcs.localhost`. Chrome and Firefox reach its host names without any change; with another browser, such as Safari, point them to your machine, for example in `/etc/hosts`:
 
 ```text
-127.0.0.1 portail.dcs.test docs.dcs.test idp.dcs.test tdf.dcs.test
+127.0.0.1 portail.dcs.localhost docs.dcs.localhost idp.dcs.localhost tdf.dcs.localhost
 ```
 
 | Service | Address |
 | --- | --- |
-| Portal | <https://portail.dcs.test> |
-| ONLYOFFICE Docs | <https://docs.dcs.test> |
-| OpenTDF platform | <https://tdf.dcs.test> |
-| Local identity provider | <https://idp.dcs.test> |
+| Portal | <https://portail.dcs.localhost> |
+| ONLYOFFICE Docs | <https://docs.dcs.localhost> |
+| OpenTDF platform | <https://tdf.dcs.localhost> |
+| Local identity provider | <https://idp.dcs.localhost> |
 
-Your browser warns about the local certificate authority the first time. To stop the stack and delete its data: `docker compose down -v`.
+Your browser warns about the local certificate authority the first time. To stop the stack and delete its data: `docker compose down -v`, in `deploy`.
 
 Sign in with one of the fictional accounts below: the password is the login.
 
@@ -279,7 +277,7 @@ The demo policy is [`deploy/spif/demo-fr.spif.xml`](deploy/spif/demo-fr.spif.xml
 | `pnpm --filter @dcs/e2e check-internal-route` | The portal's internal route serves a document only to a Document Server token for that document |
 | `pnpm --filter @dcs/e2e captures` | Screenshots of this README |
 
-Install the browsers once with `pnpm --filter @dcs/e2e exec playwright install chromium firefox`. The end-to-end tests need the `standalone` stack running on `dcs.test`; the browsers resolve its host names on their own, no hosts file needed.
+Install the browsers once with `pnpm --filter @dcs/e2e exec playwright install chromium firefox`. The end-to-end tests need the `standalone` stack running, on the `DOMAIN` of `deploy/.env`, and no hosts file: under `.localhost`, their browsers resolve the host names by themselves, which the tests thus check; under another domain, the test configuration leads the names to the local reverse proxy.
 
 The CI runs the type checks and the API tests, then starts the `standalone` stack and checks, in order: that provisioning OpenTDF again changes nothing; that OpenTDF connects with a database role that cannot reach the clearance directory; the portal's internal route; the end-to-end tests, on Chromium and Firefox; the Document Server's working files, searched for portion texts; and that the database setup hands the platform's objects over to its role, ignoring what that role plants in its search path.
 
