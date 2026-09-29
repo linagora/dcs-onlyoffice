@@ -1,7 +1,7 @@
 import { isAdministrator } from './auth/administrators.ts';
 import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentDecision, Marking } from './document-access.ts';
-import { DOCX_CONTENT_TYPE, type DocumentTemplate, type StoredDocument } from './documents.ts';
+import { DOCUMENT_FORMATS, type DocumentTemplate, FORMAT_NAMES, type StoredDocument } from './documents.ts';
 import type { SignedEditorConfig } from './editor-config.ts';
 import { firstDayOf, lastDayOf } from './validity-period.ts';
 
@@ -122,8 +122,14 @@ export function renderDocumentListPage(user: UserIdentity, documents: ListedDocu
   );
 }
 
-// A DOCX and its base label: the label the file carries, or one among those
-// the person's clearance allows.
+// What the upload form's file field offers: each format's extension and
+// media type.
+const UPLOAD_ACCEPT = Object.values(DOCUMENT_FORMATS)
+  .flatMap(({ extension, contentType }) => [extension, contentType])
+  .join(',');
+
+// A DOCX or an XLSX and its base label: the label the file carries, or one
+// among those the person's clearance allows.
 function renderUploadForm(upload: UploadForm): string {
   if (upload.labels === null) {
     return '<p>Uploads are unavailable: the policy service cannot tell which labels your clearance allows. Try again later.</p>';
@@ -136,7 +142,7 @@ function renderUploadForm(upload: UploadForm): string {
     ...upload.labels.map((label) => `<option value="${escapeHtml(label.code)}">${escapeHtml(label.marking.text)}</option>`),
   ].join('');
   return `<form class="upload" method="post" action="/documents/upload" enctype="multipart/form-data">
-  <label>DOCX file, up to ${upload.limitMegabytes} MB <input type="file" name="file" accept=".docx,${DOCX_CONTENT_TYPE}" required></label>
+  <label>${FORMAT_NAMES} file, up to ${upload.limitMegabytes} MB <input type="file" name="file" accept="${UPLOAD_ACCEPT}" required></label>
   <label>Base label <select name="base">${options}</select></label>
   <button type="submit">Upload</button>
 </form>`;

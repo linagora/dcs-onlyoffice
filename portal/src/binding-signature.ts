@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
 import JSZip from 'jszip';
-import { DOCUMENT_FORMATS, type DocumentFormat, type StoredDocument } from './documents.ts';
+import { DOCUMENT_FORMATS, type DocumentFormat, formatOfContentType, type StoredDocument } from './documents.ts';
 
 const SIGNATURE_TIMEOUT_MS = 30_000;
 const STORED_CUSTOM_PROPERTIES_HEADER = 'x-stored-custom-properties';
@@ -61,6 +61,13 @@ export interface UploadReading {
   signature: 'matched' | 'not-matched' | 'absent';
 }
 
+// An uploaded file once the policy service wrote the platform's parts into
+// it, in the format its main part gives.
+export interface PreparedUpload {
+  file: Uint8Array;
+  format: DocumentFormat;
+}
+
 // Why the policy service refuses an uploaded file (422), or could not handle
 // it (503), as a message for the person.
 export interface UploadRefusal {
@@ -97,22 +104,33 @@ export class BindingSignatures {
   }
 
   // The label an uploaded file carries, where it comes from, and whether its
-  // binding signature matched, or why the policy service refuses the file.
-  async readUpload(docx: Uint8Array): Promise<{ ok: true; value: UploadReading } | UploadRefusal> {
-    return this.#uploadStep('/uploads/read', docx, async (response) => readUploadReading(await response.json()));
+  // binding signature matched, or why the policy service refuses the file,
+  // sent as the format its name gives.
+  async readUpload(file: Uint8Array, format: DocumentFormat): Promise<{ ok: true; value: UploadReading } | UploadRefusal> {
+    return this.#uploadStep('/uploads/read', file, format, async (response) => readUploadReading(await response.json()));
   }
 
   // An uploaded file with the platform's parts, which the policy service
-  // writes as the panel does, or why it refuses the file.
-  async preparedUpload(docx: Uint8Array, base: string): Promise<{ ok: true; value: Uint8Array } | UploadRefusal> {
-    return this.#uploadStep(`/uploads/prepare?base=${encodeURIComponent(base)}`, docx, async (response) => new Uint8Array(await response.arrayBuffer()));
+  // writes as the panel does, and its format, which the policy service reads
+  // from its main part, whatever the file's name said; or why it refuses the
+  // file.
+  async preparedUpload(file: Uint8Array, format: DocumentFormat, base: string): Promise<{ ok: true; value: PreparedUpload } | UploadRefusal> {
+    return this.#uploadStep(`/uploads/prepare?base=${encodeURIComponent(base)}`, file, format, async (response) => {
+      const read = formatOfContentType(response.headers.get('content-type'));
+      return read === null ? null : { file: new Uint8Array(await response.arrayBuffer()), format: read };
+    });
   }
 
   // A step of an upload: the policy service's answer, or its refusal, which
   // it explains; a failure is logged.
-  async #uploadStep<T>(route: string, docx: Uint8Array, answerOf: (response: Response) => Promise<T | null>): Promise<{ ok: true; value: T } | UploadRefusal> {
+  async #uploadStep<T>(
+    route: string,
+    file: Uint8Array,
+    format: DocumentFormat,
+    answerOf: (response: Response) => Promise<T | null>,
+  ): Promise<{ ok: true; value: T } | UploadRefusal> {
     try {
-      const response = await this.#post(route, docx, 'docx');
+      const response = await this.#post(route, file, format);
       if (response.ok) {
         const value = await answerOf(response);
         if (value === null) {
@@ -134,8 +152,8 @@ export class BindingSignatures {
 
   // A prepared upload with its binding signed; null when the policy service
   // could not sign it.
-  async signedUpload(docx: Uint8Array, documentId: string): Promise<Uint8Array | null> {
-    return this.#signedOrNull(docx, { id: documentId, format: 'docx' }, {}, 'The binding of an upload could not be signed');
+  async signedUpload(prepared: PreparedUpload, documentId: string): Promise<Uint8Array | null> {
+    return this.#signedOrNull(prepared.file, { id: documentId, format: prepared.format }, {}, 'The binding of an upload could not be signed');
   }
 
   // The file with the parts the policy service wrote, its signed binding
