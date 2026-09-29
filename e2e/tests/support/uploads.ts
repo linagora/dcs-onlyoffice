@@ -28,7 +28,7 @@ export async function fillUploadForm(page: Page, file: UploadedFile, label: Requ
   } else {
     await labels.selectOption({ label: label.marking });
   }
-  await page.getByLabel('DOCX file, up to 20 MB').setInputFiles(file);
+  await page.getByLabel('DOCX or XLSX file, up to 20 MB').setInputFiles(file);
 }
 
 // Uploads a file through the form of the portal's home page, and gives the

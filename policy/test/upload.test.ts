@@ -15,9 +15,14 @@ const DEMO_SPIFS = path.join(import.meta.dirname, '..', '..', 'deploy', 'spif');
 const DEMO_LABEL_MAPPING = path.join(DEMO_SPIFS, 'demo-fr.label-mapping.json');
 const TEMPLATE = path.join(import.meta.dirname, '..', '..', 'deploy', 'demo', 'documents', 'exercise-northwind.docx');
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const SECRET = 'fictional-binding-signature-secret';
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
+const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
+const SPREADSHEET_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+// The extension in which ONLYOFFICE writes a sheet's user protected ranges.
+const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}';
 const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 const LABEL_NAMESPACE = 'urn:nato:stanag:4774:confidentialitymetadatalabel:1:0';
 const CUSTOM_XML_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml';
@@ -49,6 +54,40 @@ async function minimalDocx(tags: string[] = [], customXml: string[] = []): Promi
   const controls = tags.map((tag) => `<w:sdt><w:sdtPr><w:tag w:val="${tag.replaceAll('"', '&quot;')}"/></w:sdtPr><w:sdtContent><w:p><w:r><w:t>Fictional placeholder</w:t></w:r></w:p></w:sdtContent></w:sdt>`);
   zip.file('word/document.xml', `<w:document xmlns:w="${WORD_NAMESPACE}"><w:body>${controls.join('')}<w:p><w:r><w:t>Fictional text in clear</w:t></w:r></w:p></w:body></w:document>`);
   customXml.forEach((xml, index) => zip.file(`customXml/item${index + 1}.xml`, xml));
+  return zip.generateAsync({ type: 'uint8array' });
+}
+
+// The smallest SpreadsheetML package: a workbook part and one worksheet,
+// without the styles, shared strings or document properties that Excel and
+// ONLYOFFICE add. Each portion has its part and, as the platform writes it, a
+// user protected range titled with its id.
+async function minimalXlsx(portions: { id: string; label: string }[] = [], customXml: string[] = []): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file(
+    '[Content_Types].xml',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+  );
+  zip.file(
+    '_rels/.rels',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+  );
+  zip.file(
+    'xl/workbook.xml',
+    `<workbook xmlns="${SPREADSHEET_NAMESPACE}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Fictional" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+  );
+  zip.file(
+    'xl/_rels/workbook.xml.rels',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+  );
+  const ranges = portions.map(({ id }, index) => `<userProtectedRange name="${id}" sqref="F${4 + 2 * index}:G${4 + 2 * index}"/>`).join('');
+  zip.file(
+    'xl/worksheets/sheet1.xml',
+    `<worksheet xmlns="${SPREADSHEET_NAMESPACE}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Fictional text in clear</t></is></c></row></sheetData>` +
+      (portions.length === 0 ? '' : `<extLst><ext uri="${USER_PROTECTED_RANGES_EXTENSION}"><userProtectedRanges>${ranges}</userProtectedRanges></ext></extLst>`) +
+      '</worksheet>',
+  );
+  const portionParts = portions.map(({ id, label }) => `<dcs:portion xmlns:dcs="${PORTION_NAMESPACE}" id="${id}" version="1" label="${label}"/>`);
+  [...portionParts, ...customXml].forEach((xml, index) => zip.file(`customXml/item${index + 1}.xml`, xml));
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -129,8 +168,8 @@ function wordLabelElement(labelId: string, tenant: string, removed = false): str
 
 // A package with custom properties, or a Sensitivity Label Information part,
 // or both, each with its relationship and content type, as Word writes them.
-async function withLabelMetadata(docx: Uint8Array, metadata: { properties: string | null; labelList: string | null }): Promise<Uint8Array> {
-  const zip = await JSZip.loadAsync(docx);
+async function withLabelMetadata(file: Uint8Array, metadata: { properties: string | null; labelList: string | null }): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(file);
   let relationships = (await zip.file('_rels/.rels')?.async('string')) ?? '';
   let types = (await zip.file('[Content_Types].xml')?.async('string')) ?? '';
   if (metadata.properties !== null) {
@@ -175,22 +214,34 @@ describe('uploads', () => {
     await rm(keys, { recursive: true, force: true });
   });
 
-  async function prepared(body: Uint8Array, query: string, secret: string | null = SECRET): Promise<{ statusCode: number; json: unknown; docx: Uint8Array | null }> {
+  // The package the preparation answers, of the type it was sent as, or the
+  // refusal it answers.
+  async function preparedPackage(body: Uint8Array, query: string, type: string, secret: string | null): Promise<{ statusCode: number; json: unknown; file: Uint8Array | null }> {
     const response = await server.inject({
       method: 'POST',
       url: `/uploads/prepare${query}`,
-      headers: { 'content-type': DOCX_TYPE, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
+      headers: { 'content-type': type, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
       payload: Buffer.from(body),
     });
-    const isDocx = response.headers['content-type'] === DOCX_TYPE;
-    return { statusCode: response.statusCode, json: isDocx ? null : response.json(), docx: isDocx ? new Uint8Array(response.rawPayload) : null };
+    const isPackage = response.headers['content-type'] === type;
+    return { statusCode: response.statusCode, json: isPackage ? null : response.json(), file: isPackage ? new Uint8Array(response.rawPayload) : null };
   }
 
-  async function read(body: Uint8Array): Promise<{ statusCode: number; json: unknown }> {
+  async function prepared(body: Uint8Array, query: string, secret: string | null = SECRET): Promise<{ statusCode: number; json: unknown; docx: Uint8Array | null }> {
+    const { file, ...answer } = await preparedPackage(body, query, DOCX_TYPE, secret);
+    return { ...answer, docx: file };
+  }
+
+  async function preparedWorkbook(body: Uint8Array, query: string): Promise<{ statusCode: number; json: unknown; xlsx: Uint8Array | null }> {
+    const { file, ...answer } = await preparedPackage(body, query, XLSX_TYPE, SECRET);
+    return { ...answer, xlsx: file };
+  }
+
+  async function read(body: Uint8Array, type = DOCX_TYPE): Promise<{ statusCode: number; json: unknown }> {
     const response = await server.inject({
       method: 'POST',
       url: '/uploads/read',
-      headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` },
+      headers: { 'content-type': type, authorization: `Bearer ${SECRET}` },
       payload: Buffer.from(body),
     });
     return { statusCode: response.statusCode, json: response.json() };
@@ -201,17 +252,17 @@ describe('uploads', () => {
   }
 
   // The package as the portal stores it once the signing route has signed it.
-  async function signedAndStored(docx: Uint8Array): Promise<{ stored: Uint8Array; bindingXml: string }> {
+  async function signedAndStored(file: Uint8Array, type = DOCX_TYPE): Promise<{ stored: Uint8Array; bindingXml: string }> {
     const response = await server.inject({
       method: 'POST',
       url: '/bindings/sign',
-      headers: { 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` },
-      payload: Buffer.from(docx),
+      headers: { 'content-type': type, authorization: `Bearer ${SECRET}` },
+      payload: Buffer.from(file),
     });
     assert.equal(response.statusCode, 200);
     const answer: unknown = response.json();
     const written = typeof answer === 'object' && answer !== null && 'signed' in answer && 'parts' in answer ? [answer.signed, ...(Array.isArray(answer.parts) ? answer.parts : [])] : [];
-    const zip = await JSZip.loadAsync(docx);
+    const zip = await JSZip.loadAsync(file);
     let bindingXml = '';
     for (const part of written) {
       const name: unknown = typeof part === 'object' && part !== null && 'part' in part ? part.part : null;
@@ -253,7 +304,7 @@ describe('uploads', () => {
       });
     }
 
-    it('refuses a ZIP package without a WordprocessingML main document', async () => {
+    it('refuses a ZIP package whose main part is neither a Word document nor a workbook, and names both', async () => {
       const zip = new JSZip();
       zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="txt" ContentType="text/plain"/></Types>');
       zip.file('notes.txt', 'Fictional notes');
@@ -261,7 +312,7 @@ describe('uploads', () => {
       const { statusCode, json } = await prepared(await zip.generateAsync({ type: 'uint8array' }), base(DIFFUSION_RESTREINTE));
 
       assert.equal(statusCode, 422);
-      assert.equal(reasonOf(json), 'not-a-document');
+      assert.deepEqual(json, { error: 'The package holds no Word document or workbook', reason: 'not-a-document' });
     });
 
     it('refuses a base label that the security policy does not know', async () => {
@@ -379,6 +430,120 @@ describe('uploads', () => {
         }
       }
       assert.deepEqual(bindings, ['customXml/labels.xml']);
+    });
+  });
+
+  describe('the upload of a workbook', () => {
+    it('prepares a workbook whose base label part and binding, related from its workbook part, sign as they are', async () => {
+      const { statusCode, xlsx } = await preparedWorkbook(await minimalXlsx(), base(DIFFUSION_RESTREINTE));
+
+      assert.equal(statusCode, 200);
+      assert.ok(xlsx !== null);
+      const parts = await customXmlParts(xlsx);
+      const baseLabel = parts.get(DOCUMENT_NAMESPACE);
+      assert.deepEqual([baseLabel?.root.getAttribute('base'), baseLabel?.root.getAttribute('label')], [DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE]);
+      const zip = await JSZip.loadAsync(xlsx);
+      const relationships = new DOMParser().parseFromString((await zip.file('xl/_rels/workbook.xml.rels')?.async('string')) ?? '<none/>', 'text/xml');
+      const related = Array.from(relationships.getElementsByTagName('Relationship'))
+        .filter((relationship) => relationship.getAttribute('Type') === CUSTOM_XML_RELATIONSHIP)
+        .map((relationship) => relationship.getAttribute('Target'));
+      assert.deepEqual(related.sort(), [...parts.values()].map(({ part }) => `../${part}`).sort());
+
+      const { stored, bindingXml } = await signedAndStored(xlsx, XLSX_TYPE);
+
+      const verification = await verifyWithXmlsec(stored, bindingXml, certificate);
+      assert.equal(verification.status, 0);
+      assert.deepEqual([...verification.references].sort(), ['docProps/custom.xml', 'xl/workbook.xml', 'xl/worksheets/sheet1.xml']);
+    });
+
+    it('reads the base label the platform wrote into a workbook, and a binding signature that matches', async () => {
+      const { xlsx } = await preparedWorkbook(await minimalXlsx(), base('DEMO-FR:2/2.1'));
+      assert.ok(xlsx !== null);
+      const { stored } = await signedAndStored(xlsx, XLSX_TYPE);
+
+      assert.deepEqual(await read(stored, XLSX_TYPE), { statusCode: 200, json: { label: { code: 'DEMO-FR:2/2.1', source: 'base-label' }, signature: 'matched' } });
+    });
+
+    it('reads the document label of a binding another tool wrote into a workbook', async () => {
+      const xlsx = await minimalXlsx([], [bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'DIFFUSION RESTREINTE'))]);
+
+      assert.deepEqual(await read(xlsx, XLSX_TYPE), { statusCode: 200, json: { label: { code: DIFFUSION_RESTREINTE, source: 'binding' }, signature: 'absent' } });
+    });
+
+    it("reads the mapped tenant's label from a workbook's custom properties", async () => {
+      const xlsx = await withLabelMetadata(await minimalXlsx(), { properties: wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 2), labelList: null });
+
+      assert.deepEqual(await read(xlsx, XLSX_TYPE), { statusCode: 200, json: { label: { code: DIFFUSION_RESTREINTE, source: 'sensitivity-label' }, signature: 'absent' } });
+    });
+
+    it("keeps a workbook's portions, whose labels count in its document label", async () => {
+      const { xlsx } = await preparedWorkbook(await minimalXlsx([{ id: 'p1', label: SPECIAL_FRANCE }]), base(DIFFUSION_RESTREINTE));
+
+      assert.ok(xlsx !== null);
+      const parts = await customXmlParts(xlsx);
+      assert.deepEqual([parts.get(PORTION_NAMESPACE)?.root.getAttribute('id'), parts.get(PORTION_NAMESPACE)?.root.getAttribute('label')], ['p1', SPECIAL_FRANCE]);
+      // The demo policy's rule adds the informative category MORE RESTRICTIVE
+      // PORTIONS to a base label below one of the portions.
+      assert.equal(parts.get(DOCUMENT_NAMESPACE)?.root.getAttribute('label'), 'DEMO-FR:2/3.1');
+      const sheet = (await (await JSZip.loadAsync(xlsx)).file('xl/worksheets/sheet1.xml')?.async('string')) ?? '';
+      assert.match(sheet, /<userProtectedRange name="p1" sqref="F4:G4"\/>/);
+    });
+
+    it('prepares a workbook that Microsoft 365 labelled without its Sensitivity Label Information part', async () => {
+      const xlsx = await withLabelMetadata(await minimalXlsx(), {
+        properties: wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 2),
+        labelList: wordLabelElement(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT),
+      });
+      assert.deepEqual(await read(xlsx, XLSX_TYPE), { statusCode: 200, json: { label: { code: DIFFUSION_RESTREINTE, source: 'sensitivity-label' }, signature: 'absent' } });
+
+      const { statusCode, xlsx: preparedXlsx } = await preparedWorkbook(xlsx, base(DIFFUSION_RESTREINTE));
+
+      assert.equal(statusCode, 200);
+      assert.ok(preparedXlsx !== null);
+      assert.equal((await JSZip.loadAsync(preparedXlsx)).file('docMetadata/LabelInfo.xml'), null);
+    });
+
+    it('prepares a workbook that another tool labelled, whose binding it replaces', async () => {
+      const { statusCode, xlsx } = await preparedWorkbook(await minimalXlsx([], [bindingOf(originatorLabel('DEMO-FR', DEMO_POLICY_URI, 'DIFFUSION RESTREINTE'))]), base(DIFFUSION_RESTREINTE));
+
+      assert.equal(statusCode, 200);
+      assert.ok(xlsx !== null);
+      const bindings = [...(await customXmlTexts(await JSZip.loadAsync(xlsx))).values()].filter((xml) => xml.includes(BINDING_NAMESPACE));
+      assert.equal(bindings.length, 1);
+      assert.doesNotMatch(bindings[0] ?? '', /word\/document\.xml/);
+    });
+
+    for (const [kind, body, reason] of [
+      ['a legacy Excel file', async () => compoundFile(['Workbook']), 'compound-file'],
+      ['a workbook with several document label bindings', async () => minimalXlsx([], [`<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}"/>`, `<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}"/>`]), 'several-bindings'],
+      ['a workbook whose binding is not well-formed XML', async () => minimalXlsx([], [`<mb:BindingInformation xmlns:mb="${BINDING_NAMESPACE}">`]), 'malformed-binding'],
+    ] as const) {
+      it(`refuses ${kind}, as a text document`, async () => {
+        const { statusCode, json } = await preparedWorkbook(await body(), base(DIFFUSION_RESTREINTE));
+
+        assert.equal(statusCode, 422);
+        assert.equal(reasonOf(json), reason);
+      });
+    }
+
+    it('names both formats when it refuses a legacy Office document', async () => {
+      const { json } = await preparedWorkbook(compoundFile(['Workbook']), base(DIFFUSION_RESTREINTE));
+
+      assert.deepEqual(json, { error: 'The file is a legacy Office document, not a DOCX or XLSX package', reason: 'compound-file' });
+    });
+
+    it('refuses a base label that the security policy does not know for a workbook', async () => {
+      const { statusCode, json } = await preparedWorkbook(await minimalXlsx(), base('DEMO-FR:7'));
+
+      assert.equal(statusCode, 422);
+      assert.equal(reasonOf(json), 'unknown-label');
+    });
+
+    it('refuses a workbook whose portion labels in clear designate no label', async () => {
+      const { statusCode, json } = await preparedWorkbook(await minimalXlsx([{ id: 'p1', label: 'DEMO-FR:9' }]), base(DIFFUSION_RESTREINTE));
+
+      assert.equal(statusCode, 422);
+      assert.equal(reasonOf(json), 'portion-labels');
     });
   });
 

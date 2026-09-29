@@ -5,12 +5,12 @@ import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
-import { customXmlParts, holdsWorkbook, loadPackage, partNamesOf } from './opc.ts';
+import { customXmlParts, loadPackage, mainPartOf, partNamesOf } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
-const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+export const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+export const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 // The plugin's parts and tags (plugin/src/portions.ts).
 const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
 const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
@@ -94,7 +94,7 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // The binding references every part of ADatP-4778.2 Tables 5-2 and 5-3
     // that the package holds, the custom properties part written just now
     // included: only the saved package tells which parts exist.
-    const parts = await partsOf(zip, bindablePartsOf(partNamesOf(zip)));
+    const parts = await partsOf(zip, bindablePartsOf(partNamesOf(zip), (await mainPartOf(zip))?.kind ?? 'text-document'));
     return {
       signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, options.signer, options.now()) },
       // The other parts written, which the portal stores with the binding.
@@ -226,7 +226,7 @@ export async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
       partLabels.set(id, label);
     }
   }
-  const portionCodes = holdsWorkbook(partNamesOf(zip)) ? await workbookPortionCodes(zip, partLabels) : await textDocumentPortionCodes(zip);
+  const portionCodes = (await mainPartOf(zip))?.kind === 'workbook' ? await workbookPortionCodes(zip, partLabels) : await textDocumentPortionCodes(zip);
   return { bindings, unreadableBindings, baseCode, portionCodes };
 }
 

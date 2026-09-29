@@ -15,6 +15,25 @@ const UPLOADS_DIRECTORY = path.join(import.meta.dirname, 'uploads');
 // sensitivity label it pairs with DIFFUSION RESTREINTE released to NATO.
 const EXAMPLE_TENANT = '00000000-0000-0000-0000-000000000000';
 const RELEASABLE_TO_NATO_LABEL = '10000000-0000-4000-8000-000000000003';
+// That sensitivity label as Office writes it in custom properties
+// ([MS-OI29500] §3.11.2), with a fixed date and action id, so that it stays
+// the same from one run to the next.
+const SENSITIVITY_LABEL_VALUES: readonly [string, string][] = [
+  ['Enabled', 'true'],
+  ['SetDate', '2026-09-01T08:00:00Z'],
+  ['Method', 'Privileged'],
+  ['Name', 'DCS-Diffusion-Restreinte-OTAN'],
+  ['SiteId', EXAMPLE_TENANT],
+  ['ActionId', '20000000-0000-4000-8000-000000000001'],
+  ['ContentBits', '0'],
+];
+// The date of every part the generator writes into a package.
+const PART_DATE = new Date('2026-09-01T08:00:00Z');
+// The user-defined properties, among which Office reads a sensitivity label
+// ([MS-OI29500] §3.11.2). Identifiers 0 and 1 name a property set's dictionary
+// and code page ([MS-OLEPS] §2.18), so Office numbers them from 2.
+const USER_DEFINED_PROPERTIES = '{D5CDD505-2E9C-101B-9397-08002B2CF9AE}';
+const FIRST_PROPERTY_ID = 2;
 
 const DEMO_DOCUMENTS: DemoDocument[] = [
   { fileName: 'exercise-northwind.docx', build: buildExerciseNorthwind },
@@ -77,7 +96,6 @@ function buildExerciseNorthwind(): Document {
 // left and right sections the page marking keeps. Every part's date is
 // fixed, so that the file stays the same from one run to the next.
 async function buildLogisticsWorkbook(): Promise<Buffer> {
-  const date = new Date('2026-09-01T08:00:00Z');
   const rows: (string | number)[][] = [
     ['Exercise NORTHWIND 26 - fictional logistics'],
     [],
@@ -124,7 +142,7 @@ async function buildLogisticsWorkbook(): Promise<Buffer> {
     ],
     [
       'docProps/core.xml',
-      `${declaration}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Exercise NORTHWIND 26 - Logistics</dc:title><dc:description>Fictional workbook for demonstration purposes only</dc:description><dc:creator>DCS ONLYOFFICE demo</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${date.toISOString().replace(/\.\d{3}Z$/, 'Z')}</dcterms:created></cp:coreProperties>`,
+      `${declaration}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Exercise NORTHWIND 26 - Logistics</dc:title><dc:description>Fictional workbook for demonstration purposes only</dc:description><dc:creator>DCS ONLYOFFICE demo</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${PART_DATE.toISOString().replace(/\.\d{3}Z$/, 'Z')}</dcterms:created></cp:coreProperties>`,
     ],
     ['docProps/app.xml', `${declaration}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>DCS ONLYOFFICE demo</Application></Properties>`],
     [
@@ -154,7 +172,7 @@ async function buildLogisticsWorkbook(): Promise<Buffer> {
   ]);
   const zip = new JSZip();
   for (const [name, xml] of parts) {
-    zip.file(name, xml, { date });
+    zip.file(name, xml, { date: PART_DATE });
   }
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
@@ -162,23 +180,13 @@ async function buildLogisticsWorkbook(): Promise<Buffer> {
 // A Word file that a Microsoft 365 tenant labelled, as Word writes the label
 // ([MS-OI29500] §3.11.2, [MS-OFFCRYPTO] §2.6): in custom properties, and in a
 // Sensitivity Label Information part, the example tenant's DIFFUSION
-// RESTREINTE released to NATO. The label's date and action id are fixed, so
-// that the label stays the same from one run to the next.
+// RESTREINTE released to NATO.
 async function buildLabelledReport(): Promise<Buffer> {
-  const values: [string, string][] = [
-    ['Enabled', 'true'],
-    ['SetDate', '2026-09-01T08:00:00Z'],
-    ['Method', 'Privileged'],
-    ['Name', 'DCS-Diffusion-Restreinte-OTAN'],
-    ['SiteId', EXAMPLE_TENANT],
-    ['ActionId', '20000000-0000-4000-8000-000000000001'],
-    ['ContentBits', '0'],
-  ];
   const document = new Document({
     creator: 'DCS ONLYOFFICE demo',
     title: 'Exercise NORTHWIND 26 - Logistics report',
     description: 'Fictional document for demonstration purposes only',
-    customProperties: values.map(([attribute, value]) => ({ name: `MSIP_Label_${RELEASABLE_TO_NATO_LABEL}_${attribute}`, value })),
+    customProperties: SENSITIVITY_LABEL_VALUES.map(([attribute, value]) => ({ name: `MSIP_Label_${RELEASABLE_TO_NATO_LABEL}_${attribute}`, value })),
     sections: [
       {
         children: [
@@ -201,18 +209,47 @@ async function buildLabelledReport(): Promise<Buffer> {
     ],
   });
   const zip = await JSZip.loadAsync(await Packer.toBuffer(document));
+  await addLabelInformation(zip);
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+// The fictional workbook, labelled by the same tenant as the Word file, as
+// Excel writes the label, in the same places: custom properties, which the
+// workbook has no part for yet, and a Sensitivity Label Information part.
+async function buildLabelledWorkbook(): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(await buildLogisticsWorkbook());
+  const properties = SENSITIVITY_LABEL_VALUES.map(
+    ([attribute, value], index) =>
+      `<property fmtid="${USER_DEFINED_PROPERTIES}" pid="${FIRST_PROPERTY_ID + index}" name="MSIP_Label_${RELEASABLE_TO_NATO_LABEL}_${attribute}"><vt:lpwstr>${value}</vt:lpwstr></property>`,
+  );
+  zip.file(
+    'docProps/custom.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">${properties.join('')}</Properties>`,
+    { date: PART_DATE },
+  );
+  await addPackagePart(zip, 'rIdCustom', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties', 'docProps/custom.xml', 'application/vnd.openxmlformats-officedocument.custom-properties+xml');
+  await addLabelInformation(zip);
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+// Adds the Sensitivity Label Information part of the example tenant's label
+// ([MS-OFFCRYPTO] §2.6.3), as Office writes it.
+async function addLabelInformation(zip: JSZip): Promise<void> {
   zip.file(
     'docMetadata/LabelInfo.xml',
     `<?xml version="1.0" encoding="utf-8" standalone="yes"?><clbl:labelList xmlns:clbl="http://schemas.microsoft.com/office/2020/mipLabelMetadata"><clbl:label id="{${RELEASABLE_TO_NATO_LABEL}}" enabled="1" method="Privileged" siteId="{${EXAMPLE_TENANT}}" contentBits="0" removed="0" /></clbl:labelList>`,
+    { date: PART_DATE },
   );
+  await addPackagePart(zip, 'rIdLabelInfo', 'http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels', 'docMetadata/LabelInfo.xml', 'application/vnd.ms-office.classificationlabels+xml');
+}
+
+// Relates a package-level part from the package and declares its content
+// type.
+async function addPackagePart(zip: JSZip, id: string, type: string, part: string, contentType: string): Promise<void> {
   const relationships = (await zip.file('_rels/.rels')?.async('string')) ?? '';
-  zip.file(
-    '_rels/.rels',
-    relationships.replace('</Relationships>', '<Relationship Id="rIdLabelInfo" Type="http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels" Target="docMetadata/LabelInfo.xml"/></Relationships>'),
-  );
+  zip.file('_rels/.rels', relationships.replace('</Relationships>', `<Relationship Id="${id}" Type="${type}" Target="${part}"/></Relationships>`), { date: PART_DATE });
   const types = (await zip.file('[Content_Types].xml')?.async('string')) ?? '';
-  zip.file('[Content_Types].xml', types.replace('</Types>', '<Override PartName="/docMetadata/LabelInfo.xml" ContentType="application/vnd.ms-office.classificationlabels+xml"/></Types>'));
-  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  zip.file('[Content_Types].xml', types.replace('</Types>', `<Override PartName="/${part}" ContentType="${contentType}"/></Types>`), { date: PART_DATE });
 }
 
 async function generateDemoDocuments(): Promise<string[]> {
@@ -230,6 +267,9 @@ async function generateDemoDocuments(): Promise<string[]> {
   const labelled = path.join(UPLOADS_DIRECTORY, 'fictional-report-labelled-in-microsoft-365.docx');
   await writeFile(labelled, await buildLabelledReport());
   written.push(labelled);
+  const labelledWorkbook = path.join(UPLOADS_DIRECTORY, 'fictional-workbook-labelled-in-microsoft-365.xlsx');
+  await writeFile(labelledWorkbook, await buildLabelledWorkbook());
+  written.push(labelledWorkbook);
   return written;
 }
 

@@ -2,17 +2,23 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import JSZip from 'jszip';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
-import { documentLogEntries } from './support/deployment.ts';
-import { openDocument, openedDocumentId, openNewDocument } from './support/documents.ts';
+import { documentLogEntries, portalLog } from './support/deployment.ts';
+import { editorPageConfig, openDocument, openedDocumentId, openNewDocument } from './support/documents.ts';
 import { BINDING_NAMESPACE, DOCX_TYPE, LABEL_NAMESPACE, sensitivityLabelProperties } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
-import { forceSavedDocx, insertPortion, shownPortions, storedDocx, storedFile } from './support/portions.ts';
+import { forceSavedDocx, forceSavedXlsx, insertPortion, shownPortions, storedDocx, storedFile } from './support/portions.ts';
 import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
 import { upload, type UploadedFile, withCustomXmlPart, withLabelMetadata, wordLabelElement, wordLabelProperties } from './support/uploads.ts';
+import { insertWorkbookPortion } from './support/workbooks.ts';
+import { inspectXlsx, XLSX_TYPE } from './support/xlsx.ts';
 
 const TEMPLATE = new URL('../../deploy/demo/documents/exercise-northwind.docx', import.meta.url);
+// The demo generator's workbook that the example tenant labelled DIFFUSION
+// RESTREINTE released to NATO, in custom properties and a Sensitivity Label
+// Information part.
+const LABELLED_WORKBOOK = new URL('../../deploy/demo/uploads/fictional-workbook-labelled-in-microsoft-365.xlsx', import.meta.url);
 const RELEASABLE_TO_NATO = 'DIFFUSION RESTREINTE – DIFFUSION OTAN';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
@@ -79,6 +85,81 @@ test('a document downloaded from the portal and uploaded again keeps its base la
   await expect
     .poll(() => documentLogEntries(since, 'Document uploaded', uploadedId))
     .toEqual([uploadEntry({ base: CODES.nato, read: { code: CODES.nato, source: 'base-label' }, signature: 'matched', lowering: false, user: 'alice' })]);
+});
+
+test('a workbook downloaded from the portal and uploaded again keeps its base label and its portions', async ({ page, browser }) => {
+  const since = new Date();
+  const documentId = await openNewDocument(page, 'exercise-northwind-logistics.xlsx');
+  await pluginPanel(page).getByLabel('Base label').selectOption({ label: RELEASABLE_TO_NATO });
+  await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(RELEASABLE_TO_NATO);
+  const frenchOnly = markedText('Fictional French-only count uploaded again');
+  const releasable = markedText('Fictional releasable count uploaded again');
+  await insertWorkbookPortion(page, { marking: SPECIAL_FRANCE, text: frenchOnly }, 'F4:G4');
+  await insertWorkbookPortion(page, { marking: RELEASABLE_TO_NATO, text: releasable }, 'F6:G6');
+  await forceSavedXlsx(page, documentId, (xlsx) => xlsx.portionParts.length === 2 && xlsx.bindings[0]?.label?.categories.some((category) => category.tagName === 'Composition') === true);
+  const downloaded = await storedFile(page, documentId);
+
+  expect(await upload(page, { name: 'Fictional exercise logistics.xlsx', mimeType: XLSX_TYPE, buffer: downloaded }, 'carried')).toBe(303);
+
+  const uploadedId = await openedDocumentId(page);
+  await expect(page).toHaveTitle('Fictional exercise logistics.xlsx');
+  expect((await editorPageConfig(page)).documentType).toBe('cell');
+  await expect(pluginPanel(page).getByLabel('Base label')).toHaveValue(CODES.nato);
+  await expect
+    .poll(() => shownPortions(page))
+    .toEqual([
+      { marking: RELEASABLE_TO_NATO, text: releasable, notice: null },
+      { marking: SPECIAL_FRANCE, text: frenchOnly, notice: null },
+    ]);
+  const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
+  await openDocument(bob, uploadedId);
+  await expect
+    .poll(() => shownPortions(bob))
+    .toEqual([
+      { marking: RELEASABLE_TO_NATO, text: releasable, notice: null },
+      { marking: SPECIAL_FRANCE, text: null, notice: 'Access denied' },
+    ]);
+  await expect
+    .poll(() => documentLogEntries(since, 'Document uploaded', uploadedId))
+    .toEqual([uploadEntry({ base: CODES.nato, read: { code: CODES.nato, source: 'base-label' }, signature: 'matched', lowering: false, user: 'alice' })]);
+  expect(portalLog(since)).not.toContain(frenchOnly);
+  expect(portalLog(since)).not.toContain(releasable);
+  await bob.context().close();
+});
+
+// Whatever its name says, the file's main part decides its format, whose
+// extension the document's name then takes.
+test('a workbook named as a text document is stored and named as a workbook', async ({ page }) => {
+  const buffer = await readFile(LABELLED_WORKBOOK);
+
+  expect(await upload(page, { name: 'Fictional workbook named as a report.docx', mimeType: DOCX_TYPE, buffer }, 'carried')).toBe(303);
+
+  await openedDocumentId(page);
+  await expect(page).toHaveTitle('Fictional workbook named as a report.xlsx');
+  expect((await editorPageConfig(page)).documentType).toBe('cell');
+});
+
+test('a workbook that a Microsoft 365 tenant labelled gets the label the mapping pairs with it, and opens in the spreadsheet editor', async ({ page }) => {
+  const since = new Date();
+
+  const buffer = await readFile(LABELLED_WORKBOOK);
+  expect(await upload(page, { name: 'Fictional logistics workbook.xlsx', mimeType: XLSX_TYPE, buffer }, 'carried')).toBe(303);
+
+  const documentId = await openedDocumentId(page);
+  expect((await editorPageConfig(page)).documentType).toBe('cell');
+  await expect(pluginPanel(page).getByLabel('Base label')).toHaveValue(CODES.nato);
+  const stored = await storedFile(page, documentId);
+  expect((await JSZip.loadAsync(stored)).file('docMetadata/LabelInfo.xml')).toBeNull();
+  expect(sensitivityLabelProperties(await inspectXlsx(stored), NATO_SENSITIVITY_LABEL)).toMatchObject({
+    Enabled: 'true',
+    SiteId: DEMO_TENANT,
+    Name: 'DCS-Diffusion-Restreinte-OTAN',
+    Method: 'Privileged',
+    ContentBits: '0',
+  });
+  await expect
+    .poll(() => documentLogEntries(since, 'Document uploaded', documentId))
+    .toEqual([uploadEntry({ base: CODES.nato, read: { code: CODES.nato, source: 'sensitivity-label' }, signature: 'absent', lowering: false })]);
 });
 
 test('a file that another tool labelled gets its label', async ({ page }) => {

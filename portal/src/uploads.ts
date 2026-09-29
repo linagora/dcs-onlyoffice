@@ -4,7 +4,7 @@ import { requireSession } from './auth/routes.ts';
 import type { UserIdentity } from './auth/sessions.ts';
 import type { BindingSignatures } from './binding-signature.ts';
 import { markingOfLabel } from './document-access.ts';
-import { newDocumentId, storeNewDocument } from './documents.ts';
+import { FORMAT_NAMES, nameInFormat, newDocumentId, splitFileName, storeNewDocument } from './documents.ts';
 import { isLowering, type LabelJournal } from './label-journal.ts';
 import { renderMessagePage, type UploadLabel } from './pages.ts';
 import { identityHeaders } from './policy-relay.ts';
@@ -20,13 +20,14 @@ export interface UploadOptions {
   journal: LabelJournal;
 }
 
-// A person brings a DOCX into the portal (an upload). Its base label is the
-// label the file carries, unless the person chooses another under the base
-// label rule; one they must choose when it carries none. The policy service
-// reads that label, refuses what cannot become a document, writes the
-// platform's parts into it and signs its binding, as at a save; the portal
-// stores the result as a new document, named after the uploaded file, and
-// logs it. Only this route reads multipart bodies.
+// A person brings a DOCX or an XLSX into the portal (an upload). Its base
+// label is the label the file carries, unless the person chooses another
+// under the base label rule; one they must choose when it carries none. The
+// policy service reads that label, refuses what cannot become a document,
+// writes the platform's parts into it and signs its binding, as at a save;
+// the portal stores the result as a new document of the format its main part
+// gives, named after the uploaded file, and logs it. Only this route reads
+// multipart bodies.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
   app.register(async (scope) => {
     await scope.register(multipart, { limits: { fileSize: UPLOAD_LIMIT_MEGABYTES * 1024 * 1024, files: 1 } });
@@ -52,9 +53,11 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
         throw error;
       }
       if (upload === null || upload.content.length === 0) {
-        return refuse(reply, 400, 'Choose a DOCX file.');
+        return refuse(reply, 400, `Choose a ${FORMAT_NAMES} file.`);
       }
-      const reading = await options.signatures.readUpload(upload.content);
+      // The name only says how to send the file: its main part decides.
+      const namedFormat = splitFileName(upload.fileName).format ?? 'docx';
+      const reading = await options.signatures.readUpload(upload.content, namedFormat);
       if (!reading.ok) {
         return refuse(reply, reading.status, reading.message);
       }
@@ -79,16 +82,18 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
           lowering === true ? "Only an administrator whose clearance allows the file's label may lower it." : 'The base label is not among those your clearance allows.',
         );
       }
-      const prepared = await options.signatures.preparedUpload(upload.content, kept);
+      const prepared = await options.signatures.preparedUpload(upload.content, namedFormat, kept);
       if (!prepared.ok) {
         return refuse(reply, prepared.status, prepared.message);
       }
-      const documentId = newDocumentId(upload.fileName);
+      // The document is named after the file, with its format's extension.
+      const name = nameInFormat(upload.fileName, prepared.value.format);
+      const documentId = newDocumentId(name);
       const signed = await options.signatures.signedUpload(prepared.value, documentId);
       if (signed === null) {
         return refuse(reply, 503, 'The policy service could not sign the document. Try again later.');
       }
-      await storeNewDocument(options.documentsDirectory, documentId, signed, upload.fileName);
+      await storeNewDocument(options.documentsDirectory, documentId, signed, prepared.value.format, name);
       options.journal.recordUpload({ documentId, base: kept, read: carried, signature: reading.value.signature }, lowering, user.id);
       return reply.redirect(`/documents/${documentId}/edit`, 303);
     });

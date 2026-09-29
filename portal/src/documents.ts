@@ -22,16 +22,38 @@ export interface DocumentTemplate {
 
 export type SaveKind = 'session-ended' | 'forced';
 
-export const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 // Each format's file extension, media type and ONLYOFFICE editor.
 export const DOCUMENT_FORMATS: Readonly<Record<DocumentFormat, { extension: string; contentType: string; documentType: 'word' | 'cell' }>> = {
   docx: { extension: '.docx', contentType: DOCX_CONTENT_TYPE, documentType: 'word' },
   xlsx: { extension: '.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', documentType: 'cell' },
 };
-// The order in which a folder's files are looked for: should it hold both a
-// DOCX and an XLSX for one identifier, the text document is the document.
+// Every format, in the order in which a folder's files are looked for: should
+// it hold both a DOCX and an XLSX for one identifier, the text document is the
+// document.
 const LOOKUP_ORDER: readonly DocumentFormat[] = ['docx', 'xlsx'];
+
+// The formats' names, as the upload form and its messages give them.
+export const FORMAT_NAMES = LOOKUP_ORDER.map((format) => DOCUMENT_FORMATS[format].extension.slice(1).toUpperCase()).join(' or ');
+
+// A file name's format, which its extension gives, and the name without that
+// extension; a null format, and the whole name, for another name.
+export function splitFileName(name: string): { stem: string; format: DocumentFormat | null } {
+  const lower = name.toLowerCase();
+  const format = LOOKUP_ORDER.find((candidate) => lower.endsWith(DOCUMENT_FORMATS[candidate].extension)) ?? null;
+  return { stem: format === null ? name : name.slice(0, -DOCUMENT_FORMATS[format].extension.length), format };
+}
+
+// A file name with the extension of a format, which replaces its own.
+export function nameInFormat(name: string, format: DocumentFormat): string {
+  return `${splitFileName(name).stem}${DOCUMENT_FORMATS[format].extension}`;
+}
+
+// The format a media type names; null for another type.
+export function formatOfContentType(type: string | null): DocumentFormat | null {
+  return LOOKUP_ORDER.find((format) => DOCUMENT_FORMATS[format].contentType === type?.split(';', 1)[0]?.trim()) ?? null;
+}
 
 interface DocumentMetadata {
   epoch: string;
@@ -82,11 +104,11 @@ export async function createDocumentFromTemplate(
   return findDocument(documentsDirectory, id);
 }
 
-// A new document's identifier: the name it comes from, in the characters an
-// identifier allows, with a random suffix.
+// A new document's identifier: the name it comes from, without a format's
+// extension, in the characters an identifier allows, with a random suffix.
 export function newDocumentId(name: string): string {
-  const stem = name
-    .replace(/\.docx$/i, '')
+  const stem = splitFileName(name)
+    .stem
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -96,16 +118,16 @@ export function newDocumentId(name: string): string {
   return `${stem === '' ? 'document' : stem}-${randomBytes(4).toString('hex')}`;
 }
 
-// Stores a new document under an identifier that names no stored document,
-// with the name of the file it comes from: the file appears whole, and with
-// its name, or not at all.
-export async function storeNewDocument(directory: string, id: string, content: Uint8Array, name: string): Promise<StoredDocument> {
+// Stores a new document of a format under an identifier that names no stored
+// document, with the name of the file it comes from: the file appears whole,
+// and with its name, or not at all.
+export async function storeNewDocument(directory: string, id: string, content: Uint8Array, format: DocumentFormat, name: string): Promise<StoredDocument> {
   if (!DOCUMENT_ID_PATTERN.test(id)) {
     throw new Error(`Invalid document identifier ${id}`);
   }
   const shown = shownName(name);
   await writeMetadata(directory, id, { epoch: randomBytes(4).toString('hex'), version: 1, ...(shown === null ? {} : { name: shown }) });
-  const filePath = documentPath(directory, id, 'docx');
+  const filePath = documentPath(directory, id, format);
   const temporaryPath = `${filePath}.${randomBytes(4).toString('hex')}.tmp`;
   await writeFile(temporaryPath, content);
   try {
@@ -170,12 +192,8 @@ async function listDocumentFiles(directory: string): Promise<{ id: string; forma
   const entries = await readdir(directory, { withFileTypes: true });
   return entries
     .flatMap((entry) => {
-      const format = entry.isFile() ? (LOOKUP_ORDER.find((candidate) => entry.name.endsWith(DOCUMENT_FORMATS[candidate].extension)) ?? null) : null;
-      if (format === null) {
-        return [];
-      }
-      const id = entry.name.slice(0, -DOCUMENT_FORMATS[format].extension.length);
-      return DOCUMENT_ID_PATTERN.test(id) ? [{ id, format }] : [];
+      const { stem: id, format } = splitFileName(entry.name);
+      return entry.isFile() && format !== null && DOCUMENT_ID_PATTERN.test(id) ? [{ id, format }] : [];
     })
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 }
