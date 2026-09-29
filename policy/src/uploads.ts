@@ -23,7 +23,13 @@ import { removeLabelInformation } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const MAIN_DOCUMENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml';
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+// The content type of the main part of a package an upload may hold, a text
+// document's or a workbook's, and the media type of that package.
+const PACKAGE_TYPES: ReadonlyMap<string, string> = new Map([
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml', DOCX_TYPE],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', XLSX_TYPE],
+]);
 const CUSTOM_XML_PROPERTIES_TYPE = 'application/vnd.openxmlformats-officedocument.customXmlProperties+xml';
 const DATASTORE_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/customXml';
 const OFFICE_DOCUMENT_RELATIONSHIP = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
@@ -68,11 +74,11 @@ type CarriedLabel = { ok: true; code: string; source: LabelSource } | Extract<Re
 export type SignatureStatus = 'matched' | 'not-matched' | 'absent';
 
 const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
-  'not-a-package': 'The file is no DOCX package',
+  'not-a-package': 'The file is no DOCX or XLSX package',
   'rights-management': 'Microsoft Purview encrypted the file: remove its protection first',
   password: 'A password protects the file: remove it first',
-  'compound-file': 'The file is a legacy Office document, not a DOCX package',
-  'not-a-document': 'The package holds no Word document',
+  'compound-file': 'The file is a legacy Office document, not a DOCX or XLSX package',
+  'not-a-document': 'The package holds no Word document or workbook',
   'unknown-label': 'The base label designates no label of the security policy',
   'several-bindings': 'The file holds several document label bindings, where ADatP-4778.2 allows one',
   'malformed-binding': "The file's document label binding is not well-formed XML",
@@ -108,8 +114,8 @@ export interface UploadOptions {
 // references the parts the package holds. It also removes the Sensitivity
 // Label Information part, which Office could read instead of the label the
 // platform writes (ADR 0005). The portal then has the binding signed, as at
-// a save. Both routes refuse what cannot become a text document, a workbook
-// included. The body parser comes from acceptPackages.
+// a save. Both routes refuse what can become neither a text document nor a
+// workbook. The body parser comes from acceptPackages.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
   app.post('/uploads/read', async (request, reply) => {
     const received = packageBody(request, options.secret);
@@ -144,7 +150,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     if (!uploaded.ok) {
       return refuse(reply, uploaded.refusal);
     }
-    const { zip, mainPart, labels } = uploaded;
+    const { zip, mainPart, packageType, labels } = uploaded;
     const base = options.readLabelCode(requested);
     if (!base.ok) {
       return refuse(reply, 'unknown-label');
@@ -158,14 +164,16 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     const parts = partNamesOf(zip);
     await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
     await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts)));
-    return reply.type(DOCX_TYPE).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+    return reply.type(packageType).send(await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
   });
 }
 
 // An uploaded package, with its main part and its labels in clear, or why it
 // cannot become a document: its binding, if it has one, must be one that
 // signing can replace.
-async function uploadedPackage(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPart: string; labels: PackageLabels } | { ok: false; refusal: UploadRefusal }> {
+async function uploadedPackage(
+  body: Buffer,
+): Promise<{ ok: true; zip: JSZip; mainPart: string; packageType: string; labels: PackageLabels } | { ok: false; refusal: UploadRefusal }> {
   const opened = await openUpload(body);
   if (!opened.ok) {
     return opened;
@@ -222,10 +230,11 @@ function refuse(reply: FastifyReply, refusal: UploadRefusal): FastifyReply {
   return reply.code(422).send({ error: REFUSALS[refusal], reason: refusal });
 }
 
-// The package of an uploaded WordprocessingML document, with its main part,
-// or why it is none. An encrypted file is a compound file whose directory
-// names its data spaces and streams in UTF-16 ([MS-OFFCRYPTO] §2.2, §2.3).
-async function openUpload(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPart: string } | { ok: false; refusal: UploadRefusal }> {
+// The package of an uploaded text document or workbook, with its main part
+// and its media type, or why it is none. An encrypted file is a compound file
+// whose directory names its data spaces and streams in UTF-16
+// ([MS-OFFCRYPTO] §2.2, §2.3).
+async function openUpload(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPart: string; packageType: string } | { ok: false; refusal: UploadRefusal }> {
   if (body.subarray(0, COMPOUND_FILE_SIGNATURE.length).equals(COMPOUND_FILE_SIGNATURE)) {
     const names = (name: string): boolean => body.includes(Buffer.from(name, 'utf16le'));
     if (names('DRMEncryptedDataSpace')) {
@@ -237,23 +246,25 @@ async function openUpload(body: Buffer): Promise<{ ok: true; zip: JSZip; mainPar
   if (zip === null) {
     return { ok: false, refusal: 'not-a-package' };
   }
-  const mainPart = await mainDocumentPart(zip);
-  return mainPart === null ? { ok: false, refusal: 'not-a-document' } : { ok: true, zip, mainPart };
+  const main = await mainPartOf(zip);
+  return main === null ? { ok: false, refusal: 'not-a-document' } : { ok: true, zip, mainPart: main.part, packageType: main.packageType };
 }
 
-// The WordprocessingML main document part: the target of the package's
-// officeDocument relationship, of the main document's content type.
-async function mainDocumentPart(zip: JSZip): Promise<string | null> {
+// The main part of a text document or a workbook, the target of the package's
+// officeDocument relationship, with the media type its content type gives the
+// package.
+async function mainPartOf(zip: JSZip): Promise<{ part: string; packageType: string } | null> {
   const relationships = await xmlPartOf(zip, PACKAGE_RELATIONSHIPS_PART);
   const target = Array.from(relationships?.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship') ?? [])
     .find((relationship) => relationship.getAttribute('Type') === OFFICE_DOCUMENT_RELATIONSHIP)
     ?.getAttribute('Target')
     ?.replace(/^\//, '');
   const types = await xmlPartOf(zip, CONTENT_TYPES_PART);
-  const typed = Array.from(types?.getElementsByTagNameNS(CONTENT_TYPES_NAMESPACE, 'Override') ?? []).some(
-    (override) => override.getAttribute('PartName') === `/${target}` && override.getAttribute('ContentType') === MAIN_DOCUMENT_TYPE,
-  );
-  return target !== undefined && typed && zip.file(target) !== null ? target : null;
+  const contentType = Array.from(types?.getElementsByTagNameNS(CONTENT_TYPES_NAMESPACE, 'Override') ?? [])
+    .find((override) => override.getAttribute('PartName') === `/${target}`)
+    ?.getAttribute('ContentType');
+  const packageType = contentType === undefined || contentType === null ? undefined : PACKAGE_TYPES.get(contentType);
+  return target !== undefined && packageType !== undefined && zip.file(target) !== null ? { part: target, packageType } : null;
 }
 
 // Writes the Custom XML part of a namespace: again when the package holds
