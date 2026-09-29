@@ -132,6 +132,7 @@ export interface PortionDeletionFormProps {
 export function PortionDeletionForm({ onConfirm, onCancel }: PortionDeletionFormProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const form = useShownForm(true);
 
   const confirm = async (event: Event): Promise<void> => {
     event.preventDefault();
@@ -148,7 +149,7 @@ export function PortionDeletionForm({ onConfirm, onCancel }: PortionDeletionForm
   };
 
   return (
-    <form class="portion-form" data-testid="deletion-confirmation" onSubmit={confirm}>
+    <form ref={form} class="portion-form" data-testid="deletion-confirmation" onSubmit={confirm}>
       <p>{messages.deletionQuestion}</p>
       <div class="form-actions">
         <button type="submit" disabled={busy}>
