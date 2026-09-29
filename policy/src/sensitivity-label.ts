@@ -2,7 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { XMLSerializer } from '@xmldom/xmldom';
 import type JSZip from 'jszip';
 import { escapeXml } from './adatp4774.ts';
-import { appendRelationship, CONTENT_TYPES_PART, declareContentType, PACKAGE_RELATIONSHIPS_PART, partNamed, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
+import {
+  appendRelationship,
+  CONTENT_TYPES_PART,
+  declareContentType,
+  PACKAGE_RELATIONSHIPS_PART,
+  partNamed,
+  RELATIONSHIPS_NAMESPACE,
+  removeRelationships,
+  undeclareContentType,
+  xmlPartOf,
+} from './opc.ts';
 import { childElements, childrenNamed, parseXml } from './xml.ts';
 
 // A sensitivity label of a Microsoft 365 tenant: its id, and its unique name
@@ -217,6 +227,49 @@ export async function appliedSensitivityLabels(zip: JSZip, tenant: string): Prom
   }
   const { properties } = await customPropertiesOf(zip);
   return [...labelIdsOfTenant(properties, tenant)].filter((id) => enabledLabel(properties, id, tenant) !== null);
+}
+
+// Removes the Sensitivity Label Information part, with its relationship and
+// its content type: the platform keeps sensitivity labels in custom
+// properties only (ADR 0005). Each tenant's element there decided its label
+// ([MS-OFFCRYPTO] §2.6.3), so the tenant's label properties, stale, go too,
+// lest a label the element removed come back; and the label an element
+// applies, for a tenant other than the mapped one, is written as properties,
+// as §2.6.3 converts one, so that every organisation keeps its label. The
+// mapped tenant's label is signing's to write; a tenant with several elements
+// keeps its properties as they are.
+export async function removeLabelInformation(zip: JSZip, mappedTenant: string | null, now: Date): Promise<void> {
+  const part = await labelInformationPartOf(zip);
+  if (part === null) {
+    return;
+  }
+  const decided = [...(await labelInformationOf(zip))].filter((entry): entry is [string, LabelAttributes | null] => entry[1] !== 'unreadable');
+  const custom = await customPropertiesOf(zip);
+  if (decided.length > 0 && custom.transitional) {
+    const stale = new Set(decided.flatMap(([tenant]) => [...labelIdsOfTenant(custom.properties, tenant)]));
+    const kept = custom.properties.filter((property) => property.label === null || !stale.has(property.label.id));
+    const converted: string[] = [];
+    for (const [tenant, label] of decided) {
+      if (label !== null && tenant !== mappedTenant) {
+        converted.push(...labelPropertiesXml(tenant, label, null, now, nextPid(kept) + converted.length));
+      }
+    }
+    if (kept.length < custom.properties.length || converted.length > 0) {
+      await writeCustomProperties(zip, custom, [...kept.map((property) => property.xml), ...converted]);
+    }
+  }
+  const serializer = new XMLSerializer();
+  const relationships = await xmlPartOf(zip, PACKAGE_RELATIONSHIPS_PART);
+  if (relationships !== null) {
+    removeRelationships(relationships, LABEL_INFORMATION_RELATIONSHIP);
+    zip.file(PACKAGE_RELATIONSHIPS_PART, serializer.serializeToString(relationships));
+  }
+  const types = await xmlPartOf(zip, CONTENT_TYPES_PART);
+  if (types !== null) {
+    undeclareContentType(types, `/${part}`);
+    zip.file(CONTENT_TYPES_PART, serializer.serializeToString(types));
+  }
+  zip.remove(part);
 }
 
 // An xsd:boolean that holds true.

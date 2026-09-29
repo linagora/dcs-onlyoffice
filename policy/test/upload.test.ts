@@ -548,4 +548,90 @@ describe('uploads', () => {
       }
     });
   });
+
+  describe('the removal of the Sensitivity Label Information part', () => {
+    // The custom properties of a stored package, by name.
+    async function propertyValues(stored: Uint8Array): Promise<Map<string, string>> {
+      const xml = (await (await JSZip.loadAsync(stored)).file('docProps/custom.xml')?.async('string')) ?? '<none/>';
+      const properties = Array.from(new DOMParser().parseFromString(xml, 'text/xml').getElementsByTagName('property'));
+      return new Map(properties.map((property) => [property.getAttribute('name') ?? '', property.textContent ?? '']));
+    }
+
+    async function preparedAndSigned(metadata: { properties: string | null; labelList: string | null }): Promise<{ stored: Uint8Array; bindingXml: string }> {
+      const { docx } = await prepared(await withLabelMetadata(await minimalDocx(), metadata), base('DEMO-FR:2/2.1'));
+      assert.ok(docx !== null);
+      return signedAndStored(docx);
+    }
+
+    it('removes the part, and keeps every organisation\'s label in custom properties', async () => {
+      const [applied, stale, removed] = [randomUUID(), randomUUID(), randomUUID()];
+      const THIRD_TENANT = '22222222-3333-4444-5555-666666666666';
+      const { stored, bindingXml } = await preparedAndSigned({
+        // Stale properties for each tenant that has an element.
+        properties:
+          wordLabelProperties(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT, 2) +
+          wordLabelProperties(stale, OTHER_TENANT, 9) +
+          wordLabelProperties(removed, THIRD_TENANT, 16),
+        labelList: wordLabelElement(SENSITIVITY_LABELS.nato, DEMO_TENANT) + wordLabelElement(applied, OTHER_TENANT) + wordLabelElement('', THIRD_TENANT, true),
+      });
+
+      const zip = await JSZip.loadAsync(stored);
+      assert.equal(zip.file('docMetadata/LabelInfo.xml'), null);
+      assert.doesNotMatch((await zip.file('_rels/.rels')?.async('string')) ?? '', /classificationlabels/);
+      assert.doesNotMatch((await zip.file('[Content_Types].xml')?.async('string')) ?? '', /LabelInfo/);
+      const values = await propertyValues(stored);
+      const names = [...values.keys()];
+      // The mapped tenant's label, as the platform writes it.
+      assert.equal(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_Name`), 'DCS-Diffusion-Restreinte-OTAN');
+      assert.equal(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_Method`), 'Privileged');
+      assert.ok(!names.some((name) => name.includes(SENSITIVITY_LABELS.diffusionRestreinte)));
+      // The other tenant's label, which only its element gave.
+      assert.deepEqual(
+        names.filter((name) => name.includes(applied)).map((name) => name.slice(`MSIP_Label_${applied}_`.length)),
+        ['Enabled', 'SetDate', 'Method', 'SiteId', 'ActionId', 'ContentBits'],
+      );
+      assert.equal(values.get(`MSIP_Label_${applied}_SiteId`), OTHER_TENANT);
+      assert.equal(values.get(`MSIP_Label_${applied}_Method`), 'Privileged');
+      assert.ok(!names.some((name) => name.includes(stale)));
+      // The third tenant's removed label does not come back.
+      assert.ok(!names.some((name) => name.includes(removed)));
+      assert.equal((await verifyWithXmlsec(stored, bindingXml, certificate)).status, 0);
+    });
+
+    it('keeps the date and the action id that custom properties alone gave the mapped tenant\'s label, while it stays', async () => {
+      const actionId = randomUUID();
+
+      const { stored } = await preparedAndSigned({ properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2, { actionId }), labelList: null });
+
+      const values = await propertyValues(stored);
+      assert.deepEqual([values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_SetDate`), values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_ActionId`)], [WORD_SET_DATE, actionId]);
+    });
+
+    for (const [kind, labelList] of [
+      ['applies the same label', wordLabelElement(SENSITIVITY_LABELS.nato, DEMO_TENANT)],
+      ['removed the label', wordLabelElement('', DEMO_TENANT, true)],
+    ] as const) {
+      it(`renews them when the tenant's element, which ${kind}, decided`, async () => {
+        const actionId = randomUUID();
+
+        const { stored } = await preparedAndSigned({ properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2, { actionId }), labelList });
+
+        const values = await propertyValues(stored);
+        assert.notEqual(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_SetDate`), WORD_SET_DATE);
+        assert.notEqual(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_ActionId`), actionId);
+        assert.equal(values.get(`MSIP_Label_${SENSITIVITY_LABELS.nato}_Enabled`), 'true');
+      });
+    }
+
+    it('leaves the properties of a tenant with several elements as they are', async () => {
+      const [first, second] = [randomUUID(), randomUUID()];
+      const properties = wordLabelProperties(first, OTHER_TENANT, 2);
+
+      const { stored } = await preparedAndSigned({ properties, labelList: wordLabelElement(first, OTHER_TENANT) + wordLabelElement(second, OTHER_TENANT) });
+
+      const values = await propertyValues(stored);
+      assert.equal(values.get(`MSIP_Label_${first}_Name`), 'Fictional label');
+      assert.ok(![...values.keys()].some((name) => name.includes(second)));
+    });
+  });
 });

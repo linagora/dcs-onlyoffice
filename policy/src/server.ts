@@ -506,6 +506,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
         return found === null ? code : labelCode(found.policy, withoutInformativeCategories(found.label));
       },
       labelMapping,
+      now,
     });
   }
 

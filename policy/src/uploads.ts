@@ -18,6 +18,7 @@ import {
   xmlPartOf,
 } from './opc.ts';
 import { bindingLabelXml, bindingVerdict, type DocumentLabelOf, type PackageLabels, packageBody, readPackageLabels } from './package-signing.ts';
+import { removeLabelInformation } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -94,6 +95,7 @@ export interface UploadOptions {
   baseLabelOf: (code: string) => string;
   // Null without a label mapping, which leaves sensitivity labels unread.
   labelMapping: LabelMapping | null;
+  now: () => Date;
 }
 
 // The portal passes each uploaded file to the policy service twice. First it
@@ -102,9 +104,11 @@ export interface UploadOptions {
 // Then the policy service writes the platform's parts into it as the panel
 // writes them: the base label part, and the binding of the document label
 // computed from that base label and the portion labels in clear, which
-// references the parts the package holds. The portal then has the binding
-// signed, as at a save. Both refuse what cannot become a document. The DOCX
-// body parser comes from acceptPackages.
+// references the parts the package holds. It also removes the Sensitivity
+// Label Information part, which Office could read instead of the label the
+// platform writes (ADR 0005). The portal then has the binding signed, as at
+// a save. Both routes refuse what cannot become a document. The DOCX body
+// parser comes from acceptPackages.
 export function registerUploads(app: FastifyInstance, options: UploadOptions): void {
   app.post('/uploads/read', async (request, reply) => {
     const received = packageBody(request, options.secret);
@@ -148,6 +152,8 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
     if (!computed.ok) {
       return refuse(reply, 'portion-labels');
     }
+    // The platform keeps sensitivity labels in custom properties only.
+    await removeLabelInformation(zip, options.labelMapping?.tenant ?? null, options.now());
     const parts = Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
     await writeCustomXmlPart(zip, mainPart, DOCUMENT_NAMESPACE, `<dcs:document xmlns:dcs="${DOCUMENT_NAMESPACE}" base="${escapeXml(base.code)}" label="${escapeXml(computed.code)}"/>`);
     await writeCustomXmlPart(zip, mainPart, BINDING_NAMESPACE, serializeDocumentBinding(computed.labelXml, bindablePartsOf(parts)));
