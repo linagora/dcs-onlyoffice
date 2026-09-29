@@ -205,6 +205,8 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     await dismissEditorTip(alice, 15_000);
     await alicePanel.getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
+    // The page's screen marking, above and below the editor.
+    await expect(alice.getByTestId('screen-marking')).toHaveText([DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE]);
     await options.capture(alice, '12-workbook-base-label');
     return id;
   });
@@ -258,6 +260,7 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     // The bubble he read the portion in closes.
     await expect(bubble(bob).owner()).toHaveCount(0);
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(WITH_MORE_RESTRICTIVE_PORTIONS);
+    await expect(bob.getByTestId('screen-marking')).toHaveText([WITH_MORE_RESTRICTIVE_PORTIONS, WITH_MORE_RESTRICTIVE_PORTIONS]);
     await options.capture(bob, '16-workbook-access-denied');
   });
 
