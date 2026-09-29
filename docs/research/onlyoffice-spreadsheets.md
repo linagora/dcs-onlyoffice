@@ -789,6 +789,32 @@ b297063cce0ac79d10a8efd382b0f90f3b9fd6615fac7f01c88f0288e5fa7372  [MS-OI29500].p
 13. **No-plaintext check.** Does the existing search of co-editing traffic, saved files and the Document Server's
     working files cover XLSX parts and spreadsheet change records as it covers DOCX ones?
 
+## 18. Answered with a live editor
+
+ONLYOFFICE 9.4 on the standalone stack, in Chromium, with two browsers in fast co-editing, on 29 September 2026. The
+end-to-end tests named here guard each answer, but the last but one.
+
+- **3. View mode.** The left panel that the portal loads for a read-only session runs in the spreadsheet viewer: it
+  shows the document label and sends the editor no command that writes, and the stored file stays as it was
+  ([workbook.spec.ts](../../e2e/tests/workbook.spec.ts)). A right panel in the spreadsheet viewer was not tried: the
+  portal never loads one there.
+- **4. User protected ranges in co-editing.** A range created in one browser reaches the other live, and each editor
+  enforces it for its own user: typing into it is refused, with the warning "This range is not allowed for editing.",
+  one per key typed, while typing elsewhere works ([workbook-portions.spec.ts](../../e2e/tests/workbook-portions.spec.ts)).
+  A range that lists no editor, made with `AddProtectedRange` then `DeleteUser` in one command, is saved as
+  `<userProtectedRange name="…" sqref="…">` without users, and stays without editors once the file is reopened.
+- **Lifting a range's lock (ADR 0006).** In a command, `Asc` holds only `scope`: the SDK's classes are out of reach.
+  `Api.GetActiveSheet().worksheet` is the internal model, whose names are not mangled. Shadowing `isUserCanEdit` on
+  the range's object, `worksheet.getUserProtectedRangeByName(title).obj`, for the command lets it write the range's
+  cells: the write reaches the co-author, the lift enters no history, and the range keeps no editor. Removing the range
+  with `worksheet.editUserProtectedRanges(range, null, true)` after the same lift reaches the co-author too.
+- **8. Undo, in part.** For one author, undoing and redoing a lifted change and a range's removal work. In co-editing,
+  undoing a change worked, but redoing it, and undoing a removal, did nothing. A throwaway test found it; nothing
+  guards it yet.
+- **13. No-plaintext check.** The search of the Document Server's working files opens every ZIP archive by its
+  signature, XLSX files and the spreadsheet editor's change archives included; after the workbook tests, it found no
+  portion text ([search-document-server.ts](../../e2e/scripts/search-document-server.ts)).
+
 <!-- Links -->
 
 [4774]: https://www.jedi-sec.us/downloads/MISC_PDF/ADatP-4774%20EDA%20V1%20E.pdf
