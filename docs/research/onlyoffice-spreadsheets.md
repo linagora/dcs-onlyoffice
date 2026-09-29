@@ -82,11 +82,12 @@ Conventions used below:
    `/xl/pivotTables/pivotTable<N>.xml`, `/xl/comments<N>.xml` and `/xl/media/*`, with the three `docProps` parts of
    Table 5-3. The binding part is related from `xl/workbook.xml`. Excel names chart style parts `style<N>.xml`, and
    ONLYOFFICE keeps that name. ONLYOFFICE writes several content-bearing parts the table omits (threaded comments,
-   pivot cache records, drawings, tables). The header and footer strings live in the sheet parts, so the page marking
-   is covered ([11](#11-the-adatp-47782-binding-of-a-spreadsheetml-package)).
+   pivot cache records, drawings, tables), which the platform's binding references too, as the profile allows. The
+   header and footer strings live in the sheet parts, so the page marking is covered
+   ([11](#11-the-adatp-47782-binding-of-a-spreadsheetml-package)).
 10. **The standards say nothing about cells or spreadsheet markings** beyond "paragraphs, sections, figures and
     tables" and SPIF marking codes for the top and bottom of "the page or viewing area"
-    ([11.4](#114-labelling-cells-or-ranges), [7.4](#74-what-the-standards-and-the-spif-say)).
+    ([11.5](#115-labelling-cells-or-ranges), [7.4](#74-what-the-standards-and-the-spif-say)).
 11. **Purview:** the same two carriers as in a DOCX. ONLYOFFICE keeps `docProps/custom.xml` and drops
     `docMetadata/LabelInfo.xml` in an XLSX too (Tested) ([12](#12-purview-label-metadata-in-an-xlsx)).
 12. **This repository:** the plugin's editor commands and snapshot parsing, its page-marking rules, the placeholder
@@ -595,7 +596,34 @@ Observations:
 - **Rewritten at each save.** `docProps/app.xml` (application `ONLYOFFICE/9.4.0.129`) and `docProps/core.xml`
   (modification time) change at every save, as in a DOCX (Tested).
 
-### 11.4 Labelling cells or ranges
+### 11.4 What the platform's binding references
+
+"Additional package files … MAY be referenced" (p. 5-4): the platform references, after the parts of Tables 5-2 and
+5-3, every part a workbook holds that can hold its content, so that a change to any of them breaks the signature
+(Implementation, #108):
+
+| Parts | What they hold |
+|---|---|
+| `xl/threadedComments/threadedComment<N>.xml`, `xl/persons/person.xml` | Threaded comments, which Excel shows instead of the legacy ones, and their authors; ONLYOFFICE writes the part for a comment added through the editor's API (Tested) |
+| `xl/drawings/drawing<N>.xml`, `xl/drawings/vmlDrawing<N>.vml` | Drawings, which place charts, pictures and text boxes on a sheet, and legacy VML drawings |
+| `xl/diagrams/*.xml`, `xl/charts/chartEx<N>.xml` | SmartArt diagrams and the charts of Excel 2016, which hold text and values |
+| `xl/pivotCache/pivotCacheDefinition<N>.xml`, `pivotCacheRecords<N>.xml` | Pivot caches, which copy cell values |
+| `xl/tables/table<N>.xml`, `xl/slicers/slicer<N>.xml`, `xl/slicerCaches/slicerCache<N>.xml` | Tables, slicers and their caches |
+| `xl/externalLinks/externalLink<N>.xml` | Links to other workbooks, with the values they cache |
+| `xl/richData/*.xml`, `xl/metadata.xml` | Rich values and cell metadata |
+| `xl/chartsheets/sheet<N>.xml` | Chart sheets |
+| `xl/queryTables/queryTable<N>.xml`, `xl/connections.xml` | Queries and their connections |
+| `xl/embeddings/*` | Embedded objects |
+
+It leaves out the theme (`xl/theme/`), the calculation chain (`xl/calcChain.xml`) and printer settings
+(`xl/printerSettings/`), which hold no content, with the package's relationships, its content types and the Custom XML
+parts, as in a text document. References to parts that are not XML state their content type, as Annex A requires:
+pictures, embedded objects and legacy VML drawings, which Office does not write as well-formed XML. The binding the
+panel writes during an editing session, which each save signs again, names the parts ONLYOFFICE wrote for every
+workbook in [11.3](#113-what-onlyoffice-writes-against-the-table-tested): `xl/workbook.xml`, `xl/styles.xml`,
+`xl/sharedStrings.xml`, `xl/worksheets/sheet1.xml`, `docProps/core.xml` and `docProps/app.xml`.
+
+### 11.5 Labelling cells or ranges
 
 - ADatP-4774 lets labels be bound to "portions of the information, including paragraphs, sections, figures and
   tables" ([ADatP-4774][4774] §4.2 p. 4-2); nothing names cells or ranges.

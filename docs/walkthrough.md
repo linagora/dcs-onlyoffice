@@ -126,7 +126,7 @@ A workbook's page marking goes into the centre of every sheet's headers and foot
 
 ## 20. The signed binding of a workbook
 
-Once both leave the editor, the stored workbook carries the page marking and a binding signed as a text document's, over the parts that ADatP-4778.2 lists for a workbook: `xmlsec1` verifies it the same way, as [step 8](#8-the-signed-binding) tells. This step has no picture.
+Once both leave the editor, the stored workbook carries the page marking and a binding signed as a text document's, over the parts that ADatP-4778.2 lists for a workbook and those that can hold its content beyond them: `xmlsec1` verifies it the same way, as [step 8](#8-the-signed-binding) tells. This step has no picture.
 
 ## The journal
 
