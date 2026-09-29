@@ -5,7 +5,7 @@ import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
 import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
-import { customXmlParts, loadPackage, partNamesOf } from './opc.ts';
+import { customXmlParts, holdsWorkbook, loadPackage, partNamesOf } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
 
@@ -13,8 +13,13 @@ const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 // The plugin's parts and tags (plugin/src/portions.ts).
 const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
+const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PLACEHOLDER_PART = /^word\/(document|header\d*|footer\d*)\.xml$/;
+const SPREADSHEET_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const WORKSHEET_PART = /^xl\/worksheets\/sheet\d+\.xml$/;
+// The extension in which ONLYOFFICE writes a sheet's user protected ranges.
+const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}';
 // Saved documents, pictures included, stay well below this.
 const PACKAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const STORED_CUSTOM_PROPERTIES_HEADER = 'x-stored-custom-properties';
@@ -193,13 +198,15 @@ function soleBinding(labels: PackageLabels): { ok: true; binding: PackageBinding
   return { ok: true, binding: binding ?? null };
 }
 
-// The bindings, the base label and the portion labels in clear of a package:
-// the placeholders' tags hold the portion labels the panel computes the
-// document label from.
+// The bindings, the base label and the portion labels in clear of a package,
+// from which the panel computes the document label: in a text document, the
+// placeholders' tags hold the portion labels; in a workbook, the portions'
+// parts do.
 export async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
   const bindings: PackageBinding[] = [];
   const unreadableBindings: string[] = [];
   let baseCode: string | null = null;
+  const partLabels = new Map<string, string>();
   for (const part of await customXmlParts(zip)) {
     const xml = (await zip.file(part)?.async('string')) ?? '';
     const parsed = parseXml(xml);
@@ -213,9 +220,21 @@ export async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
     if (root?.namespaceURI === DOCUMENT_NAMESPACE && root.localName === 'document') {
       baseCode = root.getAttribute('base') || null;
     }
+    const id = root?.getAttribute('id') || null;
+    const label = root?.getAttribute('label') || null;
+    if (root?.namespaceURI === PORTION_NAMESPACE && root.localName === 'portion' && id !== null && label !== null) {
+      partLabels.set(id, label);
+    }
   }
+  const portionCodes = holdsWorkbook(partNamesOf(zip)) ? await workbookPortionCodes(zip, partLabels) : await textDocumentPortionCodes(zip);
+  return { bindings, unreadableBindings, baseCode, portionCodes };
+}
+
+// The portion labels a text document's placeholders, its content controls,
+// hold in their tags.
+async function textDocumentPortionCodes(zip: JSZip): Promise<string[]> {
   const portionCodes: string[] = [];
-  for (const part of Object.keys(zip.files).filter((file) => PLACEHOLDER_PART.test(file))) {
+  for (const part of partNamesOf(zip).filter((file) => PLACEHOLDER_PART.test(file))) {
     const root = await rootOf(zip, part);
     for (const tag of Array.from(root?.getElementsByTagNameNS(WORD_NAMESPACE, 'tag') ?? [])) {
       const label = portionLabelOf(tag.getAttributeNS(WORD_NAMESPACE, 'val'));
@@ -224,7 +243,24 @@ export async function readPackageLabels(zip: JSZip): Promise<PackageLabels> {
       }
     }
   }
-  return { bindings, unreadableBindings, baseCode, portionCodes };
+  return portionCodes;
+}
+
+// The labels of a workbook's portions, by the portion id: a portion counts
+// when its part and its placeholder's user protected range, titled with its
+// id, are both present (ADR 0006).
+async function workbookPortionCodes(zip: JSZip, partLabels: ReadonlyMap<string, string>): Promise<string[]> {
+  const anchored = new Set<string>();
+  for (const part of partNamesOf(zip).filter((file) => WORKSHEET_PART.test(file))) {
+    const root = await rootOf(zip, part);
+    const extensions = Array.from(root?.getElementsByTagNameNS(SPREADSHEET_NAMESPACE, 'ext') ?? []).filter(
+      (extension) => extension.getAttribute('uri') === USER_PROTECTED_RANGES_EXTENSION,
+    );
+    for (const range of extensions.flatMap((extension) => Array.from(extension.getElementsByTagNameNS(SPREADSHEET_NAMESPACE, 'userProtectedRange')))) {
+      anchored.add(range.getAttribute('name') ?? '');
+    }
+  }
+  return [...partLabels].filter(([id]) => anchored.has(id)).map(([, label]) => label);
 }
 
 // A part's root element, null when the part is missing or not well-formed

@@ -81,6 +81,12 @@ export function partNamesOf(zip: JSZip): string[] {
   return Object.keys(zip.files).filter((name) => zip.files[name]?.dir === false);
 }
 
+// Whether a package, given by its part names, holds a workbook, whose part
+// SpreadsheetML names so, as ONLYOFFICE and Microsoft Excel write it.
+export function holdsWorkbook(partNames: readonly string[]): boolean {
+  return partNames.includes('xl/workbook.xml');
+}
+
 // The package part of that name, as the package spells it: part names match
 // without regard to case (ECMA-376 Part 2 §6.2.2.3).
 export function partNamed(zip: JSZip, name: string): string | null {
