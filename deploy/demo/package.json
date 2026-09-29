@@ -9,6 +9,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "docx": "9.7.2",
+    "jszip": "3.10.2",
     "typescript": "7.0.2"
   }
 }

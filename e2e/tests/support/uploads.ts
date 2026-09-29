@@ -13,9 +13,9 @@ export interface UploadedFile {
 // the page could, a code the form does not offer.
 export type RequestedLabel = 'carried' | { marking: string } | { code: string };
 
-// Uploads a file through the form of the portal's home page, and gives the
-// status of the portal's answer.
-export async function upload(page: Page, file: UploadedFile, label: RequestedLabel): Promise<number> {
+// Fills the form of the portal's home page with a file to upload and its
+// base label, ready to submit.
+export async function fillUploadForm(page: Page, file: UploadedFile, label: RequestedLabel): Promise<void> {
   await page.goto('/');
   const labels = page.getByLabel('Base label');
   if (label === 'carried') {
@@ -29,6 +29,12 @@ export async function upload(page: Page, file: UploadedFile, label: RequestedLab
     await labels.selectOption({ label: label.marking });
   }
   await page.getByLabel('DOCX file, up to 20 MB').setInputFiles(file);
+}
+
+// Uploads a file through the form of the portal's home page, and gives the
+// status of the portal's answer.
+export async function upload(page: Page, file: UploadedFile, label: RequestedLabel): Promise<number> {
+  await fillUploadForm(page, file, label);
   const response = page.waitForResponse((candidate) => candidate.url().endsWith('/documents/upload'));
   await page.getByRole('button', { name: 'Upload' }).click();
   return (await response).status();

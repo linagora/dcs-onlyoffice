@@ -16,7 +16,15 @@ export const DOMAIN: string = settingOf('DOMAIN') ?? 'dcs.localhost';
 
 // Whether browsers resolve the stack's host names to this machine by
 // themselves, as they resolve every name under localhost.
-export const RESOLVED_BY_BROWSERS: boolean = DOMAIN === 'localhost' || DOMAIN.endsWith('.localhost');
+const RESOLVED_BY_BROWSERS: boolean = DOMAIN === 'localhost' || DOMAIN.endsWith('.localhost');
+
+// The settings that lead Chromium and Firefox to the local reverse proxy
+// under a domain other than localhost, where no hosts-file change is then
+// needed; none under localhost, which the browsers resolve by themselves.
+export const CHROMIUM_RESOLVER_ARGS: string[] = RESOLVED_BY_BROWSERS ? [] : [`--host-resolver-rules=MAP *.${DOMAIN} 127.0.0.1`];
+export const FIREFOX_RESOLVER_PREFS: Record<string, string> = RESOLVED_BY_BROWSERS
+  ? {}
+  : { 'network.dns.localDomains': ['portail', 'docs', 'idp', 'tdf'].map((host) => `${host}.${DOMAIN}`).join(',') };
 
 // A setting of the stack under test, which must be set.
 export function deploymentSetting(name: string): string {

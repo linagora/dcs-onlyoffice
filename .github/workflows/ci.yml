@@ -32,7 +32,7 @@ jobs:
     name: End-to-end tests
     runs-on: ubuntu-24.04
     needs: checks
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -70,6 +70,18 @@ jobs:
       - name: Search the Document Server's working files for portion texts
         if: ${{ !cancelled() }}
         run: pnpm --filter @dcs/e2e search-document-server
+      # Once the suite has passed. Its portion texts carry no marker, which
+      # would show in the videos: the search comes first.
+      - name: Replay the demo, with a video of each person
+        run: pnpm --filter @dcs/e2e demo
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: demo-videos
+          path: |
+            e2e/test-results/demo/*/alice.webm
+            e2e/test-results/demo/*/bob.webm
+          retention-days: 14
       # Last, since the platform loses its tables until the setup runs again.
       - name: Check that the database setup hands the platform's objects over
         if: ${{ !cancelled() }}

@@ -1,4 +1,4 @@
-import { type Browser, expect, type Page } from '@playwright/test';
+import { type Browser, type BrowserContextOptions, expect, type Page } from '@playwright/test';
 import { DOMAIN } from './deployment.ts';
 import { watchEditorLoads } from './documents.ts';
 
@@ -32,9 +32,10 @@ export async function signIn(page: Page, account: DemoAccount): Promise<void> {
   await expect(page.getByText(`Signed in as ${account.name}`)).toBeVisible();
 }
 
-// A second, independent browser session, for co-editing scenarios.
-export async function signedInPage(browser: Browser, account: DemoAccount): Promise<Page> {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: `https://portail.${DOMAIN}` });
+// A second, independent browser session, for co-editing scenarios, with more
+// context options if need be, such as recording a video.
+export async function signedInPage(browser: Browser, account: DemoAccount, options: BrowserContextOptions = {}): Promise<Page> {
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: `https://portail.${DOMAIN}`, ...options });
   const page = await context.newPage();
   watchEditorLoads(page);
   await signIn(page, account);

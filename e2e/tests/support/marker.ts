@@ -23,3 +23,10 @@ export function markedText(words: string): MarkedText {
 export function canaryText(words: string): string {
   return `${words} ${Date.now()} ${CANARY_MARKER}`;
 }
+
+// A portion's text for screenshots and videos, without the marker, which
+// would show in them: they are not part of the suite whose traces the CI
+// searches.
+export function unmarkedText(text: string): MarkedText {
+  return text as MarkedText; // SAFETY: screenshots and videos are not part of the suite whose traces the CI searches
+}

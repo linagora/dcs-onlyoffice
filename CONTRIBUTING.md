@@ -37,12 +37,13 @@ pnpm test         # policy service API tests, no stack needed
 pnpm e2e          # end-to-end tests against the running stack
 pnpm --filter @dcs/e2e search-document-server   # then: no portion text among ONLYOFFICE's working files
 pnpm --filter @dcs/e2e check-internal-route     # the Document Server's route serves a document to its own token only
+pnpm --filter @dcs/e2e demo                     # the demo replayed, with a video of each person
 ```
 
-The CI runs the type checks, the API tests and the end-to-end tests on Chromium and Firefox, then searches the Document Server's working files for portion texts; it must pass.
+The CI runs the type checks, the API tests and the end-to-end tests on Chromium and Firefox, searches the Document Server's working files for portion texts, then replays the demo; it must pass.
 
 - **Browsers.** The end-to-end suite runs on Chromium. Tests of browser-specific behaviour carry the `@cross-browser` tag, and also run on Firefox.
-- **Screenshots.** When a page shown in the README changes, refresh the screenshots with `pnpm --filter @dcs/e2e captures`; the header of [`e2e/captures/captures.spec.ts`](e2e/captures/captures.spec.ts) says which stack it expects.
+- **Screenshots.** When a page shown in the README or the demo's walkthrough changes, refresh the screenshots with `pnpm --filter @dcs/e2e captures`, which takes both; the header of [`e2e/captures/captures.spec.ts`](e2e/captures/captures.spec.ts) says which stack it expects. The walkthrough and the replay of the demo play one scenario, [`e2e/demo/scenario.ts`](e2e/demo/scenario.ts): a change to the demo goes there.
 
 ## Conventions
 

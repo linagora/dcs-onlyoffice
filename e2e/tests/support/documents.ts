@@ -1,6 +1,7 @@
-import { expect, type Page, test } from '@playwright/test';
+import { errors, expect, type Page, test } from '@playwright/test';
 import JSZip from 'jszip';
 import { DOMAIN } from './deployment.ts';
+import { bubble } from './plugin.ts';
 
 // Annotation naming a document a test created; the page fixture attaches its
 // stored DOCX to the test's results as evidence.
@@ -274,4 +275,25 @@ export async function docxText(docx: Buffer): Promise<string> {
   return [...documentXml.matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)]
     .map(([paragraph]) => [...paragraph.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map(([, text]) => text).join(''))
     .join('\n');
+}
+
+// ONLYOFFICE greets each new browser with a tip about its latest feature,
+// drawn over the labelling panel: it goes once dismissed. Its button is a
+// plain element, without the button role.
+export async function dismissEditorTip(page: Page, timeout: number): Promise<void> {
+  try {
+    await page.frameLocator('iframe[name="frameEditor"]').getByText('Got it', { exact: true }).click({ timeout });
+  } catch (error: unknown) {
+    if (!(error instanceof errors.TimeoutError)) {
+      throw error;
+    }
+  }
+}
+
+// Puts the cursor at the start of the document, out of every portion: the
+// bubble closes, and the first page shows from its top.
+export async function moveCursorToStart(page: Page): Promise<void> {
+  await page.frameLocator('iframe[name="frameEditor"]').locator('#editor_sdk').click({ position: { x: 400, y: 300 } });
+  await page.keyboard.press('ControlOrMeta+Home');
+  await expect(bubble(page).owner()).toHaveCount(0);
 }
