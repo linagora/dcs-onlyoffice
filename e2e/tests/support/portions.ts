@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
+import JSZip from 'jszip';
 import { browserFetch, openNewDocument, requestForceSave } from './documents.ts';
-import { type DocxInspection, inspectDocx } from './docx.ts';
+import { type DocxInspection, inspectDocx, type PackageInspection } from './docx.ts';
 import type { MarkedText } from './marker.ts';
 import { pluginPanel } from './plugin.ts';
 import { inspectXlsx, type XlsxInspection } from './xlsx.ts';
@@ -60,6 +61,13 @@ export async function storedDocx(page: Page, documentId: string): Promise<DocxIn
   return inspectDocx(await storedFile(page, documentId));
 }
 
+// What the stored file of a text document or of a workbook holds.
+async function storedPackage(page: Page, documentId: string): Promise<PackageInspection> {
+  const file = await storedFile(page, documentId);
+  const zip = await JSZip.loadAsync(file);
+  return zip.file('xl/workbook.xml') === null ? inspectDocx(file) : inspectXlsx(file);
+}
+
 // Leaves the editor on every page that has the document open, then waits for
 // the Document Server to store it, which it does once the last editor has
 // left, with the number of portions the test expects.
@@ -74,7 +82,7 @@ export async function leaveAndWaitForSave(editors: Page[], documentId: string, p
     await editor.goto('/');
   }
   await expect
-    .poll(async () => (await storedDocx(first, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
+    .poll(async () => (await storedPackage(first, documentId)).portionParts.length, { timeout: 90_000, intervals: [3_000] })
     .toBe(portionCount);
 }
 
