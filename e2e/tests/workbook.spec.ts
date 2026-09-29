@@ -6,9 +6,9 @@ import { documentLogEntries, storeDocument } from './support/deployment.ts';
 import { browserFetch, editorPageConfig, openDocument, openNewDocument, waitForEditorReady } from './support/documents.ts';
 import { sensitivityLabelProperties } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
-import { pluginFrame, pluginPanel } from './support/plugin.ts';
+import { commentOnCells, pluginFrame, pluginPanel } from './support/plugin.ts';
 import { forceSavedXlsx, storedFile } from './support/portions.ts';
-import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { changedSinceSigning, demoCertificate, verifyBindingSignature } from './support/signature.ts';
 import { inspectXlsx, XLSX_TYPE } from './support/xlsx.ts';
 
 const WORKBOOK_TEMPLATE = 'exercise-northwind-logistics.xlsx';
@@ -187,11 +187,39 @@ test('a stored workbook changed outside the portal is logged when it is served, 
   await openDocument(page, documentId);
 
   await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
-  const logged = (servedTo: string): unknown =>
-    expect.objectContaining({ servedTo, reason: 'Parts changed since signing', changedParts: ['xl/worksheets/sheet1.xml'] });
-  await expect.poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId)).toContainEqual(logged('document-server'));
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
+    .toContainEqual(changedSinceSigning('document-server', ['xl/worksheets/sheet1.xml']));
 
   await storedFile(page, documentId);
 
-  await expect.poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId)).toContainEqual(logged('download'));
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
+    .toContainEqual(changedSinceSigning('download', ['xl/worksheets/sheet1.xml']));
+});
+
+// Microsoft Excel shows threaded comments rather than the legacy ones, which
+// ADatP-4778.2 Table 5-2 leaves out.
+const THREADED_COMMENT_PART = /^xl\/threadedComments\/threadedComment\d+\.xml$/;
+
+test('a stored workbook whose comment changed outside the portal is logged when it is served', async ({ page }) => {
+  const since = new Date();
+  const documentId = await labelledWorkbook(page);
+  await commentOnCells(await pluginFrame(page), 'B5', 'Fictional comment on the fuel');
+  const saved = await forceSavedXlsx(
+    page,
+    documentId,
+    (xlsx) => xlsx.bindableParts.some((part) => THREADED_COMMENT_PART.test(part)) && xlsx.bindings[0]?.signed === true,
+  );
+  const commentPart = saved.bindableParts.find((part) => THREADED_COMMENT_PART.test(part)) ?? '';
+  const zip = await JSZip.loadAsync(await storedFile(page, documentId));
+  const comment = (await zip.file(commentPart)?.async('string')) ?? '';
+  zip.file(commentPart, comment.replace('Fictional comment on the fuel', 'Fictional comment changed outside the portal'));
+  const changedId = await storedAsNewWorkbook(await zip.generateAsync({ type: 'uint8array' }), 'workbook-comment-check');
+
+  await storedFile(page, changedId);
+
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', changedId))
+    .toContainEqual(changedSinceSigning('download', [commentPart]));
 });

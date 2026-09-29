@@ -4,9 +4,36 @@ import { inspectPackage, type PackageInspection } from './docx.ts';
 
 export const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 // ADatP-4778.2 Tables 5-2 and 5-3 for SpreadsheetML, chart styles under the
-// table's name and under the one Microsoft Excel and ONLYOFFICE write.
-const BINDABLE_PART =
-  /^(xl\/(workbook|styles|sharedStrings)\.xml|xl\/worksheets\/sheet\d+\.xml|xl\/charts\/(chart|colors|styles?)\d+\.xml|xl\/pivotTables\/pivotTable\d+\.xml|xl\/comments\d+\.xml|xl\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
+// table's name and under the one Microsoft Excel and ONLYOFFICE write, and
+// the parts that can hold a workbook's content that the tables leave out, as
+// docs/research/onlyoffice-spreadsheets.md, section 11.4, lists them.
+const BINDABLE_PART = new RegExp(
+  '^(' +
+    [
+      String.raw`xl/(workbook|styles|sharedStrings|metadata|connections)\.xml`,
+      String.raw`xl/worksheets/sheet\d+\.xml`,
+      String.raw`xl/charts/(chart|colors|styles?)\d+\.xml`,
+      String.raw`xl/pivotTables/pivotTable\d+\.xml`,
+      String.raw`xl/comments\d+\.xml`,
+      String.raw`xl/media/.+`,
+      String.raw`docProps/(core|app|custom)\.xml`,
+      String.raw`xl/threadedComments/threadedComment\d+\.xml`,
+      String.raw`xl/persons/person\d*\.xml`,
+      String.raw`xl/drawings/(drawing\d+\.xml|vmlDrawing\d+\.vml)`,
+      String.raw`xl/diagrams/[^/]+\.xml`,
+      String.raw`xl/charts/chartEx\d+\.xml`,
+      String.raw`xl/pivotCache/pivotCache(Definition|Records)\d+\.xml`,
+      String.raw`xl/tables/table\d+\.xml`,
+      String.raw`xl/slicers/slicer\d+\.xml`,
+      String.raw`xl/slicerCaches/slicerCache\d+\.xml`,
+      String.raw`xl/externalLinks/externalLink\d+\.xml`,
+      String.raw`xl/richData/[^/]+\.xml`,
+      String.raw`xl/chartsheets/sheet\d+\.xml`,
+      String.raw`xl/queryTables/queryTable\d+\.xml`,
+      String.raw`xl/embeddings/.+`,
+    ].join('|') +
+    ')$',
+);
 const SPREADSHEET_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const WORKSHEET_PART = /^xl\/worksheets\/sheet\d+\.xml$/;
 // The extension in which ONLYOFFICE writes a sheet's user protected ranges.
