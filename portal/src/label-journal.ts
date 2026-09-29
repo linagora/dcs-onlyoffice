@@ -34,6 +34,13 @@ export interface PortionDeletion {
   before: PortionState;
 }
 
+// A DOCX a person brought into the portal as a new document, with the base
+// label they chose.
+export interface DocumentUpload {
+  documentId: string;
+  base: string;
+}
+
 // The journal of label changes, in the portal's log. Any editor can change a
 // label in the file, and the panel offers lower ones only to administrators:
 // the portal logs every lowering. The panel reports its own changes and
@@ -61,6 +68,10 @@ export class LabelJournal {
 
   recordPortionDeletion(deletion: PortionDeletion, user: string): void {
     this.#log.info({ ...deletion, user }, 'Portion deleted in the panel');
+  }
+
+  recordUpload(upload: DocumentUpload, user: string): void {
+    this.#log.info({ ...upload, user }, 'Document uploaded');
   }
 
   // What a save changed in the labels in clear of a stored file: its base

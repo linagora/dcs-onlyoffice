@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
+    "@fastify/multipart": "10.1.2",
     "@fastify/static": "10.1.5",
     "@xmldom/xmldom": "0.9.12",
     "fastify": "5.12.5",

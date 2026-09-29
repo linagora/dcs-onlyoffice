@@ -23,6 +23,7 @@ import { registerOpentdfRelay } from './opentdf-relay.ts';
 import { renderDocumentListPage, renderEditorPage, renderRestrictedDocumentPage, renderSavingDocumentPage } from './pages.ts';
 import { registerPluginRoutes } from './plugin-routes.ts';
 import { registerPolicyRelay } from './policy-relay.ts';
+import { labelsForUpload, registerUploads, UPLOAD_LIMIT_MEGABYTES } from './uploads.ts';
 
 interface DocumentParams {
   id: string;
@@ -78,14 +79,17 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   app.get('/', async (request, reply) => {
     const session = requireSession(request);
-    const [documents, templates] = await Promise.all([
+    const [documents, templates, uploadLabels] = await Promise.all([
       listDocuments(config.documentsDirectory),
       listTemplates(config.templatesDirectory),
+      labelsForUpload(config.policyInternalUrl, session.user, request.log),
     ]);
     baseLabels.retain(new Set(documents.map((document) => document.id)));
     const decisions = await documentAccess.decide(session.user, documents);
     const listed = documents.map((document, index) => ({ document, decision: decisions[index] ?? { open: false, reason: 'unavailable' } as const }));
-    return reply.type('text/html; charset=utf-8').send(renderDocumentListPage(session.user, listed, templates));
+    return reply
+      .type('text/html; charset=utf-8')
+      .send(renderDocumentListPage(session.user, listed, templates, { labels: uploadLabels, limitMegabytes: UPLOAD_LIMIT_MEGABYTES }));
   });
 
   app.get('/api/me', async (request) => requireSession(request).user);
@@ -104,6 +108,12 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       return reply.code(400).send({ error: 'Unknown template' });
     }
     return reply.redirect(`/documents/${document.id}/edit`, 303);
+  });
+  registerUploads(app, {
+    policyInternalUrl: config.policyInternalUrl,
+    documentsDirectory: config.documentsDirectory,
+    signatures: bindingSignatures,
+    journal: labelJournal,
   });
 
   const openEditor = (mode: EditorMode) => async (request: FastifyRequest<EditorRoute>, reply: FastifyReply): Promise<FastifyReply> => {
@@ -156,7 +166,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     bindingSignatures.checkAside(content, document.id, 'download');
     return reply
       .type(DOCX_CONTENT_TYPE)
-      .header('Content-Disposition', `attachment; filename="${document.fileName}"`)
+      .header('Content-Disposition', attachment(document.fileName, `${document.id}.docx`))
       .send(content);
   });
 
@@ -270,4 +280,11 @@ function readBaseLabelChange(body: unknown): { before: string | null; after: str
   const { before, after } = body;
   const isCode = (value: unknown): value is string | null => value === null || typeof value === 'string';
   return isCode(before) && isCode(after) ? { before, after } : null;
+}
+
+// A download's Content-Disposition (RFC 6266): the name in ASCII for older
+// clients, then in UTF-8 (RFC 8187), since an uploaded file keeps its own.
+function attachment(fileName: string, asciiName: string): string {
+  const encoded = encodeURIComponent(fileName).replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${asciiName}"; filename*=UTF-8''${encoded}`;
 }

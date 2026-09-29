@@ -1,7 +1,7 @@
 import { isAdministrator } from './auth/administrators.ts';
 import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentDecision, Marking } from './document-access.ts';
-import type { DocumentTemplate, StoredDocument } from './documents.ts';
+import { DOCX_CONTENT_TYPE, type DocumentTemplate, type StoredDocument } from './documents.ts';
 import type { SignedEditorConfig } from './editor-config.ts';
 import { firstDayOf, lastDayOf } from './validity-period.ts';
 
@@ -53,10 +53,24 @@ const STYLE = `
   form.clearance { display: grid; gap: 0.4rem; }
   form.clearance fieldset { border: 1px solid #e4e7eb; padding: 0.3rem 0.6rem; }
   form.clearance button { justify-self: start; }
+  form.upload { display: grid; gap: 0.6rem; justify-items: start; }
   .notice { padding: 0.5rem 0.8rem; border-radius: 4px; background: #e3f9e5; }
   .notice.error { background: #ffe3e3; }
   .label-swatch { display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.4rem; border-radius: 2px; vertical-align: middle; }
 `;
+
+// A label a person may give an uploaded document.
+export interface UploadLabel {
+  code: string;
+  marking: Marking;
+}
+
+// What the upload form offers: the labels the person's clearance allows,
+// null when the policy service cannot tell, and the largest file it takes.
+export interface UploadForm {
+  labels: UploadLabel[] | null;
+  limitMegabytes: number;
+}
 
 // A stored document, with what the signed-in person may do with it.
 export interface ListedDocument {
@@ -67,7 +81,7 @@ export interface ListedDocument {
 // A document the person may not open shows only its base label's marking:
 // its name and identifier can be sensitive too, and the restricted documents
 // come last, ordered by marking, so that their place reveals nothing either.
-export function renderDocumentListPage(user: UserIdentity, documents: ListedDocument[], templates: DocumentTemplate[]): string {
+export function renderDocumentListPage(user: UserIdentity, documents: ListedDocument[], templates: DocumentTemplate[], upload: UploadForm): string {
   const openRows = documents.flatMap(({ document, decision }) =>
     decision.open
       ? [
@@ -102,8 +116,26 @@ export function renderDocumentListPage(user: UserIdentity, documents: ListedDocu
   ${documentRows}
   <h2>Templates</h2>
   <p>${templateButtons}</p>
+  <h2>Upload</h2>
+  ${renderUploadForm(upload)}
 </main>`,
   );
+}
+
+// A DOCX and its base label, among those the person's clearance allows.
+function renderUploadForm(upload: UploadForm): string {
+  if (upload.labels === null) {
+    return '<p>Uploads are unavailable: the policy service cannot tell which labels your clearance allows. Try again later.</p>';
+  }
+  if (upload.labels.length === 0) {
+    return '<p>Your clearance allows no label to give an uploaded document.</p>';
+  }
+  const options = upload.labels.map((label) => `<option value="${escapeHtml(label.code)}">${escapeHtml(label.marking.text)}</option>`).join('');
+  return `<form class="upload" method="post" action="/documents/upload" enctype="multipart/form-data">
+  <label>DOCX file, up to ${upload.limitMegabytes} MB <input type="file" name="file" accept=".docx,${DOCX_CONTENT_TYPE}" required></label>
+  <label>Base label <select name="base" required>${options}</select></label>
+  <button type="submit">Upload</button>
+</form>`;
 }
 
 // The answer to the addresses of a document the person may not open, which
