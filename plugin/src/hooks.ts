@@ -3,7 +3,7 @@ import type { BubbleContent } from './bubble-channel.ts';
 import { PortionBubble } from './bubble.ts';
 import { describeError, logProblem } from './log.ts';
 import { messages } from './messages.ts';
-import { addInsertTabButton, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
+import { addInsertTabButton, type EditorType, editorTypeOf, offerContextMenu, onEditorEvent, type PluginInfo } from './onlyoffice.ts';
 import type { EnvelopeClient } from './envelopes.ts';
 import {
   type DocumentLabelRequest,
@@ -76,12 +76,12 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
   const [rereadProblem, setRereadProblem] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<DocumentState> => {
-    const current = await readDocumentState();
+    const current = await readDocumentState(editorTypeOf(await pluginReady));
     // Only a real change re-renders, so that polling stays cheap.
     setState((previous) => (previous !== null && sameState(previous, current) ? previous : current));
     setRereadProblem(null);
     return current;
-  }, []);
+  }, [pluginReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,10 +139,13 @@ export function useDocumentState(pluginReady: Promise<PluginInfo>): DocumentStat
 // other's portion, and the last writer wins: whoever may write and notices
 // that the stored label or its page marking is stale rewrites both. So does
 // the first author to open a labelled document that has no page marking yet.
+// In a workbook, where the panel reads no page marking, only the stored label
+// counts. Nothing is written until the editor is known.
 export function useDocumentLabel(
   request: DocumentLabelRequest | null,
   stored: Pick<DocumentState, 'documentLabelCode' | 'pageMarking'> | null,
   canWrite: boolean,
+  editor: EditorType | null,
 ): LabelView | null {
   const [label, setLabel] = useState<LabelView | null>(null);
   useEffect(() => {
@@ -158,10 +161,9 @@ export function useDocumentLabel(
       setLabel(computed.label);
       const storedLabelCode = stored?.documentLabelCode ?? null;
       const pageMarking = stored?.pageMarking ?? null;
-      const stale =
-        storedLabelCode !== computed.label.code || pageMarking?.labelCode !== computed.label.code || pageMarking.text !== computed.label.marking.text;
-      if (canWrite && storedLabelCode !== null && stale) {
-        await writeDocumentLabel(request);
+      const staleMarking = editor === 'word' && (pageMarking?.labelCode !== computed.label.code || pageMarking.text !== computed.label.marking.text);
+      if (canWrite && editor !== null && storedLabelCode !== null && (storedLabelCode !== computed.label.code || staleMarking)) {
+        await writeDocumentLabel(request, editor);
       }
     };
     compute().catch((error: unknown) => {
@@ -173,7 +175,7 @@ export function useDocumentLabel(
     return () => {
       cancelled = true;
     };
-  }, [request, stored, canWrite]);
+  }, [request, stored, canWrite, editor]);
   return label;
 }
 

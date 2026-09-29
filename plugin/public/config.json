@@ -33,7 +33,8 @@
       ],
       "isViewer": true,
       "EditorsSupport": [
-        "word"
+        "word",
+        "cell"
       ],
       "type": "panelRight",
       "isVisual": true,

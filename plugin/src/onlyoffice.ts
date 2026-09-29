@@ -8,6 +8,8 @@ export interface PluginInfo {
   userId?: unknown;
   userName?: unknown;
   isViewMode?: unknown;
+  // word in the text editor, cell in the spreadsheet editor.
+  editorType?: unknown;
   // The options the host gave this plugin in the editor configuration.
   options?: unknown;
   [field: string]: unknown;
@@ -69,6 +71,14 @@ declare global {
   interface Window {
     Asc?: AscRuntime;
   }
+}
+
+// The editor the plugin runs in: ONLYOFFICE's text editor, which edits text
+// documents, or its spreadsheet editor, which edits workbooks.
+export type EditorType = 'word' | 'cell';
+
+export function editorTypeOf(info: PluginInfo): EditorType {
+  return info.editorType === 'cell' ? 'cell' : 'word';
 }
 
 let ready: Promise<PluginInfo> | null = null;

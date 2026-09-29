@@ -1,5 +1,6 @@
-// The subset of the ONLYOFFICE Office JavaScript API used inside commands.
-// These globals only exist in the editor's command sandbox.
+// The subset of the ONLYOFFICE Office JavaScript API used inside commands:
+// the text editor's, and the spreadsheet editor's. These globals only exist
+// in the editor's command sandbox.
 
 export interface ApiColor {
   readonly kind?: 'color';
@@ -97,4 +98,13 @@ export interface OfficeApi {
   GetDocument(): ApiDocument;
   CreateBlockLvlSdt(): ApiBlockLvlSdt;
   HexColor(hex: string): ApiColor;
+}
+
+// A worksheet gives the workbook's Custom XML parts, whichever sheet it is.
+export interface ApiWorksheet {
+  GetCustomXmlParts(): ApiCustomXmlParts;
+}
+
+export interface SpreadsheetApi {
+  GetActiveSheet(): ApiWorksheet;
 }

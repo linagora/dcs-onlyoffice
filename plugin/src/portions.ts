@@ -11,8 +11,9 @@ import type {
   HeaderFooterType,
   OfficeApi,
 } from './office-api.ts';
-import { runCommand } from './onlyoffice.ts';
+import { type EditorType, runCommand } from './onlyoffice.ts';
 import { type DocumentLabel, type DocumentLabelRequest, fetchAdatp4774, fetchDocumentLabel, fetchLabelAttributes, type LabelView } from './policy.ts';
+import { readWorkbookCommand, writeWorkbookLabelCommand } from './workbook-commands.ts';
 
 export const PORTION_NAMESPACE = 'urn:linagora:dcs:portion:1';
 export const DOCUMENT_NAMESPACE = 'urn:linagora:dcs:document:1';
@@ -108,7 +109,7 @@ interface DocumentLabelScope {
   pageMarking: PageMarkingScope;
 }
 
-interface CommandScope extends DocumentLabelScope {
+export interface CommandScope extends DocumentLabelScope {
   portion: PortionWriteScope | null;
   portionNamespace: string;
   documentNamespace: string;
@@ -131,7 +132,7 @@ interface HeaderFooterSnapshot {
   blocks: (ControlSnapshot | null)[] | null;
 }
 
-interface DocumentSnapshot {
+export interface DocumentSnapshot {
   controls: { tag: string; internalId: string }[];
   portionParts: string[];
   documentParts: string[];
@@ -476,12 +477,12 @@ async function writeLabelling(portion: PortionWriteScope, documentLabel: Documen
   return written === true ? { status: 'written' } : { status: 'not-written' };
 }
 
-// Rewrites the document label, and its page marking, from the base label and
-// the portions' labels.
-export async function writeDocumentLabel(request: DocumentLabelRequest): Promise<boolean> {
+// Rewrites the document label, and in a text document its page marking, from
+// the base label and the portions' labels.
+export async function writeDocumentLabel(request: DocumentLabelRequest, editor: EditorType): Promise<boolean> {
   const documentLabel = await fetchDocumentLabel(request);
   const done = await runCommand(
-    writeLabellingCommand,
+    editor === 'cell' ? writeWorkbookLabelCommand : writeLabellingCommand,
     { portion: null, ...documentLabelScope(documentLabel, request.baseLabelCode) },
     true,
     (result) => (result === true ? true : null),
@@ -490,9 +491,9 @@ export async function writeDocumentLabel(request: DocumentLabelRequest): Promise
 }
 
 // Portions in document order, each joined with the content of its part.
-export async function readDocumentState(): Promise<DocumentState> {
+export async function readDocumentState(editor: EditorType): Promise<DocumentState> {
   const snapshot = await runCommand(
-    readDocumentCommand,
+    editor === 'cell' ? readWorkbookCommand : readDocumentCommand,
     { portionNamespace: PORTION_NAMESPACE, documentNamespace: DOCUMENT_NAMESPACE },
     false,
     parseSnapshot,
