@@ -232,6 +232,10 @@ Sign in with one of the fictional accounts below: the password is the login.
 
 `alice` reads every label of the demo policy, `bob` every label but DIFFUSION RESTREINTE – SPÉCIAL FRANCE, and `chloe` only NON PROTÉGÉ. `dan` and `erin`, who hold no valid clearance, open no document. The accounts come from [`deploy/idp/users.json`](deploy/idp/users.json), their clearances from [`deploy/directory/seeds/demo.json`](deploy/directory/seeds/demo.json).
 
+### Walk through the demo
+
+[docs/walkthrough.md](docs/walkthrough.md) follows the demo scenario step by step, with pictures: a base label, portions, co-editing, a change the co-author sees, a raise to SPÉCIAL FRANCE that shuts the allied officer out, a deletion, the page markings, the signed binding, a revocation and an upload. `pnpm --filter @dcs/e2e demo` replays it with a video of each person's browser, and the CI keeps each run's videos for 14 days.
+
 ### Deploy
 
 [docs/hosting.md](docs/hosting.md) describes the hosted mode, behind an existing reverse proxy that terminates TLS and with your own OpenID Connect provider: DNS and TLS, the two clients to register at the provider, the settings of `deploy/.env`, the hosted accounts' clearances, the nginx site of [`deploy/nginx`](deploy/nginx/dcs.conf.template), and the checks once the stack runs.
