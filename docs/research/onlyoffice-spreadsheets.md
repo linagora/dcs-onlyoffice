@@ -72,7 +72,9 @@ Conventions used below:
    and footers, coloured with `&K` codes. There is no public API, but the internal model reachable from `callCommand`
    records history and persists (Tested). Excel limits each string to 255 characters; ONLYOFFICE's dialog enforces
    255, its model and save path do not (Tested). They are drawn only when printing, in print preview and in PDF: **the
-   editor shows no page marking on screen** ([7](#7-page-marking-in-headers-and-footers)).
+   editor shows no page marking on screen** ([7](#7-page-marking-in-headers-and-footers)). The portal's page shows the
+   document label above and below the editor instead, as the workbook's screen marking, which the panel keeps up to
+   date by messages to the page (Implementation, #107).
 8. **Co-editing:** a plugin's command takes no cell lock, and the server relays changes without checking locks. In
    fast mode, the editor sends changes within 40 ms, but neither sends nor applies any while the local user is editing
    a cell. A command is one undo step; in view mode its writes are undone (Implementation,

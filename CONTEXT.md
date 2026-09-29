@@ -86,6 +86,10 @@ _Avoid_: global label, rollup
 The marking of the document label, repeated at the top and the bottom of every page. In a text document it sits in a place of its own that authors cannot edit; in a workbook, in the headers and footers of every sheet, which only printing and PDF show.
 _Avoid_: banner, header label
 
+**Screen marking**:
+The marking of a workbook's document label, shown above and below its editor on the portal's page, in the label's colour, since the spreadsheet editor shows the page marking only when printing.
+_Avoid_: banner
+
 **Journal**:
 The record of label changes: each change of a base label or of a protected portion, each deletion of a protected portion and each protection of existing content, made in the panel, with who made it; each upload, with the label read from the file and the base label it got; and each save that lowers a label or removes a protected portion, with who took part in the editing session. It never holds a portion's text.
 _Avoid_: audit trail, history

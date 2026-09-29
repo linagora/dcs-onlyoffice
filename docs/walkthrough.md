@@ -78,7 +78,7 @@ The report's paragraph on transport turns out to be for French eyes only. Alice 
 
 ## 12. A workbook
 
-The same scenario goes on in a workbook. Alice creates one from the `exercise-northwind-logistics.xlsx` template, which opens in ONLYOFFICE's spreadsheet editor with the same labelling panel, and gives it the base label DIFFUSION RESTREINTE.
+The same scenario goes on in a workbook. Alice creates one from the `exercise-northwind-logistics.xlsx` template, which opens in ONLYOFFICE's spreadsheet editor with the same labelling panel, and gives it the base label DIFFUSION RESTREINTE. Above and below the editor, the portal's page shows the document label in its colour, the workbook's screen marking, which follows each label the panel computes.
 
 ![The spreadsheet editor, with the labelling panel and the document label DIFFUSION RESTREINTE](screenshots/walkthrough/12-workbook-base-label.png)
 
@@ -120,7 +120,7 @@ The last two rows of supplies turn out to be for French eyes only. Alice selects
 
 ## 19. The page marking of a workbook
 
-A workbook's page marking goes into the centre of every sheet's headers and footers, first and even pages included: the spreadsheet editor shows it only when printing, in the print preview (**File**, **Print**) and in a PDF, while the panel shows the document label on screen.
+A workbook's page marking goes into the centre of every sheet's headers and footers, first and even pages included: the spreadsheet editor shows it only when printing, in the print preview (**File**, **Print**) and in a PDF, while the screen marking shows the document label on screen.
 
 ![The print preview, with the page marking at the top and the bottom of the page](screenshots/walkthrough/19-workbook-print-preview.png)
 
