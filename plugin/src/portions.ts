@@ -54,6 +54,9 @@ export const EDITORS: Readonly<
       editsPortions: boolean;
       // Reads the selected content the panel protects.
       readSelection: () => SelectionReading;
+      // Whether the portal's page shows the document label around the
+      // editor, since its pages show no page marking on screen.
+      screenMarked: boolean;
       selectPlaceholder: (portion: StoredPortion) => Promise<void>;
       // Reads which portion's placeholder holds the selection, at each change
       // of the selection, where the editor tells it through no event of its
@@ -74,6 +77,7 @@ export const EDITORS: Readonly<
     insertsPortions: true,
     editsPortions: true,
     readSelection: readParagraphsCommand,
+    screenMarked: false,
     selectPlaceholder: async (portion) => {
       await callEditorMethod('SelectContentControl', [portion.internalId]);
     },
@@ -89,6 +93,7 @@ export const EDITORS: Readonly<
     insertsPortions: true,
     editsPortions: true,
     readSelection: readSelectionCommand,
+    screenMarked: true,
     selectPlaceholder: async (portion) => {
       const scope = { rangeTitle: portion.id } satisfies SelectionScope;
       const selected = await runCommand(selectPlaceholderCommand, scope, false, (result) => (typeof result === 'boolean' ? result : null));

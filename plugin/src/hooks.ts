@@ -24,7 +24,7 @@ import {
   releasePortionLockOnLeave,
   takePortionLock,
 } from './policy.ts';
-import { reportPortionChange, reportPortionDeletion } from './portal.ts';
+import { reportPortionChange, reportPortionDeletion, sendScreenMarking } from './portal.ts';
 import { writeFailureOf } from './PortionForm.tsx';
 import {
   changePortion,
@@ -235,6 +235,18 @@ export function useDocumentLabel(
     };
   }, [request, stored, canWrite, editor]);
   return label;
+}
+
+// The portal's page around a workbook's editor shows its document label above
+// and below it, which the spreadsheet editor leaves out on screen: the panel
+// tells the page each label it computes. The hook only sends, hence no return
+// value.
+export function useScreenMarking(label: LabelView | null, editor: EditorType | null): void {
+  useEffect(() => {
+    if (label !== null && editor !== null && EDITORS[editor].screenMarked) {
+      sendScreenMarking(label.marking);
+    }
+  }, [label, editor]);
 }
 
 const RETRY_INTERVAL_MS = 3_000;

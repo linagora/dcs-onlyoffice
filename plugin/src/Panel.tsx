@@ -9,6 +9,7 @@ import {
   useDocumentLabel,
   useDocumentState,
   useMenuEntryPoints,
+  useScreenMarking,
   useLoadable,
   usePortionBubble,
   type PortionNotice,
@@ -118,6 +119,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     [policy, baseLabelCode, documentState],
   );
   const documentLabel = useDocumentLabel(labelRequest, documentState, !readOnly, editorType);
+  useScreenMarking(documentLabel, editorType);
 
   const requestFromMenu = useCallback((request: EntryPointRequest): void => {
     if (request === 'insertion') {
