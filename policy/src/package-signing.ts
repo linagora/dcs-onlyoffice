@@ -15,6 +15,7 @@ import {
 } from './binding-signature.ts';
 import { customXmlParts, declaredContentTypes, loadPackage, mainPartOf, partNamesOf } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
+import type { SignatureTrust } from './signature-trust.ts';
 import { parseXml } from './xml.ts';
 
 export const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -43,6 +44,8 @@ export type DocumentLabelOf = (baseCode: string | null, portionCodes: string[]) 
 export interface PackageSignatureOptions {
   secret: string;
   signer: BindingSigner;
+  // What a binding signature's certificate is trusted by.
+  trust: SignatureTrust;
   documentLabelOf: DocumentLabelOf;
   // The code of the label an ADatP-4774 label element designates, null when
   // it designates no valid label.
@@ -128,7 +131,7 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // and the signature does not cover it: the verdict names it.
     const labelInformationPart = await labelInformationPartOf(zip);
     const served = { documentId: headerOf(request, DOCUMENT_ID_HEADER), latestSignature: headerOf(request, LATEST_SIGNATURE_HEADER) };
-    return { ...(await bindingVerdict(zip, await readPackageLabels(zip), options.signer.certificate, served)), labelInformationPart };
+    return { ...(await bindingVerdict(zip, await readPackageLabels(zip), options.trust, served)), labelInformationPart };
   });
 }
 
@@ -186,13 +189,13 @@ export function bindingLabelXml(binding: PackageBinding): string | null {
   return binding.root.getElementsByTagNameNS(LABEL_NAMESPACE, 'originatorConfidentialityLabel')[0]?.toString() ?? null;
 }
 
-// What a package's binding signature says against the certificate: valid,
+// What a package's binding signature says under the trust configured: valid,
 // altered, unsigned, or no labels at all. `served` says which document the
 // portal serves it as, if it does.
 export async function bindingVerdict(
   zip: JSZip,
   labels: PackageLabels,
-  certificate: string,
+  trust: SignatureTrust,
   served: ServedDocument = { documentId: null, latestSignature: null },
 ): Promise<BindingVerification | { status: 'unlabelled' }> {
   const sole = soleBinding(labels);
@@ -204,7 +207,7 @@ export async function bindingVerdict(
   }
   const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
   const names = partNamesOf(zip);
-  return verifyDocumentBinding(bindingXml, await partsOf(zip, names), await bindablePartsOf(zip, sole.binding.part), certificate, served);
+  return verifyDocumentBinding(bindingXml, await partsOf(zip, names), await bindablePartsOf(zip, sole.binding.part), trust, served);
 }
 
 // The package's one binding, null when it holds neither a binding nor a base

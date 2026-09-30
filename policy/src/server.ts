@@ -29,6 +29,7 @@ import type { SecurityPolicy } from './spif/model.ts';
 import { policyNamed } from './spif/lookup.ts';
 import { PortionLocks, registerPortionLocks } from './portion-locks.ts';
 import type { MappedSensitivityLabel } from './sensitivity-label.ts';
+import { signatureTrust } from './signature-trust.ts';
 import { loadPolicies } from './spif/reader.ts';
 import { type ReadLabel, registerUploads } from './uploads.ts';
 
@@ -40,8 +41,11 @@ export interface PolicyServerOptions {
   // Shared with the portal, which alone administers the clearance directory.
   directoryAdministrationSecret?: string;
   // The key and certificate that sign document label bindings, with the
-  // secret the portal holds to ask for signatures.
-  bindingSignature?: { signer: BindingSigner; secret: string };
+  // secret the portal holds to ask for signatures; the certificates of the
+  // authorities that issue signing certificates, and their revocation lists,
+  // as PEM, one after the other. Without authorities, the signing certificate
+  // alone is trusted.
+  bindingSignature?: { signer: BindingSigner; secret: string; trustAnchors?: string; revocationLists?: string };
   markingLanguage?: string;
   reviewPeriodYears?: number;
   rollupRule?: RollupRule;
@@ -478,9 +482,12 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
       const result = documentLabelUnder(base.policy, base.label, portionCodes);
       return result.ok ? { ok: true, code: labelCode(base.policy, result.label), labelXml: originatorLabelXml(base.policy, result.label, null) } : result;
     };
+    const trust = signatureTrust(bindingSignature.signer.certificate, bindingSignature.trustAnchors ?? '', bindingSignature.revocationLists ?? '', now());
     acceptPackages(app);
     registerPackageSignatures(app, {
-      ...bindingSignature,
+      secret: bindingSignature.secret,
+      signer: bindingSignature.signer,
+      trust,
       now,
       sensitivityLabelOf,
       codeOfLabelXml: (xml) => {
@@ -492,7 +499,7 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     // Uploads share the portal's secret, and end signed as a save.
     registerUploads(app, {
       secret: bindingSignature.secret,
-      certificate: bindingSignature.signer.certificate,
+      trust,
       documentLabelOf,
       readLabelCode: (code) => {
         const found = labelOfCode(code);

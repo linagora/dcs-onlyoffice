@@ -45,19 +45,25 @@ if (directoryHost !== '') {
 }
 
 // Without its key, its certificate and the secret it shares with the portal,
-// the service signs no binding. The key and the certificate are base64-encoded
-// PEM, which keeps each on one line of deploy/.env.
+// the service signs no binding. The key, the certificate, the certificates of
+// the authorities trusted to issue signing certificates and their revocation
+// lists are base64-encoded PEM, which keeps each on one line of deploy/.env;
+// the last two may hold several. Without authorities, the signing
+// certificate alone is trusted.
 const signingKey = process.env.BINDING_SIGNING_KEY ?? '';
 const signingCertificate = process.env.BINDING_SIGNING_CERTIFICATE ?? '';
 const signatureSecret = process.env.BINDING_SIGNATURE_SECRET ?? '';
 if (signingKey !== '' && signingCertificate !== '' && signatureSecret !== '') {
   options.bindingSignature = {
     secret: signatureSecret,
-    signer: {
-      privateKey: Buffer.from(signingKey, 'base64').toString('utf8'),
-      certificate: Buffer.from(signingCertificate, 'base64').toString('utf8'),
-    },
+    signer: { privateKey: decodedPem(signingKey), certificate: decodedPem(signingCertificate) },
+    trustAnchors: decodedPem(process.env.BINDING_TRUST_ANCHORS ?? ''),
+    revocationLists: decodedPem(process.env.BINDING_REVOCATION_LISTS ?? ''),
   };
+}
+
+function decodedPem(base64: string): string {
+  return Buffer.from(base64, 'base64').toString('utf8');
 }
 
 const server = await buildPolicyServer(options);

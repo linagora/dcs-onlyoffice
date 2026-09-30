@@ -770,7 +770,7 @@ describe('the signature of the document label binding', () => {
     });
   });
 
-  it('finds a binding changed since signing, or signed with another key, altered', async () => {
+  it('finds a binding changed since signing altered, and one signed with another key untrusted', async () => {
     const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
     const relabelled = await withChangedPart(signed, 'customXml/item1.xml', (xml) =>
       xml.replace('<slab:Classification>DIFFUSION RESTREINTE</slab:Classification>', '<slab:Classification>NON PROTÉGÉ</slab:Classification>'),
@@ -779,8 +779,27 @@ describe('the signature of the document label binding', () => {
     const signedElsewhere = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE), otherSigner);
     await otherSigner.close();
 
-    for (const docx of [relabelled, signedElsewhere]) {
-      assert.deepEqual(await verdictOf(docx), {
+    assert.deepEqual(await verdictOf(relabelled), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'The signature does not hold', changedParts: [], labelInformationPart: null },
+    });
+    // Without trusted authorities, the service trusts its own certificate
+    // alone.
+    assert.deepEqual(await verdictOf(signedElsewhere), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'The signing certificate is not trusted', changedParts: [], labelInformationPart: null },
+    });
+  });
+
+  it('finds a signature whose certificate was replaced, by another one or by what is none, altered', async () => {
+    const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+    const otherCertificate = (await readFile(path.join(keys, 'other-signer.pem'), 'utf8')).replace(/-----[A-Z ]+-----|\s/g, '');
+
+    for (const replacement of [otherCertificate, Buffer.from('no certificate').toString('base64')]) {
+      const replaced = await withChangedPart(signed, BINDING_PART, (xml) =>
+        xml.replace(/<X509Certificate>[^<]*<\/X509Certificate>/, `<X509Certificate>${replacement}</X509Certificate>`),
+      );
+      assert.deepEqual(await verdictOf(replaced), {
         statusCode: 200,
         body: { status: 'altered', reason: 'The signature does not hold', changedParts: [], labelInformationPart: null },
       });

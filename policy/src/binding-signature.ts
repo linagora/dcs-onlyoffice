@@ -1,8 +1,9 @@
-import { type BinaryLike, createHash, createPrivateKey, createPublicKey, type KeyLike, KeyObject, sign, verify } from 'node:crypto';
+import { type BinaryLike, createHash, createPrivateKey, createPublicKey, type KeyLike, KeyObject, sign, verify, X509Certificate } from 'node:crypto';
 import type { Element } from '@xmldom/xmldom';
 import { type HashAlgorithm, type SignatureAlgorithm, SignedXml } from 'xml-crypto';
 import { escapeXml } from './adatp4774.ts';
 import { BINDING_NAMESPACE, DOCUMENT_BINDING_ID, packPartName, packUri, serializeDocumentBinding } from './adatp4778.ts';
+import { type DistrustReason, distrustOf, type SignatureTrust } from './signature-trust.ts';
 import { childElements, childrenNamed, parseXml } from './xml.ts';
 
 const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
@@ -27,6 +28,7 @@ export type AlterationReason =
   | 'The binding is not well-formed XML'
   | 'The binding holds what its signature does not cover'
   | 'The signature does not hold'
+  | DistrustReason
   | 'Parts changed since signing'
   | 'Signed for another document'
   | 'The signature names no document'
@@ -173,22 +175,24 @@ export function signedDocumentBinding(
   return { xml, signatureValue: signatureValueOf(signed) };
 }
 
-// Verifies a document label binding against the certificate the policy
-// service signs with. Only a binding as signedDocumentBinding writes it counts:
+// Verifies a document label binding against the certificates the policy
+// service trusts. Only a binding as signedDocumentBinding writes it counts:
 // the signature and the MetadataBinding it covers, nothing beside them; the
-// signature's algorithms alone, the configured certificate rather than the
-// one in KeyInfo, and references to the MetadataBinding, the Manifest and the
-// signature properties. The package parts the signed Manifest names are then
-// digested again. A part among `bindable`, those the binding would reference
-// now, that the Manifest does not name counts as changed too: it was added
-// since signing, or an earlier signature left it out. A package whose parts
-// are unchanged is then checked against the document it is served as: the
-// one its signature names, and the latest signature the portal stored for it.
+// signature's algorithms alone, and references to the MetadataBinding, the
+// Manifest and the signature properties. The signature must hold with the
+// certificate its KeyInfo holds, and that certificate be trusted at the
+// signing time its properties give. The package parts the signed Manifest
+// names are then digested again. A part among `bindable`, those the binding
+// would reference now, that the Manifest does not name counts as changed too:
+// it was added since signing, or an earlier signature left it out. A package
+// whose parts are unchanged is then checked against the document it is
+// served as: the one its signature names, and the latest signature the
+// portal stored for it.
 export function verifyDocumentBinding(
   bindingXml: string,
   parts: ReadonlyMap<string, Uint8Array>,
   bindable: readonly string[],
-  certificate: string,
+  trust: SignatureTrust,
   served: ServedDocument,
 ): BindingVerification {
   const parsed = parseXml(bindingXml);
@@ -202,7 +206,11 @@ export function verifyDocumentBinding(
   if (!holdsOnlySignedContent(parsed.root)) {
     return bindingAltered('The binding holds what its signature does not cover');
   }
-  const verifier = new SignedXml({ publicCert: certificate, getCertFromKeyInfo: () => null });
+  const certificate = signingCertificateOf(signature);
+  if (certificate === null) {
+    return bindingAltered('The signature does not hold');
+  }
+  const verifier = new SignedXml({ publicCert: certificate.toString(), getCertFromKeyInfo: () => null });
   verifier.SignatureAlgorithms = { [ECDSA_SHA256]: EcdsaSha256 };
   verifier.HashAlgorithms = { [SHA384]: Sha384 };
   const expectedReferences = [DOCUMENT_BINDING_ID, MANIFEST_ID, PROPERTIES_ID].map((id) => `#${id}`);
@@ -210,6 +218,11 @@ export function verifyDocumentBinding(
   const manifest = holds ? signedElement(verifier.getSignedReferences(), 'Manifest') : null;
   if (manifest === null || verifier.getReferences().map((reference) => reference.uri).join(' ') !== expectedReferences.join(' ')) {
     return bindingAltered('The signature does not hold');
+  }
+  const properties = signedElement(verifier.getSignedReferences(), 'SignatureProperties');
+  const distrust = distrustOf(certificate, signingTimeOf(properties), trust);
+  if (distrust !== null) {
+    return bindingAltered(distrust);
   }
   const references = childrenNamed(manifest, SIGNATURE_NAMESPACE, 'Reference').map((reference) => {
     const uri = reference.getAttribute('URI') ?? '';
@@ -227,8 +240,7 @@ export function verifyDocumentBinding(
   if (changedParts.length > 0) {
     return { status: 'altered', reason: 'Parts changed since signing', changedParts };
   }
-  const properties = signedElement(verifier.getSignedReferences(), 'SignatureProperties');
-  const signedDocument = properties?.getElementsByTagNameNS(SIGNED_DOCUMENT_NAMESPACE, 'document')[0]?.textContent ?? null;
+  const signedDocument = signedPropertyText(properties, SIGNED_DOCUMENT_NAMESPACE, 'document');
   if (served.documentId !== null && signedDocument === null) {
     return bindingAltered('The signature names no document');
   }
@@ -293,6 +305,35 @@ function signatureHolds(verifier: SignedXml, signatureXml: string, bindingXml: s
     }
     throw error;
   }
+}
+
+// The certificate a signature's KeyInfo holds, which holdsOnlySignedContent
+// found alone in its X509Data; null when it does not read as one.
+function signingCertificateOf(signature: Element): X509Certificate | null {
+  const [keyInfo] = childrenNamed(signature, SIGNATURE_NAMESPACE, 'KeyInfo');
+  const [data] = keyInfo === undefined ? [] : childrenNamed(keyInfo, SIGNATURE_NAMESPACE, 'X509Data');
+  const [certificate] = data === undefined ? [] : childrenNamed(data, SIGNATURE_NAMESPACE, 'X509Certificate');
+  try {
+    return new X509Certificate(Buffer.from(certificate?.textContent ?? '', 'base64'));
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+// When a signature says it was made, as its signed properties give it; null
+// when they give no time.
+function signingTimeOf(properties: Element | null): Date | null {
+  const created = signedPropertyText(properties, WSU_NAMESPACE, 'Created');
+  const time = created === null ? null : new Date(created);
+  return time === null || Number.isNaN(time.getTime()) ? null : time;
+}
+
+// The text of an element that the signed properties hold, null without one.
+function signedPropertyText(properties: Element | null, namespace: string, localName: string): string | null {
+  return properties?.getElementsByTagNameNS(namespace, localName)[0]?.textContent ?? null;
 }
 
 // A signature's value, as its SignatureValue element holds it, without the
