@@ -347,8 +347,10 @@ async function readPart(zip: JSZip, name: string): Promise<string> {
   return content;
 }
 
+// A byte order mark at the start of a part, which XML allows and Office
+// writes in some parts, is left out.
 function parse(xml: string): Element {
-  const root = new DOMParser().parseFromString(xml, 'text/xml').documentElement;
+  const root = new DOMParser().parseFromString(xml.replace(/^\uFEFF/, ''), 'text/xml').documentElement;
   if (root === null) {
     throw new Error('Unparsable XML part');
   }
