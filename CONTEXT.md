@@ -91,8 +91,8 @@ The marking of a workbook's document label, shown above and below its editor on 
 _Avoid_: banner
 
 **Journal**:
-The record of label changes: each change of a base label or of a protected portion, each deletion of a protected portion and each protection of existing content, made in the panel, with who made it; each upload, with the label read from the file and the base label it got; and each save that lowers a label or removes a protected portion, with who took part in the editing session. It never holds a portion's text.
-_Avoid_: audit trail, history
+The record of what changed labels and access, which administrators read: each change of a base label or of a protected portion, each deletion of a protected portion and each protection of existing content, made in the panel, with who made it; each upload, with the label read from the file and the base label it got; each save that lowers a label or removes a protected portion, with who took part in the editing session; each change of a clearance, with the administrator who made it; each editing session ended because someone may no longer open the document; and each stored file served that no longer matches its signature, holds none, or holds a Sensitivity Label Information part. Entries are only ever added, and never hold a portion's text.
+_Avoid_: audit trail, history, log (for the concept)
 
 **Envelope**:
 The encrypted form of a protected portion's text: a ZTDF object that also carries the portion label, bound to it.
@@ -115,3 +115,7 @@ _Avoid_: attribute store, référentiel (in English text)
 **Access decision**:
 Whether a clearance lets its holder read a label, by the rules of the label's security policy.
 _Avoid_: authorization, entitlement check
+
+**Revocation**:
+A change of a clearance that lets its holder read less than before: a lower classification, fewer categories, a validity period that ends sooner, or its expiry. It applies at once to the holder's open editing sessions and to what their panel has read.
+_Avoid_: withdrawal, de-authorisation
