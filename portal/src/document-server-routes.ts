@@ -4,7 +4,7 @@ import type { BindingSignatures } from './binding-signature.ts';
 import { withoutSignature } from './binding.ts';
 import type { PortalConfig } from './config.ts';
 import { type FileLabels, fileLabelsOf } from './document-labels.ts';
-import { DOCUMENT_FORMATS, findDocument, moveDocumentToNewKey, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
+import { DOCUMENT_FORMATS, findDocument, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
 import type { EditingSessions } from './editing-sessions.ts';
 import { INTERNAL_DOCUMENTS_PATH, internalDocumentUrl } from './editor-config.ts';
 import type { LabelJournal } from './label-journal.ts';
@@ -219,7 +219,7 @@ function followEditingSession(
   } else if (labelChanged && !lastOfEnded) {
     // Checked in the background: the Document Server waits for this answer.
     editingSessions
-      .endIfExcluded(saved, callback.key, async () => moveDocumentToNewKey(config.documentsDirectory, saved.id))
+      .endIfExcluded(saved, callback.key, 'base-label')
       .catch((error: unknown) => {
         log.error({ documentId: saved.id, err: error }, 'An editing session could not be checked against a new base label');
       });

@@ -18,7 +18,16 @@ import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts
 import { StoredLabels } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { EditingSessions } from './editing-sessions.ts';
-import { createDocumentFromTemplate, DOCUMENT_FORMATS, fileNameOf, findDocument, latestSignatureOf, listDocuments, listTemplates } from './documents.ts';
+import {
+  createDocumentFromTemplate,
+  DOCUMENT_FORMATS,
+  fileNameOf,
+  findDocument,
+  latestSignatureOf,
+  listDocuments,
+  listTemplates,
+  moveDocumentToNewKey,
+} from './documents.ts';
 import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
 import { type CommandService, requestForceSave } from './onlyoffice.ts';
 import { registerOpentdfRelay } from './opentdf-relay.ts';
@@ -74,7 +83,16 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     latestSignatureOf(config.documentsDirectory, id),
   );
   const commands: CommandService = { internalUrl: config.onlyofficeInternalUrl, secret: config.onlyofficeJwtSecret };
-  const editingSessions = new EditingSessions(commands, documentAccess, journal, app.log);
+  const editingSessions = new EditingSessions(
+    commands,
+    documentAccess,
+    {
+      find: async (id) => findDocument(config.documentsDirectory, id),
+      moveToNewKey: async (id, fromKey) => moveDocumentToNewKey(config.documentsDirectory, id, fromKey),
+    },
+    journal,
+    app.log,
+  );
   // A document the person may not open answers every address the same way,
   // without its name.
   const refuse = (reply: FastifyReply, user: UserIdentity, decision: Exclude<DocumentDecision, { open: true }>): FastifyReply =>
@@ -104,6 +122,8 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     policyInternalUrl: config.policyInternalUrl,
     portalPublicUrl: config.portalPublicUrl,
     administrationSecret: config.directoryAdministrationSecret,
+    journal,
+    editingSessions,
   });
   registerJournalAdmin(app, journal);
   registerOpentdfRelay(app, { opentdfInternalUrl: config.opentdfInternalUrl, accessTokens: new AccessTokens(oidc, sessions) });
@@ -147,7 +167,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       buildEditorConfig(document, { id: user.id, name: user.name }, plugin, mode, language, config),
       config.onlyofficeJwtSecret,
     );
-    editingSessions.remember(document.key, user);
+    editingSessions.remember(document, user);
     const screenMarking = DOCUMENT_FORMATS[document.format].screenMarked ? { initial: await documentAccess.documentLabelMarkingOf(user, document) } : null;
     return reply.type('text/html; charset=utf-8').send(
       renderEditorPage({

@@ -208,9 +208,11 @@ export async function saveDocumentContent(
 }
 
 // The document's next editing session gets a key that no earlier editor
-// configuration names.
-export async function moveDocumentToNewKey(directory: string, id: string): Promise<StoredDocument | null> {
-  if ((await findDocument(directory, id)) === null) {
+// configuration names; null when the document is gone, or no longer under
+// `fromKey`, as when its session ended meanwhile.
+export async function moveDocumentToNewKey(directory: string, id: string, fromKey: string): Promise<StoredDocument | null> {
+  const document = await findDocument(directory, id);
+  if (document === null || document.key !== fromKey) {
     return null;
   }
   await incrementVersion(directory, id);

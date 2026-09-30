@@ -91,6 +91,7 @@ const JOURNAL_CATEGORY_NAMES: Readonly<Record<JournalCategory, string>> = {
   label: 'Label change',
   upload: 'Upload',
   save: 'Save',
+  clearance: 'Clearance change',
   session: 'Editing session',
   'stored-file': 'Stored file alert',
 };
@@ -210,7 +211,7 @@ export function renderSavingDocumentPage(user: UserIdentity): string {
     `${renderHeader(user)}
 <main>
   <h2>Saving the document</h2>
-  <p>This document's base label changed, so its editing session ended. The document opens as soon as its last changes are saved.</p>
+  <p>This document's editing session ended, as its base label or a clearance no longer lets someone in. The document opens as soon as its last changes are saved.</p>
   <p><a href="/">Back to the documents</a></p>
 </main>`,
     2,
@@ -281,7 +282,7 @@ export function renderClearancesPage(
     `${renderHeader(user)}
 <main>
   <h2>Clearances</h2>
-  <p>A change applies at the next key request: a reader sees it once the document is reopened. A clearance is valid from the start of its first day to the end of its last day, UTC.</p>
+  <p>A change applies at once: OpenTDF reads it at the next key request, a change that lets someone read less ends their editing sessions on the documents it no longer lets them open, and their labelling panel forgets within seconds the portions it no longer lets them read. A clearance is valid from the start of its first day to the end of its last day, UTC.</p>
   ${messages}
   <table>
     <thead><tr><th>Person</th><th>Nationality</th><th>Policy</th><th>Clearance</th></tr></thead>

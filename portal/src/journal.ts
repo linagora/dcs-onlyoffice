@@ -3,12 +3,13 @@ import pg from 'pg';
 import type { UserIdentity } from './auth/sessions.ts';
 
 // What an entry records, as administrators filter the journal.
-export const JOURNAL_CATEGORIES = ['label', 'upload', 'save', 'session', 'stored-file'] as const;
+export const JOURNAL_CATEGORIES = ['label', 'upload', 'save', 'clearance', 'session', 'stored-file'] as const;
 export type JournalCategory = (typeof JOURNAL_CATEGORIES)[number];
 
 // What a person was to an entry: who acted, who took part in an editing
-// session, who was excluded from one, who downloaded a file.
-const JOURNAL_ROLES = ['author', 'session', 'excluded', 'downloader'] as const;
+// session, who was excluded from one, who downloaded a file, whose clearance
+// changed.
+const JOURNAL_ROLES = ['author', 'session', 'excluded', 'downloader', 'holder'] as const;
 export type JournalRole = (typeof JOURNAL_ROLES)[number];
 
 // A person an entry names, as the portal knew them when it recorded it. The

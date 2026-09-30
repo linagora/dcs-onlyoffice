@@ -196,6 +196,25 @@ export async function storeDocument(documentId: string, content: Uint8Array, ext
   }
 }
 
+// Sets the first instant a clearance no longer covers in the clearance
+// directory itself, as a change made outside the administration page, which
+// the portal learns nothing of; runs `during`, then sets the instant it had
+// back, whatever happens.
+export async function withValidUntilInDirectory(email: string, validUntil: string, during: () => Promise<void>): Promise<void> {
+  const previous = asDatabaseOwner(`SELECT valid_until FROM directory.clearances WHERE email = '${email}'`);
+  asDatabaseOwner(`UPDATE directory.clearances SET valid_until = '${validUntil}' WHERE email = '${email}'`);
+  try {
+    await during();
+  } finally {
+    asDatabaseOwner(`UPDATE directory.clearances SET valid_until = '${previous}' WHERE email = '${email}'`);
+  }
+}
+
+// psql's output of `sql`, run on the stack's database as its owner.
+function asDatabaseOwner(sql: string): string {
+  return compose('exec', '-T', 'postgres', 'psql', '-U', 'opentdf', '-d', 'opentdf', '-v', 'ON_ERROR_STOP=1', '-At', '-c', sql).trim();
+}
+
 // Fails with docker's own message.
 function compose(...args: string[]): string {
   return composeWith({}, ...args);

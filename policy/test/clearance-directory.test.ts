@@ -299,26 +299,33 @@ describe('clearance directory administration', () => {
     });
   });
 
-  it('changes the terms of an entry, and keeps who it belongs to', async () => {
+  it('changes the terms of an entry, keeps who it belongs to, and answers with the entry before and after the change', async () => {
     const terms = {
       classification: 'diffusion restreinte',
       categories: ['Releasable To:NATO', 'Special Handling:SPECIAL FRANCE'],
       validFrom: '2026-01-01T00:00:00Z',
       validUntil: '2030-01-01T00:00:00Z',
     };
+    const bob = { email: 'bob.walker@dcs.test', name: 'Bob Walker', nationality: 'GBR', policy: 'DEMO-FR' };
 
     const response = await server.inject({ method: 'PUT', url: bobUrl, headers: admin, payload: terms });
 
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), {
-      email: 'bob.walker@dcs.test',
-      name: 'Bob Walker',
-      nationality: 'GBR',
-      policy: 'DEMO-FR',
-      classification: 'DIFFUSION RESTREINTE',
-      categories: ['Releasable To:NATO', 'Special Handling:SPECIAL FRANCE'],
-      validFrom: '2026-01-01T00:00:00.000Z',
-      validUntil: '2030-01-01T00:00:00.000Z',
+      before: {
+        ...bob,
+        classification: 'DIFFUSION RESTREINTE',
+        categories: ['Releasable To:NATO'],
+        validFrom: '2026-01-01T00:00:00.000Z',
+        validUntil: '2036-01-01T00:00:00.000Z',
+      },
+      after: {
+        ...bob,
+        classification: 'DIFFUSION RESTREINTE',
+        categories: ['Releasable To:NATO', 'Special Handling:SPECIAL FRANCE'],
+        validFrom: '2026-01-01T00:00:00.000Z',
+        validUntil: '2030-01-01T00:00:00.000Z',
+      },
     });
   });
 

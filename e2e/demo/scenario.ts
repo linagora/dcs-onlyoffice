@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { BOB, BOB_TERMS, saveTerms, yesterday } from '../tests/support/clearances.ts';
-import { dismissEditorTip, moveCursorToStart, openDocument, openedDocumentId, openNewDocument } from '../tests/support/documents.ts';
+import { dismissEditorTip, editorDisconnection, moveCursorToStart, openDocument, openedDocumentId, openNewDocument } from '../tests/support/documents.ts';
 import { DOCX_TYPE, pageMarkingTexts } from '../tests/support/docx.ts';
 import type { MarkedText } from '../tests/support/marker.ts';
 import { bubble, pluginFrame, pluginPanel, selectParagraphs } from '../tests/support/plugin.ts';
@@ -160,10 +160,13 @@ async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOpt
     expect(await verifyBindingSignature(await storedFile(alice, documentId), demoAuthorityCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
   });
 
-  await test.step('9. The French officer ends the allied officer\'s clearance, and the document no longer opens for him', async () => {
+  await test.step('9. The French officer ends the allied officer\'s clearance, which ends his editing session at once, and the document no longer opens for him', async () => {
+    await openDocument(bob, documentId);
     try {
       await saveTerms(alice, BOB, { ...BOB_TERMS, validThrough: yesterday() });
       await options.capture(alice, '09-revocation');
+      await expect(editorDisconnection(bob)).toBeVisible();
+      await options.capture(bob, '09-session-ended');
       const answer = await bob.goto(`/documents/${documentId}/edit`);
       expect(answer?.status()).toBe(403);
       await expect(bob.getByRole('heading', { name: 'Access denied' })).toBeVisible();

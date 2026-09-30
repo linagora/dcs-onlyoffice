@@ -3,6 +3,8 @@ import { forbidden, NO_FRAMING } from './administration.ts';
 import { isAdministrator } from './auth/administrators.ts';
 import { requireSession } from './auth/routes.ts';
 import type { UserIdentity } from './auth/sessions.ts';
+import type { EditingSessions } from './editing-sessions.ts';
+import { type Journal, journalPerson } from './journal.ts';
 import { type ClearanceChoices, type ClearanceEntry, type PageNotice, renderClearancesPage } from './pages.ts';
 import { identityHeaders } from './policy-relay.ts';
 import { firstInstant, instantAfter } from './validity-period.ts';
@@ -13,10 +15,23 @@ export interface ClearanceAdminDeps {
   // Shared with the policy service, which serves the directory's
   // administration to the portal only.
   administrationSecret: string;
+  journal: Journal;
+  editingSessions: EditingSessions;
+}
+
+// What a clearance lets its holder read, and when.
+type ClearanceTerms = Pick<ClearanceEntry, 'classification' | 'categories' | 'validFrom' | 'validUntil'>;
+
+// A clearance change, as the policy service answers it.
+interface ClearanceChange {
+  before: ClearanceEntry;
+  after: ClearanceEntry;
 }
 
 // Administrators see and edit every clearance of the directory, which the
-// policy service keeps. OpenTDF reads a change at the next key request.
+// policy service keeps. A change goes into the journal, and applies at once:
+// OpenTDF reads it at the next key request, and the portal ends the editing
+// sessions that a change letting someone read less excludes them from.
 export function registerClearanceAdmin(app: FastifyInstance, deps: ClearanceAdminDeps): FastifyInstance {
   app.get<{ Querystring: { saved?: unknown } }>('/admin/clearances', async (request, reply) => {
     const { user } = requireSession(request);
@@ -37,7 +52,7 @@ export function registerClearanceAdmin(app: FastifyInstance, deps: ClearanceAdmi
     const form = request.body instanceof URLSearchParams ? request.body : new URLSearchParams();
     const email = form.get('email') ?? '';
     const policy = form.get('policy') ?? '';
-    const terms = {
+    const terms: ClearanceTerms = {
       classification: form.get('classification') ?? '',
       categories: form.getAll('category'),
       validFrom: firstInstant(form.get('validFrom'), form.get('validFromWas')),
@@ -49,6 +64,21 @@ export function registerClearanceAdmin(app: FastifyInstance, deps: ClearanceAdmi
       body: JSON.stringify(terms),
     });
     if (response.ok) {
+      const change = clearanceChangeOf(await response.json());
+      deps.journal.record({
+        category: 'clearance',
+        level: 'info',
+        message: 'Clearance changed',
+        documentId: null,
+        fields: { policy: change.after.policy, before: termsOf(change.before), after: termsOf(change.after) },
+        // The directory knows its people by their email address.
+        people: [journalPerson('author', user), { role: 'holder', id: change.after.email, name: change.after.name, email: change.after.email }],
+      });
+      // Checked in the background: the administrator's page does not wait for
+      // the Document Server.
+      deps.editingSessions.applyClearanceChange(change.after.email).catch((error: unknown) => {
+        request.log.error({ err: error, email: change.after.email }, 'The editing sessions could not be checked after a clearance change');
+      });
       return reply.redirect(`/admin/clearances?saved=${encodeURIComponent(email)}`, 303);
     }
     const body: unknown = await response.json();
@@ -96,6 +126,17 @@ function entriesOf(body: unknown): ClearanceEntry[] {
     throw new Error('Unexpected clearance list');
   }
   return list;
+}
+
+function clearanceChangeOf(body: unknown): ClearanceChange {
+  if (typeof body !== 'object' || body === null || !('before' in body) || !('after' in body) || !isClearanceEntry(body.before) || !isClearanceEntry(body.after)) {
+    throw new Error('Unexpected clearance change');
+  }
+  return { before: body.before, after: body.after };
+}
+
+function termsOf(entry: ClearanceEntry): ClearanceTerms {
+  return { classification: entry.classification, categories: entry.categories, validFrom: entry.validFrom, validUntil: entry.validUntil };
 }
 
 function isClearanceEntry(value: unknown): value is ClearanceEntry {
