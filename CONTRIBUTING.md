@@ -71,7 +71,7 @@ TypeScript is strict. Node.js strips types without transforming code, so only er
 ### Tests
 
 - **Two public seams.** Tests check behaviour through the policy service's HTTP API, in process with `node:test`, and through the whole stack in the browser, with Playwright. Internals are not tested directly.
-- **The stack itself.** Besides these seams, end-to-end tests may act on the stack through `docker compose` in `deploy`: to make the clearance directory unreadable to OpenTDF, as an outage would, then restart the policy service, which restores its grants; to store a file in the portal's storage, as someone with access to it could; and to read the portal's log, which is the journal of label changes.
+- **The stack itself.** Besides these seams, end-to-end tests may act on the stack through `docker compose` in `deploy`: to make the clearance directory unreadable to OpenTDF, as an outage would, then restart the policy service, which restores its grants; to restart the policy service with other signing settings than `deploy/.env` gives, as a change of key or a revocation list would, then with those of `deploy/.env` again; to store a file in the portal's storage, as someone with access to it could; and to read the portal's log, which is the journal of label changes.
 - **Portion texts.** One check looks further, because keeping portion texts out of ONLYOFFICE is what the project guarantees first: every portion text a test writes carries a marker (`e2e/tests/support/marker.ts`), and after the end-to-end suite a script searches the Document Server's working files for it.
 - **Independent expected values.** Expected values come from the standards, the SPIF or a reference implementation, never recomputed the way the code computes them.
 

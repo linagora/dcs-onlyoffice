@@ -36,6 +36,9 @@ export interface DocumentBinding {
   references: string[];
   // Whether an XML signature opens the binding.
   signed: boolean;
+  // The certificate the signature's KeyInfo holds, in base64; null without
+  // one.
+  signingCertificate: string | null;
 }
 
 // A block content control with the colour of its text.
@@ -263,6 +266,7 @@ function readBinding(xml: string): DocumentBinding | null {
     label: label === undefined ? null : readLabel(label),
     references: elements(root, BINDING_NAMESPACE, 'DataReference').map((reference) => reference.getAttribute('URI') ?? ''),
     signed: first?.namespaceURI === SIGNATURE_NAMESPACE && first.localName === 'Signature',
+    signingCertificate: elements(root, SIGNATURE_NAMESPACE, 'X509Certificate')[0]?.textContent?.replace(/\s/g, '') ?? null,
   };
 }
 

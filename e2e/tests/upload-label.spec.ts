@@ -9,7 +9,7 @@ import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, forceSavedXlsx, insertPortion, shownPortions, storedDocx, storedFile } from './support/portions.ts';
-import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { demoAuthorityCertificate, verifyBindingSignature } from './support/signature.ts';
 import { upload, type UploadedFile, withCustomXmlPart, withLabelMetadata, wordLabelElement, wordLabelProperties } from './support/uploads.ts';
 import { insertWorkbookPortion } from './support/workbooks.ts';
 import { inspectXlsx, XLSX_TYPE } from './support/xlsx.ts';
@@ -290,7 +290,7 @@ test('a file changed after its binding was signed is accepted, and signed afresh
     .toEqual([uploadEntry({ base: CODES.diffusionRestreinte, read: { code: CODES.diffusionRestreinte, source: 'base-label' }, signature: 'not-matched' })]);
   const stored = await storedFile(page, uploadedId);
   const bindable = (await storedDocx(page, uploadedId)).bindableParts;
-  expect(await verifyBindingSignature(stored, demoCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
+  expect(await verifyBindingSignature(stored, demoAuthorityCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
 });
 
 test.describe('an author who is no administrator', () => {

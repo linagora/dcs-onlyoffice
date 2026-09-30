@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { field } from './json.ts';
 
 const COMPOSE_DIRECTORY = fileURLToPath(new URL('../../../deploy/', import.meta.url));
 const SETTINGS_FILE = new URL('../../../deploy/.env', import.meta.url);
+const INIT_ENV_SCRIPT = fileURLToPath(new URL('../../../deploy/scripts/init-env.sh', import.meta.url));
 
 // The stack's public domain: that of the stack under test, else the
 // standalone profile's default.
@@ -68,6 +69,50 @@ export async function withUnreadableDirectory(during: () => Promise<void>): Prom
   }
 }
 
+// Restarts the policy service with settings other than those of
+// deploy/.env, as a change of signing key or a revocation list would, while
+// `during` runs; then with those of deploy/.env again. A run interrupted
+// meanwhile leaves the service with the other settings until compose starts
+// it again.
+export async function withPolicySettings(settings: Record<string, string>, during: () => Promise<void>): Promise<void> {
+  startPolicyService(settings);
+  try {
+    await during();
+  } finally {
+    startPolicyService({});
+  }
+}
+
+// Compose recreates the service when its settings change.
+function startPolicyService(settings: Record<string, string>): void {
+  composeWith(settings, 'up', '-d', '--wait', '--no-deps', 'policy');
+}
+
+// A signing key and its certificate, as deploy/.env sets them.
+export type SigningKeySettings = { BINDING_SIGNING_KEY: string; BINDING_SIGNING_CERTIFICATE: string };
+
+// The signing key and certificate that a change of key gives, as the hosting
+// guide has one made: init-env.sh, run again on deploy/.env with both
+// emptied, has the demo authority certify a new key. It runs on a copy,
+// which leaves deploy/.env as it is.
+export async function newSigningKey(): Promise<SigningKeySettings> {
+  if (settingInFile('BINDING_AUTHORITY_KEY') === null) {
+    throw new Error('deploy/.env has no demo authority to certify a new key: empty BINDING_SIGNING_KEY and BINDING_SIGNING_CERTIFICATE, then run deploy/scripts/init-env.sh again');
+  }
+  const directory = await mkdtemp(path.join(tmpdir(), 'new-signing-key-'));
+  try {
+    await mkdir(path.join(directory, 'scripts'));
+    await copyFile(INIT_ENV_SCRIPT, path.join(directory, 'scripts', 'init-env.sh'));
+    const settings = readFileSync(SETTINGS_FILE, 'utf8').replace(/^(BINDING_SIGNING_KEY|BINDING_SIGNING_CERTIFICATE)=.*$/gm, '$1=');
+    await writeFile(path.join(directory, '.env'), settings, { mode: 0o600 });
+    execFileSync('sh', [path.join(directory, 'scripts', 'init-env.sh')], { stdio: 'pipe' });
+    const changed = parseEnv(await readFile(path.join(directory, '.env'), 'utf8'));
+    return { BINDING_SIGNING_KEY: changed.BINDING_SIGNING_KEY ?? '', BINDING_SIGNING_CERTIFICATE: changed.BINDING_SIGNING_CERTIFICATE ?? '' };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 // The portal's log since `since`, as it writes it: one JSON object a line.
 export function portalLog(since: Date): string {
   return compose('logs', '--no-log-prefix', '--since', since.toISOString(), 'portal');
@@ -118,5 +163,10 @@ export async function storeDocument(documentId: string, content: Uint8Array, ext
 
 // Fails with docker's own message.
 function compose(...args: string[]): string {
-  return execFileSync('docker', ['compose', ...args], { cwd: COMPOSE_DIRECTORY, stdio: 'pipe', encoding: 'utf8' });
+  return composeWith({}, ...args);
+}
+
+// With settings that win over those of deploy/.env, as the environment's do.
+function composeWith(settings: Record<string, string>, ...args: string[]): string {
+  return execFileSync('docker', ['compose', ...args], { cwd: COMPOSE_DIRECTORY, stdio: 'pipe', encoding: 'utf8', env: { ...process.env, ...settings } });
 }

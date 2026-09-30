@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DOMParser } from '@xmldom/xmldom';
@@ -27,9 +27,50 @@ export function signatureMismatch(servedTo: 'document-server' | 'download', reas
   return expect.objectContaining({ servedTo, reason, changedParts: [] });
 }
 
-// The demo certificate init-env.sh generated, as deploy/.env holds it.
-export function demoCertificate(): string {
-  return Buffer.from(deploymentSetting('BINDING_SIGNING_CERTIFICATE'), 'base64').toString('utf8');
+// The certificate of the demo authority that init-env.sh generated, the first
+// of deploy/.env's trust anchors: verifiers trust binding signatures by it,
+// and xmlsec1 takes the first certificate of a file.
+export function demoAuthorityCertificate(): string {
+  return Buffer.from(deploymentSetting('BINDING_TRUST_ANCHORS'), 'base64').toString('utf8');
+}
+
+// A certificate revocation list of the demo authority that revokes a
+// certificate given as base64-encoded PEM, as deploy/.env would hold it:
+// made with OpenSSL's certificate authority, as an operator could.
+export async function demoRevocationList(revokedCertificate: string): Promise<string> {
+  const directory = await mkdtemp(path.join(tmpdir(), 'revocation-list-'));
+  try {
+    const file = (name: string): string => path.join(directory, name);
+    await writeFile(file('authority.key'), Buffer.from(deploymentSetting('BINDING_AUTHORITY_KEY'), 'base64'), { mode: 0o600 });
+    await writeFile(file('authority.pem'), demoAuthorityCertificate());
+    await writeFile(file('revoked.pem'), Buffer.from(revokedCertificate, 'base64'));
+    const serialNumber = execFileSync('openssl', ['x509', '-in', file('revoked.pem'), '-noout', '-serial'], { encoding: 'utf8' }).trim().replace(/^serial=/, '');
+    // The authority's database holds the revoked certificate alone, with a
+    // far expiry.
+    await writeFile(file('index.txt'), `R\t491231235959Z\t${databaseTime(new Date())}\t${serialNumber}\tunknown\t/CN=Revoked\n`);
+    await writeFile(file('crlnumber'), '01\n');
+    await writeFile(file('ca.cnf'), '[ ca ]\ndefault_ca = demo\n[ demo ]\ndatabase = index.txt\ncrlnumber = crlnumber\ndefault_md = sha256\ndefault_crl_days = 30\n');
+    execFileSync('openssl', ['ca', '-config', 'ca.cnf', '-gencrl', '-keyfile', 'authority.key', '-cert', 'authority.pem', '-out', 'list.pem'], {
+      cwd: directory,
+      stdio: 'pipe',
+    });
+    return (await readFile(file('list.pem'))).toString('base64');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+// A time as OpenSSL's certificate database writes it: YYMMDDHHMMSSZ.
+function databaseTime(time: Date): string {
+  return time.toISOString().replace(/^\d\d|[-:T]|\.\d+/g, '');
+}
+
+// The body of a certificate given as base64-encoded PEM, as a signature's
+// KeyInfo holds it.
+export function certificateBody(certificate: string): string {
+  return Buffer.from(certificate, 'base64')
+    .toString('utf8')
+    .replace(/-----[A-Z ]+-----|\s/g, '');
 }
 
 // Verifies the signature of a DOCX package's document label binding with

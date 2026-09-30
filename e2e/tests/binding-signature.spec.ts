@@ -6,12 +6,12 @@ import { stringField } from './support/json.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, replaceCustomXmlParts } from './support/plugin.ts';
 import { forceSavedDocx, insertPortion, storedFile } from './support/portions.ts';
-import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { demoAuthorityCertificate, verifyBindingSignature } from './support/signature.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 
-test('each save signs the document label binding, which xmlsec1 verifies against the demo certificate', async ({ page }) => {
+test('each save signs the document label binding, which xmlsec1 verifies by the demo authority', async ({ page }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   await pluginPanel(page).getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: markedText('Fictional paragraph under a signed binding') });
@@ -25,7 +25,7 @@ test('each save signs the document label binding, which xmlsec1 verifies against
     categories: [{ type: 'INFORMATIVE', tagName: 'Composition', values: ['MORE RESTRICTIVE PORTIONS'] }],
   });
   const parts = docx.bindableParts.length;
-  expect(await verifyBindingSignature(await storedFile(page, documentId), demoCertificate())).toEqual({
+  expect(await verifyBindingSignature(await storedFile(page, documentId), demoAuthorityCertificate())).toEqual({
     status: 0,
     manifest: `${parts}/${parts}`,
   });
@@ -58,7 +58,7 @@ test('a document label written in the file by hand is replaced at the next save,
   const docx = await forceSavedDocx(page, documentId, (saved) => saved.bindings[0]?.signed === true);
   expect(docx.bindings[0]?.label?.classification).toBe(DIFFUSION_RESTREINTE);
   const parts = docx.bindableParts.length;
-  expect(await verifyBindingSignature(await storedFile(page, documentId), demoCertificate())).toEqual({
+  expect(await verifyBindingSignature(await storedFile(page, documentId), demoAuthorityCertificate())).toEqual({
     status: 0,
     manifest: `${parts}/${parts}`,
   });
