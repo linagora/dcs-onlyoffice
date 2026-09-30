@@ -4,6 +4,7 @@ import type { BindingSignatures } from './binding-signature.ts';
 import { withoutSignature } from './binding.ts';
 import type { PortalConfig } from './config.ts';
 import { type FileLabels, fileLabelsOf } from './document-labels.ts';
+import { DocumentQueues } from './document-queues.ts';
 import { DOCUMENT_FORMATS, findDocument, type SaveKind, saveDocumentContent, type StoredDocument } from './documents.ts';
 import type { EditingSessions } from './editing-sessions.ts';
 import { INTERNAL_DOCUMENTS_PATH, internalDocumentUrl } from './editor-config.ts';
@@ -64,7 +65,7 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
     if (callback.joined.length > 0) {
       admitInBackground(config, services.editingSessions, request.log, request.params.id, callback);
     }
-    const saved = await inArrivalOrder(request.params.id, async () => storeCallbackFile(config, services, request.log, request.params.id, callback));
+    const saved = await callbackQueues.run(request.params.id, async () => storeCallbackFile(config, services, request.log, request.params.id, callback));
     if (saved === 'failed') {
       request.log.error({ documentId: request.params.id, status: callback.status }, 'Saving the document failed');
       return reply.send(CALLBACK_FAILED);
@@ -81,27 +82,7 @@ type CallbackOutcome = 'saved' | 'ignored' | 'failed';
 // is still downloading or writing it. Each document's callbacks run one at a
 // time, in arrival order, so that an older snapshot never replaces a newer one
 // and a callback from an ended session meets the new key.
-const callbackQueues = new Map<string, Promise<unknown>>();
-
-async function inArrivalOrder<T>(documentId: string, task: () => Promise<T>): Promise<T> {
-  const previous = callbackQueues.get(documentId) ?? Promise.resolve();
-  const run = runAfter(previous, task);
-  // The caller receives the task's failure; the queue only waits for it.
-  const settled = run.catch(() => null);
-  callbackQueues.set(documentId, settled);
-  try {
-    return await run;
-  } finally {
-    if (callbackQueues.get(documentId) === settled) {
-      callbackQueues.delete(documentId);
-    }
-  }
-}
-
-async function runAfter<T>(previous: Promise<unknown>, task: () => Promise<T>): Promise<T> {
-  await previous;
-  return task();
-}
+const callbackQueues = new DocumentQueues();
 
 // Whoever joins a session is decided again, against the stored base label:
 // the Document Server waits for the callback's answer, so this runs aside.
