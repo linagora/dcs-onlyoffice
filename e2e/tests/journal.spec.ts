@@ -1,13 +1,13 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import type { Locator, Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
-import { today, tomorrow } from './support/clearances.ts';
+import { CHLOE, CHLOE_TERMS, saveTerms, today, tomorrow } from './support/clearances.ts';
 import { asJournalRole, storeDocument } from './support/deployment.ts';
 import { browserFetch, editorDisconnection, openDocument, openNewDocument } from './support/documents.ts';
 import { DOCX_TYPE } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
+import { journalFields, journalRow } from './support/journal.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, removePortion } from './support/plugin.ts';
 import { documentWithPortion, forceSavedDocx, storedFile } from './support/portions.ts';
@@ -19,20 +19,6 @@ const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
 const DIFFUSION_RESTREINTE_CODE = 'DEMO-FR:2';
 // A DOCX that the panel never labelled: the portal's template.
 const TEMPLATE = new URL('../../deploy/demo/documents/exercise-northwind.docx', import.meta.url);
-
-// The rows of the journal page, as the portal shows them with `filters`, that
-// hold `text`. The journal stores an entry shortly after the action that
-// caused it: the page is loaded again until the row shows.
-async function journalRow(page: Page, filters: Record<string, string>, text: string): Promise<Locator> {
-  const row = page.getByRole('row').filter({ hasText: text });
-  await expect
-    .poll(async () => {
-      await page.goto(`/admin/journal?${new URLSearchParams(filters).toString()}`);
-      return row.count();
-    })
-    .toBeGreaterThan(0);
-  return row;
-}
 
 test('an administrator reads in the journal a base label changed in the panel, with the name and email address of who changed it', async ({ page, browser }) => {
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
@@ -124,6 +110,29 @@ test('a save that removes a portion outside the panel goes into the journal, wit
   await expect(row).toContainText('Alice Martin');
   await expect(row).toContainText('alice.martin@dcs.test');
   await administrator.context().close();
+});
+
+test('a clearance change made on the administration page goes into the journal, with the administrator, the person and the clearance before and after it', async ({ page }) => {
+  // A first valid day of its own, which tells this change apart in the journal.
+  const firstDay = `2026-0${randomInt(1, 9)}-${randomInt(10, 29)}`;
+
+  try {
+    await saveTerms(page, CHLOE, { ...CHLOE_TERMS, validFrom: firstDay });
+
+    const row = await journalRow(page, { person: CHLOE, category: 'clearance' }, `"validFrom":"${firstDay}T00:00:00.000Z"`);
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('Clearance change');
+    await expect(row).toContainText('Clearance changed');
+    await expect(row).toContainText('Alice Martin <alice.martin@dcs.test> (author)');
+    await expect(row).toContainText('Chloe Bernard <chloe.bernard@dcs.test> (holder)');
+    expect(await journalFields(row)).toEqual({
+      policy: 'DEMO-FR',
+      before: { classification: 'NON PROTEGE', categories: [], validFrom: '2026-01-01T00:00:00.000Z', validUntil: '2036-01-01T00:00:00.000Z' },
+      after: { classification: 'NON PROTEGE', categories: [], validFrom: `${firstDay}T00:00:00.000Z`, validUntil: '2036-01-01T00:00:00.000Z' },
+    });
+  } finally {
+    await saveTerms(page, CHLOE, CHLOE_TERMS);
+  }
 });
 
 test('the journal filters its entries by person, category and period, and pages through the older ones', async ({ page, browser }) => {
