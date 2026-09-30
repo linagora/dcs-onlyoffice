@@ -757,7 +757,7 @@ Disconnect-ExchangeOnline
 A Microsoft 365 Business tenant, its subscription upgraded to Business Premium, held the four labels of the demo
 policy, without encryption or content marking, published to every user; co-authoring of files with sensitivity labels
 stayed off. The checks used Word and Excel for the web, from OneDrive: Word for Mac did not activate with the tenant's
-licence during the test, so Word desktop remains to check. Each answer is **Tested** unless it says otherwise.
+licence during the test, and was checked later (8.2). Each answer is **Tested** unless it says otherwise.
 
 - **1. Minimal property set.** The seven properties the platform writes are enough: Word for the web showed the label
   of every file the platform stored, which carries only those seven. Word for the web itself writes an eighth,
@@ -786,8 +786,33 @@ licence during the test, so Word desktop remains to check. Each answer is **Test
   label the mapping pairs with its sensitivity label. One of them, saved by Word for the web, had a UTF-8 byte order
   mark before the XML declaration of `[Content_Types].xml`, which XML allows and the platform refused until #136.
 
-Questions 3, 5, 9, 10, 12 and 14 need Word desktop, PowerShell on Windows, a new tenant or a label that applies
-encryption; they stay open.
+### 8.2 Answers from Word for Mac (#140)
+
+The same tenant, with co-authoring of files with sensitivity labels still off, later activated Word for Mac. Each
+answer is **Tested** unless it says otherwise.
+
+- **Export.** Word for Mac showed the label of a file the platform stored, opened from OneDrive: DIFFUSION
+  RESTREINTE – SPÉCIAL FRANCE, checked in its Sensitivity menu, which listed the four labels of the demo policy. The
+  other three labels were not opened in Word for Mac. *Inference*: it shows them too, since the platform writes the
+  same seven properties for every label, which Word for the web showed for all four (8.1).
+- **1 and 2. Property set and location.** A document Word for Mac labels carries the same eight custom properties as
+  one Word for the web labels, the label's unique name in `Name` and `Privileged` in `Method`, and no LabelInfo part.
+  Only `Tag` differs: `50, 0, 1, 1` from Word for Mac, `10, 0, 1, 2` from Word for the web. Word for Mac writes no
+  byte order mark before the XML declaration of `[Content_Types].xml`.
+- **Saving a labelled file.** When Word for Mac saved a change to a document Word for the web had labelled, it kept
+  the document's custom properties unchanged, `SetDate` and `Tag` included: saving does not label the file again.
+- **13. ONLYOFFICE output in Word.** Word for Mac opened without complaint a DOCX the platform stored, and showed its
+  label. When it saved a change, it kept byte for byte the platform's two Custom XML parts, the binding and the base
+  label part, and the seven custom properties with their values, adding neither `Tag` nor a LabelInfo part. It gave
+  the Custom XML item ids back the braces that ONLYOFFICE drops (3.4), left out the empty relationship parts that
+  ONLYOFFICE writes, and rewrote every other part. Uploaded with the label it carries, the file kept the base label
+  of its base label part, and the journal recorded that its binding signature no longer matched: the platform
+  signed it afresh.
+- **Import.** A document Word for Mac labelled, and one that Word for Mac changed after Word for the web labelled it,
+  each got the base label the mapping pairs with its sensitivity label when uploaded with the label it carries.
+
+Questions 3, 5, 9, 10, 12 and 14 need a label that applies content marking or encryption, stale metadata, PowerShell
+on Windows or a new tenant; they stay open.
 
 ---
 
