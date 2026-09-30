@@ -76,6 +76,7 @@ test('the French officer uploads an unlabelled DOCX, which opens in the editor w
       signature: 'absent',
       user: 'alice',
       lowering: false,
+      people: [{ role: 'author', id: 'alice', name: 'Alice Martin', email: 'alice.martin@dcs.test' }],
       msg: 'Document uploaded',
     },
   ]);

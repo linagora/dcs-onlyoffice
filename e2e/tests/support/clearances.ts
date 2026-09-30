@@ -66,3 +66,12 @@ export async function saveTerms(page: Page, email: string, terms: Terms): Promis
 export function yesterday(): string {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
+
+// The current day and the next, UTC, as the portal's date fields take them.
+export function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function tomorrow(): string {
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}

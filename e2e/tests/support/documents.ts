@@ -1,4 +1,4 @@
-import { errors, expect, type Page, test } from '@playwright/test';
+import { errors, expect, type Locator, type Page, test } from '@playwright/test';
 import JSZip from 'jszip';
 import { DOMAIN } from './deployment.ts';
 import { bubble } from './plugin.ts';
@@ -182,6 +182,11 @@ export async function editorPageConfig(page: Page): Promise<EditorPageConfig> {
 
 export async function editorDocumentKey(page: Page): Promise<string> {
   return (await editorPageConfig(page)).document.key;
+}
+
+// What ONLYOFFICE Docs tells an editor that the portal disconnects.
+export function editorDisconnection(page: Page): Locator {
+  return page.frameLocator('iframe[name="frameEditor"]').getByText('The file cannot be accessed right now.');
 }
 
 function isEditorPageConfig(value: unknown): value is EditorPageConfig {

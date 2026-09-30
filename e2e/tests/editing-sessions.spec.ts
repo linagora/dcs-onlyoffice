@@ -1,16 +1,18 @@
-import type { Locator, Page } from '@playwright/test';
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { BOB, BOB_TERMS, saveTerms, yesterday } from './support/clearances.ts';
-import { earlierEditorEvents, editorDocumentKey, editorPageConfig, openDocument, openNewDocument, openWithEarlierConfig } from './support/documents.ts';
+import {
+  earlierEditorEvents,
+  editorDisconnection as disconnection,
+  editorDocumentKey,
+  editorPageConfig,
+  openDocument,
+  openNewDocument,
+  openWithEarlierConfig,
+} from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
-
-// What ONLYOFFICE Docs tells an editor that the portal disconnects.
-function disconnection(page: Page): Locator {
-  return page.frameLocator('iframe[name="frameEditor"]').getByText('The file cannot be accessed right now.');
-}
 
 // A signed editor configuration joins its document's editing session
 // whenever it connects. When the base label comes to exclude someone who
