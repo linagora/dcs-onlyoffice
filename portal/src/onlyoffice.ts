@@ -131,6 +131,10 @@ export async function dropFromSession(service: CommandService, key: string, user
   return error === COMMAND_ERROR.none || error === COMMAND_ERROR.unknownKey;
 }
 
+// How long the portal waits for the command service: a Document Server that
+// stops answering must not hold back the checks of the editing sessions.
+const COMMAND_TIMEOUT_MS = 10_000;
+
 // The command service's answer, null when it cannot be had.
 async function sendCommand(service: CommandService, command: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   const token = await signOnlyofficeToken(command, service.secret);
@@ -138,11 +142,12 @@ async function sendCommand(service: CommandService, command: Record<string, unkn
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ ...command, token }),
-  });
-  if (!response.ok) {
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  }).catch((): null => null);
+  if (response === null || !response.ok) {
     return null;
   }
-  const result: unknown = await response.json();
+  const result: unknown = await response.json().catch((): null => null);
   return isRecord(result) ? result : null;
 }
 
