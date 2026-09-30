@@ -33,6 +33,7 @@ export class PortionReader {
   #kept = new Map<string, OpenedEnvelope>();
   #opening = new Map<string, Promise<OpenedEnvelope>>();
   #labels = new Map<string, LabelReading>();
+  #unreadable: ReadonlySet<string> = new Set();
 
   constructor(opener: EnvelopeOpener, readLabel: LabelReader) {
     this.#opener = opener;
@@ -53,7 +54,34 @@ export class PortionReader {
       return opened;
     }
     const [boundLabel, partLabel] = await Promise.all([this.#labelOf(opened.boundLabelXml), this.#labelOf(portion.partLabelXml)]);
+    // Opened as a revocation came, or before its bound label could be read.
+    if (boundLabel.status === 'read' && this.#unreadable.has(boundLabel.label.code)) {
+      this.#kept.set(key, { status: 'denied' });
+      return { status: 'denied' };
+    }
     return { status: 'opened', text: opened.text, boundLabel, partLabel };
+  }
+
+  // Forgets the texts of portions whose bound labels are among `unreadable`,
+  // which the person may no longer read, those read so far and those read
+  // from now on: they count as refused until the panel opens again, as
+  // OpenTDF would refuse them now.
+  forget(unreadable: ReadonlySet<string>): void {
+    this.#unreadable = unreadable;
+    for (const [key, opened] of this.#kept) {
+      const bound = this.#boundLabelOf(opened);
+      if (bound?.status === 'read' && unreadable.has(bound.label.code)) {
+        this.#kept.set(key, { status: 'denied' });
+      }
+    }
+  }
+
+  // The codes of the labels bound to the texts the panel read.
+  boundLabelCodes(): string[] {
+    return [...this.#kept.values()].flatMap((opened) => {
+      const bound = this.#boundLabelOf(opened);
+      return bound?.status === 'read' ? [bound.label.code] : [];
+    });
   }
 
   // Forgets the texts of portions the document no longer holds.
@@ -83,6 +111,11 @@ export class PortionReader {
   async #openStored(envelope: string): Promise<OpenedEnvelope> {
     const bytes = envelopeBytes(envelope);
     return bytes === null ? { status: 'failed', reason: messages.envelopeDamaged, retry: false } : this.#opener.open(bytes);
+  }
+
+  // The reading of the label bound to an opened envelope, null until read.
+  #boundLabelOf(opened: OpenedEnvelope): LabelReading | null {
+    return opened.status === 'opened' && opened.boundLabelXml !== null ? (this.#labels.get(opened.boundLabelXml) ?? null) : null;
   }
 
   async #labelOf(xml: string | null): Promise<LabelReading> {
