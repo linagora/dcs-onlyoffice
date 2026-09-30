@@ -56,9 +56,11 @@ Once both leave the editor, the Document Server stores the document. At that sav
 
 ## 9. A revocation
 
-Alice, an administrator, opens **Clearances** from the portal's header, and ends Bob's clearance: its last valid day becomes yesterday. When Bob opens the document again, the portal refuses it, and shows only its base label's marking. The replay then gives Bob his clearance back; by hand, set its last valid day to 2035-12-31 again.
+Bob opens the document again. Alice, an administrator, opens **Clearances** from the portal's header, and ends Bob's clearance: its last valid day becomes yesterday. The portal ends Bob's editing session at once, as it would for every co-author: his editor says the file cannot be accessed. When he opens the document again, the portal refuses it, and shows only its base label's marking. The journal records the change, with Alice, Bob and his clearance before and after it, and the editing session it ended. The replay then gives Bob his clearance back; by hand, set its last valid day to 2035-12-31 again.
 
 ![The clearance administration page, once Bob's clearance ended](screenshots/walkthrough/09-revocation.png)
+
+![Bob's editor, whose editing session the revocation ended](screenshots/walkthrough/09-session-ended.png)
 
 ![The portal's refusal, which Bob gets for the document](screenshots/walkthrough/09-refused.png)
 
@@ -130,4 +132,4 @@ Once both leave the editor, the stored workbook carries the page marking and a b
 
 ## The journal
 
-Every step that changes a label is in the journal, which never holds a portion's text: Alice, an administrator, opens **Journal** in the portal's header, and filters it by document, person, period or category. The portal also writes the journal to its log: in `deploy`, `docker compose logs portal | grep -E 'Base label|Portion|Document uploaded|Existing content'`.
+Every step that changes a label is in the journal, which never holds a portion's text, and so are the clearance change of step 9 and the editing session it ended: Alice, an administrator, opens **Journal** in the portal's header, and filters it by document, person, period or category. The portal also writes the journal to its log: in `deploy`, `docker compose logs portal | grep -E 'Base label|Portion|Document uploaded|Existing content'`.
