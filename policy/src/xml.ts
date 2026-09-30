@@ -1,12 +1,16 @@
 import { DOMParser, type Element } from '@xmldom/xmldom';
 
 const ELEMENT_NODE = 1;
+const BYTE_ORDER_MARK = '\uFEFF';
 
 export type ParsedXml = { ok: true; root: Element } | { ok: false; error: string };
 
 // Parses a document that must be well-formed and carry no DTD: refusing DTDs
-// rules out entity expansion attacks.
-export function parseXml(xml: string): ParsedXml {
+// rules out entity expansion attacks. A byte order mark at the start of the
+// text, which XML allows and Office writes in some package parts, is left
+// out.
+export function parseXml(text: string): ParsedXml {
+  const xml = text.startsWith(BYTE_ORDER_MARK) ? text.slice(BYTE_ORDER_MARK.length) : text;
   if (/<!DOCTYPE/i.test(xml)) {
     return { ok: false, error: 'DTDs are not allowed' };
   }
