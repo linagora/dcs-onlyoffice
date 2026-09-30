@@ -1,4 +1,5 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { type Browser, expect, type Locator, type Page } from '@playwright/test';
+import { DEMO_ACCOUNTS, signedInPage } from './accounts.ts';
 
 // What the administration page edits of an entry: its validity period as its
 // first and last days.
@@ -60,6 +61,20 @@ export async function saveTerms(page: Page, email: string, terms: Terms): Promis
   await form.getByLabel('Valid through').fill(terms.validThrough);
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toHaveText(`Clearance of ${email} saved.`);
+}
+
+// Saves an entry's terms from an administrator's page of its own, which leaves
+// the test's other pages as they are, runs `during`, then saves `restored`
+// again, whatever happens.
+export async function withTerms(browser: Browser, email: string, terms: Terms, restored: Terms, during: () => Promise<void>): Promise<void> {
+  const administrator = await signedInPage(browser, DEMO_ACCOUNTS.alice);
+  try {
+    await saveTerms(administrator, email, terms);
+    await during();
+  } finally {
+    await saveTerms(administrator, email, restored);
+    await administrator.context().close();
+  }
 }
 
 // A last valid day that has passed: an entry that ends on it grants nothing.
