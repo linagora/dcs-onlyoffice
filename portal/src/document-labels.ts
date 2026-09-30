@@ -1,8 +1,9 @@
 import { readFile, stat } from 'node:fs/promises';
-import { type Document, DOMParser } from '@xmldom/xmldom';
+import type { Document } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 import { customXmlParts } from './binding.ts';
 import type { StoredDocument } from './documents.ts';
+import { parsePackageXml } from './xml.ts';
 
 // The plugin keeps the base label the author chose in a Custom XML part of its
 // own, and each portion's label in its portion's part (DOCUMENT_NAMESPACE and
@@ -79,7 +80,7 @@ async function xmlPartsMatching(zip: JSZip, name: RegExp): Promise<Document[]> {
   for (const part of Object.keys(zip.files).filter((file) => name.test(file))) {
     const xml = await zip.file(part)?.async('string');
     if (xml !== undefined) {
-      parts.push(new DOMParser().parseFromString(xml, 'text/xml'));
+      parts.push(parsePackageXml(xml));
     }
   }
   return parts;
