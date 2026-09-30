@@ -594,6 +594,10 @@ Caveats:
 - Any save that rewrites a referenced part (at least `docProps/core.xml` and `docProps/app.xml`) invalidates
   the signature.
 - This `ds:Signature` is unrelated to OPC package signatures ([ECMA-376-2][ecma2] clause 10).
+- The platform adds a second `SignatureProperty`, in a namespace of its own (`urn:linagora:dcs:signature:1`), that
+  names the document it signs for, and the portal keeps the value of the latest signature it stored for each
+  document: a file of another document, or an earlier version, put in a document's place is reported (Implementation,
+  #90). A third-party tool verifies the binding as before; the identifier is informative for it.
 
 ### 4.7 Is an unsigned binding conformant?
 
