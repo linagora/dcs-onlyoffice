@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { OidcSettings } from './auth/oidc.ts';
 import { EDITOR_LANGUAGES, type EditorLanguage, isEditorLanguage } from './editor-config.ts';
+import type { JournalDatabaseSettings } from './journal.ts';
 
 export interface PortalConfig {
   domain: string;
@@ -24,6 +25,9 @@ export interface PortalConfig {
   pluginDirectory: string;
   port: number;
   oidc: OidcSettings;
+  // Where the journal is kept, with the role that may only add entries and
+  // read them.
+  journalDatabase: JournalDatabaseSettings;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
@@ -55,6 +59,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
       scopes: env.OIDC_SCOPES ?? 'openid profile email',
       redirectUri: `${portalPublicUrl}/auth/callback`,
       postLogoutRedirectUri: `${portalPublicUrl}/`,
+    },
+    journalDatabase: {
+      host: env.JOURNAL_DB_HOST ?? 'postgres',
+      port: Number(env.JOURNAL_DB_PORT ?? '5432'),
+      database: env.JOURNAL_DB_NAME ?? 'opentdf',
+      user: env.JOURNAL_DB_USER ?? 'dcs_journal',
+      password: requireEnv(env, 'JOURNAL_DB_PASSWORD'),
     },
   };
 }

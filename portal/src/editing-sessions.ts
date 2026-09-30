@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentAccessCheck } from './document-access.ts';
 import type { StoredDocument } from './documents.ts';
+import { type Journal, type JournalPerson, type JournalRole, journalPersonById } from './journal.ts';
 import { type CommandService, dropFromSession, requestSessionEditors } from './onlyoffice.ts';
 
 // How long new editor configurations wait for the last save of a session the
@@ -19,6 +20,7 @@ const RETIRING_TIMEOUT_MS = 30_000;
 export class EditingSessions {
   #commands: CommandService;
   #documentAccess: DocumentAccessCheck;
+  #journal: Journal;
   #log: FastifyBaseLogger;
   // Whom each editor user id stands for, as of the last configuration the
   // portal signed for them. Kept in memory: a restart forgets it.
@@ -30,9 +32,10 @@ export class EditingSessions {
   // save has not arrived yet.
   #retiring = new Map<string, { key: string; since: number }>();
 
-  constructor(commands: CommandService, documentAccess: DocumentAccessCheck, log: FastifyBaseLogger) {
+  constructor(commands: CommandService, documentAccess: DocumentAccessCheck, journal: Journal, log: FastifyBaseLogger) {
     this.#commands = commands;
     this.#documentAccess = documentAccess;
+    this.#journal = journal;
     this.#log = log;
   }
 
@@ -43,6 +46,12 @@ export class EditingSessions {
     const holders = this.#holders.get(key) ?? new Set<string>();
     holders.add(user.id);
     this.#holders.set(key, holders);
+  }
+
+  // The people editor user ids stand for, as of the last configuration the
+  // portal signed for each, as the journal names them.
+  people(role: JournalRole, editorUserIds: string[]): JournalPerson[] {
+    return editorUserIds.map((id) => journalPersonById(role, id, this.#identities.get(id) ?? null));
   }
 
   // The editor user ids that received a configuration naming `key`, to edit
@@ -66,7 +75,14 @@ export class EditingSessions {
       return;
     }
     const dropped = await dropFromSession(this.#commands, key, refused);
-    this.#log.warn({ documentId: document.id, users: refused, dropped }, 'Disconnected editors whom the base label excludes from an editing session');
+    this.#journal.record({
+      category: 'session',
+      level: 'warn',
+      message: 'Disconnected editors whom the base label excludes from an editing session',
+      documentId: document.id,
+      fields: { users: refused, dropped },
+      people: this.people('excluded', refused),
+    });
   }
 
   // Ends the session of `key` when the document's stored base label excludes
@@ -86,10 +102,14 @@ export class EditingSessions {
     }
     this.forget(key);
     const dropped = await dropFromSession(this.#commands, key, null);
-    this.#log.warn(
-      { documentId: document.id, excluded: refused, holdersKnown: holders !== undefined, dropped },
-      'Ended an editing session that the base label excludes someone from',
-    );
+    this.#journal.record({
+      category: 'session',
+      level: 'warn',
+      message: 'Ended an editing session that the base label excludes someone from',
+      documentId: document.id,
+      fields: { excluded: refused, holdersKnown: holders !== undefined, dropped },
+      people: this.people('excluded', refused),
+    });
   }
 
   // While true, the document's ended session may still send its last save,

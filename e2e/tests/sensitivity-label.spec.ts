@@ -100,9 +100,16 @@ test('a stored file that holds a Sensitivity Label Information part is logged wh
   await openDocument(page, documentId);
 
   await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
-  await expect.poll(reports).toContainEqual({ documentId, servedTo: 'document-server', part: 'docMetadata/LabelInfo.xml' });
+  await expect.poll(reports).toContainEqual({ documentId, servedTo: 'document-server', part: 'docMetadata/LabelInfo.xml', people: [] });
 
   await storedFile(page, documentId);
 
-  await expect.poll(reports).toContainEqual({ documentId, servedTo: 'download', part: 'docMetadata/LabelInfo.xml' });
+  await expect
+    .poll(reports)
+    .toContainEqual({
+      documentId,
+      servedTo: 'download',
+      part: 'docMetadata/LabelInfo.xml',
+      people: [{ role: 'downloader', id: 'alice', name: 'Alice Martin', email: 'alice.martin@dcs.test' }],
+    });
 });

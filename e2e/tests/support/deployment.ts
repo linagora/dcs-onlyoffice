@@ -113,6 +113,41 @@ export async function newSigningKey(): Promise<SigningKeySettings> {
   }
 }
 
+// What running `sql` on the stack's database as the role with which the
+// portal keeps the journal gives: psql's output, or its error. psql connects
+// over TCP, where the database checks the role's password: the container's
+// own socket trusts every role.
+export function asJournalRole(sql: string): { ok: boolean; output: string } {
+  try {
+    const output = composeWith(
+      { PGPASSWORD: deploymentSetting('JOURNAL_DB_PASSWORD') },
+      'exec',
+      '-T',
+      '-e',
+      'PGPASSWORD',
+      'postgres',
+      'psql',
+      '-h',
+      '127.0.0.1',
+      '-U',
+      'dcs_journal',
+      '-d',
+      'opentdf',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-At',
+      '-c',
+      sql,
+    );
+    return { ok: true, output: output.trim() };
+  } catch (error: unknown) {
+    if (error instanceof Error && 'stderr' in error) {
+      return { ok: false, output: String(error.stderr).trim() };
+    }
+    throw error;
+  }
+}
+
 // The portal's log since `since`, as it writes it: one JSON object a line.
 export function portalLog(since: Date): string {
   return compose('logs', '--no-log-prefix', '--since', since.toISOString(), 'portal');

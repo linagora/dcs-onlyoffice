@@ -23,11 +23,11 @@ interface DocumentParams {
 }
 
 // What a save needs besides the file: the policy service's signature of its
-// binding, the journal that logs the labels it lowers, and the editing
+// binding, the journal that records the labels it lowers, and the editing
 // sessions that follow it.
 export interface SaveServices {
   signatures: BindingSignatures;
-  journal: LabelJournal;
+  labelJournal: LabelJournal;
   editingSessions: EditingSessions;
 }
 
@@ -47,7 +47,7 @@ export function registerDocumentServerRoutes(app: FastifyInstance, config: Porta
       return reply.code(404).send({ error: 'Document not found' });
     }
     const content = await readFile(document.filePath);
-    services.signatures.checkAside(content, document, 'document-server');
+    services.signatures.checkAside(content, document, 'document-server', null);
     return reply.type(DOCUMENT_FORMATS[document.format].contentType).send(content);
   });
 
@@ -186,7 +186,7 @@ async function storeCallbackFile(
   }
   if (before !== null && after !== null) {
     // Logged in the background: the Document Server waits for this answer.
-    services.journal.recordSave(documentId, before, after, sessionUsers).catch((error: unknown) => {
+    services.labelJournal.recordSave(documentId, before, after, editingSessions.people('session', sessionUsers)).catch((error: unknown) => {
       log.error({ documentId, err: error }, 'The lowering of a label could not be checked');
     });
   }

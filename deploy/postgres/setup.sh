@@ -5,7 +5,9 @@
 #   create its own, and owns those; it has no right on the clearance directory,
 #   which only entity resolution reads, through the reader role;
 # - the policy service's role owns the clearance directory's schema, creates
-#   its table and grants the reader role the columns an access decision needs.
+#   its table and grants the reader role the columns an access decision needs;
+# - the journal's schema and table belong to the superuser, and the portal's
+#   role may only add entries and read them (ADR 0007).
 # The platform's role can thus create a schema of any name, such as one a
 # role's search path would look in first: every other role searches pg_catalog
 # only, and names its tables with their schema.
@@ -14,7 +16,8 @@ set -eu
 psql -v ON_ERROR_STOP=1 -q \
   -v platform_password="$OPENTDF_PLATFORM_DB_PASSWORD" \
   -v directory_password="$DIRECTORY_DB_PASSWORD" \
-  -v reader_password="$DIRECTORY_READER_PASSWORD" <<'SQL'
+  -v reader_password="$DIRECTORY_READER_PASSWORD" \
+  -v journal_password="$JOURNAL_DB_PASSWORD" <<'SQL'
 SET search_path = pg_catalog;
 ALTER ROLE CURRENT_USER SET search_path = pg_catalog;
 
@@ -24,11 +27,15 @@ SELECT 'CREATE ROLE dcs_directory LOGIN'
   WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dcs_directory')\gexec
 SELECT 'CREATE ROLE dcs_directory_reader LOGIN'
   WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dcs_directory_reader')\gexec
+SELECT 'CREATE ROLE dcs_journal LOGIN'
+  WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dcs_journal')\gexec
 ALTER ROLE dcs_opentdf PASSWORD :'platform_password';
 ALTER ROLE dcs_directory PASSWORD :'directory_password';
 ALTER ROLE dcs_directory_reader PASSWORD :'reader_password';
+ALTER ROLE dcs_journal PASSWORD :'journal_password';
 ALTER ROLE dcs_directory SET search_path = pg_catalog;
 ALTER ROLE dcs_directory_reader SET search_path = pg_catalog;
+ALTER ROLE dcs_journal SET search_path = pg_catalog;
 
 -- Each service of the platform keeps its tables in a schema named after the
 -- configured one and the service, opentdf_policy for instance. The platform
@@ -75,5 +82,30 @@ $$;
 
 CREATE SCHEMA IF NOT EXISTS directory AUTHORIZATION dcs_directory;
 GRANT USAGE ON SCHEMA directory TO dcs_directory_reader;
+
+-- The journal, whose entries the portal adds and never changes. The schema
+-- and its table go back to the superuser, should the platform's role have
+-- created them first, and granting on every start also repairs a changed
+-- grant. The portal's role adds the columns of an entry's content only: the
+-- database gives each entry its identifier and its time.
+CREATE SCHEMA IF NOT EXISTS journal;
+ALTER SCHEMA journal OWNER TO CURRENT_USER;
+CREATE TABLE IF NOT EXISTS journal.entries (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  category text NOT NULL,
+  message text NOT NULL,
+  document_id text,
+  people jsonb NOT NULL,
+  fields jsonb NOT NULL
+);
+ALTER TABLE journal.entries OWNER TO CURRENT_USER;
+CREATE INDEX IF NOT EXISTS entries_document ON journal.entries (document_id);
+REVOKE ALL ON SCHEMA journal FROM dcs_journal;
+REVOKE ALL ON journal.entries FROM dcs_journal;
+REVOKE ALL (id, recorded_at, category, message, document_id, people, fields) ON journal.entries FROM dcs_journal;
+GRANT USAGE ON SCHEMA journal TO dcs_journal;
+GRANT SELECT ON journal.entries TO dcs_journal;
+GRANT INSERT (category, message, document_id, people, fields) ON journal.entries TO dcs_journal;
 SQL
 echo "dcs: database roles ready"

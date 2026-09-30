@@ -11,6 +11,8 @@ import { SessionStore, type UserIdentity } from './auth/sessions.ts';
 import { BindingSignatures } from './binding-signature.ts';
 import { registerClearanceAdmin } from './clearance-admin.ts';
 import type { PortalConfig } from './config.ts';
+import { Journal } from './journal.ts';
+import { registerJournalAdmin } from './journal-admin.ts';
 import { LabelJournal, type PortionState } from './label-journal.ts';
 import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts';
 import { StoredLabels } from './document-labels.ts';
@@ -65,12 +67,14 @@ export function buildServer(config: PortalConfig): FastifyInstance {
 
   const storedLabels = new StoredLabels();
   const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, storedLabels, app.log);
-  const labelJournal = new LabelJournal(config.policyInternalUrl, app.log);
-  const bindingSignatures = new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, app.log, async (id) =>
+  const journal = new Journal(config.journalDatabase, app.log);
+  app.addHook('onClose', async () => journal.close());
+  const labelJournal = new LabelJournal(config.policyInternalUrl, journal, app.log);
+  const bindingSignatures = new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, journal, app.log, async (id) =>
     latestSignatureOf(config.documentsDirectory, id),
   );
   const commands: CommandService = { internalUrl: config.onlyofficeInternalUrl, secret: config.onlyofficeJwtSecret };
-  const editingSessions = new EditingSessions(commands, documentAccess, app.log);
+  const editingSessions = new EditingSessions(commands, documentAccess, journal, app.log);
   // A document the person may not open answers every address the same way,
   // without its name.
   const refuse = (reply: FastifyReply, user: UserIdentity, decision: Exclude<DocumentDecision, { open: true }>): FastifyReply =>
@@ -101,6 +105,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     portalPublicUrl: config.portalPublicUrl,
     administrationSecret: config.directoryAdministrationSecret,
   });
+  registerJournalAdmin(app, journal);
   registerOpentdfRelay(app, { opentdfInternalUrl: config.opentdfInternalUrl, accessTokens: new AccessTokens(oidc, sessions) });
 
   app.post('/documents', async (request, reply) => {
@@ -115,7 +120,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     policyInternalUrl: config.policyInternalUrl,
     documentsDirectory: config.documentsDirectory,
     signatures: bindingSignatures,
-    journal: labelJournal,
+    labelJournal,
   });
 
   const openEditor = (mode: EditorMode) => async (request: FastifyRequest<EditorRoute>, reply: FastifyReply): Promise<FastifyReply> => {
@@ -167,7 +172,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       return refuse(reply, user, decision);
     }
     const content = await readFile(document.filePath);
-    bindingSignatures.checkAside(content, document, 'download');
+    bindingSignatures.checkAside(content, document, 'download', user);
     return reply
       .type(DOCUMENT_FORMATS[document.format].contentType)
       .header('Content-Disposition', attachment(document.fileName, fileNameOf(document.id, document.format)))
@@ -193,7 +198,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     report: string,
     read: (body: unknown) => Report | null,
     expected: string,
-    record: (entry: Report & { documentId: string }, user: string) => Promise<void> | void,
+    record: (entry: Report & { documentId: string }, user: UserIdentity) => Promise<void> | void,
   ): void => {
     app.post<{ Params: DocumentParams }>(`/documents/:id/${report}`, async (request, reply) => {
       const document = await findDocument(config.documentsDirectory, request.params.id);
@@ -206,7 +211,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       if (!decision.open) {
         return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
       }
-      await record({ documentId: document.id, ...body }, user.id);
+      await record({ documentId: document.id, ...body }, user);
       return reply.code(204).send();
     });
   };
@@ -235,7 +240,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     if (!decision.open) {
       return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
     }
-    await labelJournal.recordBaseLabelReport({ documentId: document.id, ...change }, user.id);
+    await labelJournal.recordBaseLabelReport({ documentId: document.id, ...change }, user);
     // The change reaches the Document Server through the editor's websocket,
     // which may come after this request: until then, it has nothing to save.
     let outcome = await requestForceSave(commands, document.key);
@@ -246,7 +251,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     return reply.code(outcome === 'failed' ? 502 : 202).send({ outcome });
   });
 
-  registerDocumentServerRoutes(app, config, { signatures: bindingSignatures, journal: labelJournal, editingSessions });
+  registerDocumentServerRoutes(app, config, { signatures: bindingSignatures, labelJournal, editingSessions });
 
   return app;
 }

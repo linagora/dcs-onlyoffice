@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { forbidden, NO_FRAMING } from './administration.ts';
 import { isAdministrator } from './auth/administrators.ts';
 import { requireSession } from './auth/routes.ts';
 import type { UserIdentity } from './auth/sessions.ts';
-import { type ClearanceChoices, type ClearanceEntry, type PageNotice, renderClearancesPage, renderMessagePage } from './pages.ts';
+import { type ClearanceChoices, type ClearanceEntry, type PageNotice, renderClearancesPage } from './pages.ts';
 import { identityHeaders } from './policy-relay.ts';
 import { firstInstant, instantAfter } from './validity-period.ts';
 
@@ -13,10 +14,6 @@ export interface ClearanceAdminDeps {
   // administration to the portal only.
   administrationSecret: string;
 }
-
-// The page must not be framed: a sibling host could lure an administrator
-// into clicking Save on it.
-const NO_FRAMING = "frame-ancestors 'none'";
 
 // Administrators see and edit every clearance of the directory, which the
 // policy service keeps. OpenTDF reads a change at the next key request.
@@ -59,14 +56,6 @@ export function registerClearanceAdmin(app: FastifyInstance, deps: ClearanceAdmi
     return sendPage(reply, user, deps, { saved: null, error: `The clearance of ${email} was not saved: ${reason}` }, 422);
   });
   return app;
-}
-
-function forbidden(reply: FastifyReply): FastifyReply {
-  return reply
-    .code(403)
-    .header('Content-Security-Policy', NO_FRAMING)
-    .type('text/html; charset=utf-8')
-    .send(renderMessagePage('Forbidden', 'This page is reserved to administrators.'));
 }
 
 function directoryHeaders(user: UserIdentity, deps: ClearanceAdminDeps): Record<string, string> {
