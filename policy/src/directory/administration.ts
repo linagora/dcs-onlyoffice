@@ -44,8 +44,9 @@ export function registerDirectoryAdministration(app: FastifyInstance, administra
       });
 
       // Changes the terms and the validity period of an entry, which the SPIF
-      // checks as it checks the seed. OpenTDF reads the change at the next
-      // key request.
+      // checks as it checks the seed, and answers with the entry before and
+      // after the change, which the portal journals. OpenTDF reads the change
+      // at the next key request.
       directory.put<{ Params: EntryParams }>('/policies/:policy/clearances/:email', async (request, reply) => {
         const { store } = requireAdministration(administration);
         const policy = policyNamed(policies, request.params.policy);
@@ -69,8 +70,9 @@ export function registerDirectoryAdministration(app: FastifyInstance, administra
         if (!(await store.update(check.clearance))) {
           return reply.code(404).send({ error: noEntry });
         }
-        request.log.info({ by: callerEmail(request), before: clearanceView(entry), after: clearanceView(check.clearance) }, 'Clearance changed');
-        return clearanceView(check.clearance);
+        const change = { before: clearanceView(entry), after: clearanceView(check.clearance) };
+        request.log.info({ by: callerEmail(request), ...change }, 'Clearance changed');
+        return change;
       });
     },
     { prefix: '/directory' },
