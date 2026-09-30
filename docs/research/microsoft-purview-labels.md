@@ -59,7 +59,8 @@ All identifiers in the examples are fictional: tenant `00000000-0000-0000-0000-0
 5. **Signature**: `docProps/custom.xml` is in ADatP-4778.2 Table 5-3, so the portal must write the Purview
    properties before the policy service signs. `docMetadata/LabelInfo.xml`, `_rels/.rels` and
    `[Content_Types].xml` are not in Tables 5-2 or 5-3. A LabelInfo part added after signing would change the label
-   Word shows in an opted-in tenant without invalidating the signature.
+   Word shows in an opted-in tenant without invalidating the signature. The platform's binding now references
+   `_rels/.rels` and `[Content_Types].xml`, which adding the part changes (Implementation, #91).
 6. **Import**: refuse compound files (encrypted or legacy binary) with a message that says which. For each tenant,
    read its LabelInfo element first, then its custom properties if it has no element. A `removed="1"` element means
    no label for that tenant. Keep only the configured tenant's label for the mapping; identify it by id, never by
@@ -448,6 +449,11 @@ Implications (*Inference* from these rules and from sections 2 and 3):
    - if the portal writes the part, reference `pack:///docMetadata/LabelInfo.xml` as an additional part;
    - also reference `pack:///_rels/.rels`, which ONLYOFFICE rewrites from a template at each save;
    - make the stored-file check report a `classificationlabels` relationship that the binding does not cover.
+
+   The platform's binding now references `_rels/.rels` and `[Content_Types].xml`
+   ([labelling-standards.md 4.9](labelling-standards.md#49-what-the-platforms-binding-references); Implementation,
+   #91): a LabelInfo part added after signing changes them, so the stored-file check reports them as changed, and
+   still names the part.
 4. A file saved by Word rewrites `docProps/*`, so its binding no longer verifies. This is expected
    ([labelling-standards.md 4.6](labelling-standards.md#46-signing-a-docx-binding)); the portal signs again at its
    own next save.

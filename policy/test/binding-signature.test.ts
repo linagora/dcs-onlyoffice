@@ -26,8 +26,13 @@ const SHA384 = 'http://www.w3.org/2001/04/xmldsig-more#sha384';
 const ECDSA_SHA256 = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256';
 const NOW = new Date('2026-09-28T09:00:00.000Z');
 // Parts ADatP-4778.2 Tables 5-2 and 5-3 require a whole-document binding to
-// reference, when the package holds them.
-const BINDABLE_PART = /^(word\/(document|styles|footnotes|endnotes|comments)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml)$/;
+// reference, when the package holds them; the relationship parts and the
+// content types; and the Custom XML parts, of which the demo templates hold
+// none but those the tests write. The binding references them all but its
+// own part, BINDING_PART, which holds the signature.
+const BINDABLE_PART =
+  /^(word\/(document|styles|footnotes|endnotes|comments)\.xml|word\/(header|footer)\d*\.xml|word\/media\/.+|docProps\/(core|app|custom)\.xml|(.+\/)?_rels\/[^/]*\.rels|\[Content_Types\]\.xml|customXml\/[^/]+)$/;
+const BINDING_PART = 'customXml/item1.xml';
 // Codes of the demo SPIF's labels.
 const NON_PROTEGE = 'DEMO-FR:1';
 const DIFFUSION_RESTREINTE = 'DEMO-FR:2';
@@ -103,13 +108,15 @@ describe('the signature of the document label binding', () => {
       payload: { base: bindingLabel, portions: [], parts: [...bindableParts(zip), ...extraParts] },
     });
     assert.equal(computed.statusCode, 200);
-    zip.file('customXml/item1.xml', alter((computed.json() as { xml: string }).xml)); // SAFETY: the answer asserted just above
+    zip.file(BINDING_PART, alter((computed.json() as { xml: string }).xml)); // SAFETY: the answer asserted just above
     zip.file('customXml/item2.xml', `<dcs:document xmlns:dcs="urn:linagora:dcs:document:1" base="${base}" label="${bindingLabel}"/>`);
     return zip.generateAsync({ type: 'uint8array' });
   }
 
   function bindableParts(zip: JSZip): string[] {
-    return Object.keys(zip.files).filter((name) => BINDABLE_PART.test(name)).sort();
+    return Object.keys(zip.files)
+      .filter((name) => BINDABLE_PART.test(name) && name !== BINDING_PART)
+      .sort();
   }
 
   async function sign(docx: Uint8Array, secret: string | null = SECRET, type: string = DOCX_TYPE): Promise<{ statusCode: number; body: unknown }> {
@@ -289,6 +296,174 @@ describe('the signature of the document label binding', () => {
     assert.equal(verification.manifest, `${present.length}/${present.length}`);
   });
 
+  // The properties part of a Custom XML part, and the relationship to it.
+  function customXmlProperties(item: number, namespace: string): Record<string, string> {
+    return {
+      [`customXml/itemProps${item}.xml`]: `<ds:datastoreItem ds:itemID="{00000000-0000-4000-8000-00000000000${item}}" xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml"><ds:schemaRefs><ds:schemaRef ds:uri="${namespace}"/></ds:schemaRefs></ds:datastoreItem>`,
+      [`customXml/_rels/item${item}.xml.rels`]: `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps${item}.xml"/></Relationships>`,
+    };
+  }
+
+  // A text document that holds, besides its template's parts, every part that
+  // can hold its content: those of ADatP-4778.2 Tables 5-2 and 5-3 and those
+  // the tables leave out; a SPECIAL FRANCE portion's part; and the properties
+  // of its Custom XML parts. Its theme and web settings hold no content, as
+  // the font table, the settings and the numbering definitions of the
+  // template. Its content types declare an embedded macro-enabled workbook
+  // and an ActiveX control's parts.
+  async function textDocumentWithEveryPart(): Promise<Uint8Array> {
+    const labelled = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
+    const declared = await withChangedPart(labelled, '[Content_Types].xml', (xml) =>
+      xml.replace(
+        '</Types>',
+        '<Default Extension="xlsm" ContentType="application/vnd.ms-excel.sheet.macroEnabled.12"/>' +
+          '<Override PartName="/word/activeX/activeX1.xml" ContentType="application/vnd.ms-office.activeX+xml"/>' +
+          '<Override PartName="/word/activeX/activeX1.bin" ContentType="application/vnd.ms-office.activeX"/></Types>',
+      ),
+    );
+    return withParts(declared, {
+      'word/commentsExtended.xml': '<w15:commentsEx xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"/>',
+      'word/media/image1.png': 'Fictional picture',
+      // Parts the tables leave out that hold content.
+      'word/people.xml': '<w15:people xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"/>',
+      'word/commentsIds.xml': '<w16cid:commentsIds xmlns:w16cid="http://schemas.microsoft.com/office/word/2016/wordml/cid"/>',
+      'word/commentsExtensible.xml': '<w16cex:commentsExtensible xmlns:w16cex="http://schemas.microsoft.com/office/word/2018/wordml/cex"/>',
+      'word/glossary/document.xml': '<w:glossaryDocument xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>',
+      'word/glossary/styles.xml': '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>',
+      'word/charts/chart1.xml': '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>',
+      'word/charts/colors1.xml': '<cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle"/>',
+      'word/charts/style1.xml': '<cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle"/>',
+      'word/charts/chartEx1.xml': '<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"/>',
+      'word/diagrams/data1.xml': '<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>',
+      'word/embeddings/oleObject1.bin': 'Fictional embedded object',
+      'word/embeddings/Microsoft_Excel_Worksheet1.xlsx': 'Fictional embedded workbook',
+      'word/embeddings/Microsoft_Excel_Macro-Enabled_Worksheet1.xlsm': 'Fictional embedded macro-enabled workbook',
+      'word/drawings/drawing1.xml': '<c:userShapes xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>',
+      'word/ink/ink1.xml': '<inkml:ink xmlns:inkml="http://www.w3.org/2003/InkML"/>',
+      'word/activeX/activeX1.xml': '<ax:ocx xmlns:ax="http://schemas.microsoft.com/office/2006/activeX"/>',
+      'word/activeX/activeX1.bin': 'Fictional ActiveX control state',
+      'docProps/thumbnail.jpeg': 'Fictional thumbnail',
+      'customXml/item3.xml': `<dcs:portion xmlns:dcs="${PORTION_NAMESPACE}" id="p1" version="1" label="${SPECIAL_FRANCE}"><dcs:label/><dcs:content encoding="ztdf">RmljdGlvbmFs</dcs:content></dcs:portion>`,
+      ...customXmlProperties(1, BINDING_NAMESPACE),
+      ...customXmlProperties(2, 'urn:linagora:dcs:document:1'),
+      // Parts that hold no content.
+      'word/theme/theme1.xml': '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>',
+      'word/webSettings.xml': '<w:webSettings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>',
+      'word/glossary/settings.xml': '<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>',
+    });
+  }
+
+  it('references every part of a text document that can hold its content, its relationships, its content types and its Custom XML parts but the binding, and not its theme or settings, as xmlsec1 verifies', async () => {
+    const docx = await textDocumentWithEveryPart();
+
+    const { statusCode, body } = await sign(docx);
+
+    assert.equal(statusCode, 200);
+    const verification = await verifyWithXmlsec(docx, signedOf(body).xml, certificate);
+    assert.deepEqual([...verification.references].sort(), [
+      '[Content_Types].xml',
+      '_rels/.rels',
+      'customXml/_rels/item1.xml.rels',
+      'customXml/_rels/item2.xml.rels',
+      'customXml/item2.xml',
+      'customXml/item3.xml',
+      'customXml/itemProps1.xml',
+      'customXml/itemProps2.xml',
+      'docProps/app.xml',
+      'docProps/core.xml',
+      'docProps/custom.xml',
+      'docProps/thumbnail.jpeg',
+      'word/_rels/comments.xml.rels',
+      'word/_rels/document.xml.rels',
+      'word/_rels/endnotes.xml.rels',
+      'word/_rels/fontTable.xml.rels',
+      'word/_rels/footer1.xml.rels',
+      'word/_rels/footnotes.xml.rels',
+      'word/_rels/header1.xml.rels',
+      'word/activeX/activeX1.bin',
+      'word/activeX/activeX1.xml',
+      'word/charts/chart1.xml',
+      'word/charts/chartEx1.xml',
+      'word/charts/colors1.xml',
+      'word/charts/style1.xml',
+      'word/comments.xml',
+      'word/commentsExtended.xml',
+      'word/commentsExtensible.xml',
+      'word/commentsIds.xml',
+      'word/diagrams/data1.xml',
+      'word/document.xml',
+      'word/drawings/drawing1.xml',
+      'word/embeddings/Microsoft_Excel_Macro-Enabled_Worksheet1.xlsm',
+      'word/embeddings/Microsoft_Excel_Worksheet1.xlsx',
+      'word/embeddings/oleObject1.bin',
+      'word/endnotes.xml',
+      'word/footer1.xml',
+      'word/footnotes.xml',
+      'word/glossary/document.xml',
+      'word/glossary/styles.xml',
+      'word/header1.xml',
+      'word/ink/ink1.xml',
+      'word/media/image1.png',
+      'word/people.xml',
+      'word/styles.xml',
+    ]);
+    assert.deepEqual([verification.status, verification.manifest], [0, '45/45']);
+    const { xml } = signedOf(body);
+    // A URI cannot hold brackets: the address of the content types
+    // percent-encodes them.
+    assert.match(xml, /URI="pack:\/\/\/%5BContent_Types%5D\.xml"/);
+    // Annex A has a reference to data that is not XML state its content type:
+    // the one the package declares, or else the one its extension gives.
+    assert.match(xml, /URI="pack:\/\/\/word\/embeddings\/Microsoft_Excel_Macro-Enabled_Worksheet1\.xlsm" xmime:contentType="application\/vnd\.ms-excel\.sheet\.macroEnabled\.12"/);
+    assert.match(xml, /URI="pack:\/\/\/word\/activeX\/activeX1\.bin" xmime:contentType="application\/vnd\.ms-office\.activeX"/);
+    assert.match(xml, /URI="pack:\/\/\/word\/activeX\/activeX1\.xml"\/>/);
+    assert.match(xml, /URI="pack:\/\/\/word\/embeddings\/Microsoft_Excel_Worksheet1\.xlsx" xmime:contentType="application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet"/);
+    assert.match(xml, /URI="pack:\/\/\/docProps\/thumbnail\.jpeg" xmime:contentType="image\/jpeg"/);
+  });
+
+  it("names a text document's base label part, portion part, relationship part or content types changed since signing", async () => {
+    const signed = await signedPackage(await textDocumentWithEveryPart());
+    const changes: [string, (xml: string) => string][] = [
+      // The base label lowered in clear, and a portion relabelled.
+      ['customXml/item2.xml', (xml) => xml.replace(`base="${DIFFUSION_RESTREINTE}"`, `base="${NON_PROTEGE}"`)],
+      ['customXml/item3.xml', (xml) => xml.replace(`label="${SPECIAL_FRANCE}"`, `label="${NON_PROTEGE}"`)],
+      // A part related, and its content type declared.
+      [
+        'word/_rels/document.xml.rels',
+        (xml) =>
+          xml.replace(
+            '</Relationships>',
+            '<Relationship Id="rIdFictional" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml" Target="../customXml/item9.xml"/></Relationships>',
+          ),
+      ],
+      ['[Content_Types].xml', (xml) => xml.replace('</Types>', '<Override PartName="/customXml/item9.xml" ContentType="application/xml"/></Types>')],
+    ];
+
+    for (const [part, change] of changes) {
+      assert.deepEqual(await verdictOf(await withChangedPart(signed, part, change)), {
+        statusCode: 200,
+        body: { status: 'altered', reason: 'Parts changed since signing', changedParts: [part], labelInformationPart: null },
+      });
+    }
+  });
+
+  // Custom XML parts named as Office names them, and a header, are read by
+  // their names alone, without a relationship or a content type of their own.
+  it('names a part added since signing that the binding would reference, such as a Custom XML part or a header', async () => {
+    const signed = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+    const additions: Record<string, string> = {
+      'customXml/item9.xml': `<dcs:document xmlns:dcs="urn:linagora:dcs:document:1" base="${NON_PROTEGE}" label="${NON_PROTEGE}"/>`,
+      'word/header9.xml': '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>',
+    };
+
+    for (const [part, content] of Object.entries(additions)) {
+      assert.deepEqual(await verdictOf(await withParts(signed, { [part]: content })), {
+        statusCode: 200,
+        body: { status: 'altered', reason: 'Parts changed since signing', changedParts: [part], labelInformationPart: null },
+      });
+    }
+  });
+
   // A workbook that holds, besides its template's parts, every part that can
   // hold its content: those of ADatP-4778.2 Tables 5-2 and 5-3, chart styles
   // under both their names, and those the tables leave out; with its theme,
@@ -326,6 +501,11 @@ describe('the signature of the document label binding', () => {
       'xl/queryTables/queryTable1.xml': '<queryTable xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
       'xl/connections.xml': '<connections xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
       'xl/embeddings/oleObject1.bin': 'Fictional embedded object',
+      'xl/activeX/activeX1.xml': '<ax:ocx xmlns:ax="http://schemas.microsoft.com/office/2006/activeX"/>',
+      'xl/activeX/activeX1.bin': 'Fictional ActiveX control state',
+      'xl/ctrlProps/ctrlProp1.xml': '<formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"/>',
+      'xl/ink/ink1.xml': '<inkml:ink xmlns:inkml="http://www.w3.org/2003/InkML"/>',
+      'docProps/thumbnail.jpeg': 'Fictional thumbnail',
       // Parts that hold no content.
       'xl/theme/theme1.xml': '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>',
       'xl/calcChain.xml': '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
@@ -333,7 +513,7 @@ describe('the signature of the document label binding', () => {
     });
   }
 
-  it('references every part of a workbook that can hold its content, but not its theme, calculation chain or printer settings, as xmlsec1 verifies', async () => {
+  it('references every part of a workbook that can hold its content, its relationships, its content types and its Custom XML parts but the binding, and not its theme, calculation chain or printer settings, as xmlsec1 verifies', async () => {
     const xlsx = await workbookWithEveryPart();
 
     const { statusCode, body } = await sign(xlsx, SECRET, XLSX_TYPE);
@@ -341,9 +521,16 @@ describe('the signature of the document label binding', () => {
     assert.equal(statusCode, 200);
     const verification = await verifyWithXmlsec(xlsx, signedOf(body).xml, certificate);
     assert.deepEqual([...verification.references].sort(), [
+      '[Content_Types].xml',
+      '_rels/.rels',
+      'customXml/item2.xml',
       'docProps/app.xml',
       'docProps/core.xml',
       'docProps/custom.xml',
+      'docProps/thumbnail.jpeg',
+      'xl/_rels/workbook.xml.rels',
+      'xl/activeX/activeX1.bin',
+      'xl/activeX/activeX1.xml',
       'xl/charts/chart1.xml',
       'xl/charts/chartEx1.xml',
       'xl/charts/colors1.xml',
@@ -352,11 +539,13 @@ describe('the signature of the document label binding', () => {
       'xl/chartsheets/sheet1.xml',
       'xl/comments1.xml',
       'xl/connections.xml',
+      'xl/ctrlProps/ctrlProp1.xml',
       'xl/diagrams/data1.xml',
       'xl/drawings/drawing1.xml',
       'xl/drawings/vmlDrawing1.vml',
       'xl/embeddings/oleObject1.bin',
       'xl/externalLinks/externalLink1.xml',
+      'xl/ink/ink1.xml',
       'xl/media/image1.png',
       'xl/metadata.xml',
       'xl/persons/person.xml',
@@ -375,7 +564,7 @@ describe('the signature of the document label binding', () => {
       'xl/worksheets/sheet1.xml',
       'xl/worksheets/sheet2.xml',
     ]);
-    assert.deepEqual([verification.status, verification.manifest], [0, '33/33']);
+    assert.deepEqual([verification.status, verification.manifest], [0, '42/42']);
     // Annex A has a reference to data that is not XML state its content type.
     const { xml } = signedOf(body);
     assert.match(xml, /URI="pack:\/\/\/xl\/embeddings\/oleObject1\.bin" xmime:contentType="application\/vnd\.openxmlformats-officedocument\.oleObject"/);

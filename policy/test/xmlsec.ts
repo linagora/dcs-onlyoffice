@@ -16,6 +16,12 @@ export interface XmlsecVerification {
   references: string[];
 }
 
+// The package file a pack:/// address names: percent-encoded characters, such
+// as the brackets of [Content_Types].xml, decoded.
+function partNameOf(uri: string): string {
+  return decodeURIComponent(uri.replace('pack:///', ''));
+}
+
 // Verifies a signed binding with xmlsec1, the independent verifier, against a
 // certificate, with the package parts its Manifest references mapped to their
 // pack:/// addresses. `alter` may change the extracted parts first.
@@ -34,11 +40,14 @@ export async function verifyWithXmlsec(
       .map((reference) => reference.getAttribute('URI') ?? '');
     const maps: string[] = [];
     for (const uri of uris) {
-      const name = uri.replace('pack:///', '');
+      const name = partNameOf(uri);
       const target = path.join(directory, 'parts', name);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, (await zip.file(name)?.async('uint8array')) ?? new Uint8Array());
-      maps.push(`--url-map:${uri}`, target);
+      // xmlsec1 looks an address up decoded, then as written.
+      for (const address of new Set([`pack:///${name}`, uri])) {
+        maps.push(`--url-map:${address}`, target);
+      }
     }
     await alter(path.join(directory, 'parts'));
     await writeFile(path.join(directory, 'binding.xml'), bindingXml);
@@ -63,7 +72,7 @@ export async function verifyWithXmlsec(
       { encoding: 'utf8' },
     );
     const report = /Manifests References \(ok\/all\): (\d+\/\d+)/.exec(`${result.stdout}${result.stderr}`);
-    return { status: result.status, manifest: report?.[1] ?? null, references: uris.map((uri) => uri.replace('pack:///', '')) };
+    return { status: result.status, manifest: report?.[1] ?? null, references: uris.map(partNameOf) };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

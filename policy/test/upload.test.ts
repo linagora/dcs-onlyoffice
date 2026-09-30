@@ -397,10 +397,22 @@ describe('uploads', () => {
 
       const verification = await verifyWithXmlsec(stored, bindingXml, certificate);
       assert.equal(verification.status, 0);
-      // The document itself, and the custom properties the sensitivity label
-      // went to.
-      assert.deepEqual([...verification.references].sort(), ['docProps/custom.xml', 'word/document.xml']);
-      assert.equal(verification.manifest, '2/2');
+      // The document itself, the custom properties the sensitivity label went
+      // to, the base label's Custom XML part, the properties of both Custom
+      // XML parts, the relationships and the content types; not the binding.
+      assert.deepEqual([...verification.references].sort(), [
+        '[Content_Types].xml',
+        '_rels/.rels',
+        'customXml/_rels/item1.xml.rels',
+        'customXml/_rels/item2.xml.rels',
+        'customXml/item1.xml',
+        'customXml/itemProps1.xml',
+        'customXml/itemProps2.xml',
+        'docProps/custom.xml',
+        'word/_rels/document.xml.rels',
+        'word/document.xml',
+      ]);
+      assert.equal(verification.manifest, '10/10');
       // The demo policy's rule adds the informative category MORE RESTRICTIVE
       // PORTIONS to a base label below one of the portions.
       const label = new DOMParser().parseFromString(bindingXml, 'text/xml');
@@ -453,7 +465,19 @@ describe('uploads', () => {
 
       const verification = await verifyWithXmlsec(stored, bindingXml, certificate);
       assert.equal(verification.status, 0);
-      assert.deepEqual([...verification.references].sort(), ['docProps/custom.xml', 'xl/workbook.xml', 'xl/worksheets/sheet1.xml']);
+      assert.deepEqual([...verification.references].sort(), [
+        '[Content_Types].xml',
+        '_rels/.rels',
+        'customXml/_rels/item1.xml.rels',
+        'customXml/_rels/item2.xml.rels',
+        'customXml/item1.xml',
+        'customXml/itemProps1.xml',
+        'customXml/itemProps2.xml',
+        'docProps/custom.xml',
+        'xl/_rels/workbook.xml.rels',
+        'xl/workbook.xml',
+        'xl/worksheets/sheet1.xml',
+      ]);
     });
 
     it('reads the base label the platform wrote into a workbook, and a binding signature that matches', async () => {
@@ -606,7 +630,7 @@ describe('uploads', () => {
       assert.deepEqual((await read(docx)).json, { label: { code: DIFFUSION_RESTREINTE, source: 'binding' }, signature: 'absent' });
     });
 
-    it('says that the binding signature no longer matches a base label changed after signing, which the signature does not cover', async () => {
+    it('says that the binding signature no longer matches a base label changed after signing', async () => {
       const { docx } = await prepared(await minimalDocx(), base(DIFFUSION_RESTREINTE));
       assert.ok(docx !== null);
       const zip = await JSZip.loadAsync((await signedAndStored(docx)).stored);

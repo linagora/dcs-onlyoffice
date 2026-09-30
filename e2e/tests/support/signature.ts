@@ -49,11 +49,16 @@ export async function verifyBindingSignature(docx: Buffer, certificate: string):
       .map((reference) => reference.getAttribute('URI') ?? '');
     const maps: string[] = [];
     for (const uri of manifestReferences) {
-      const name = uri.replace('pack:///', '');
+      // Percent-encoded characters, such as the brackets of
+      // [Content_Types].xml, decoded.
+      const name = decodeURIComponent(uri.replace('pack:///', ''));
       const target = path.join(directory, 'parts', name);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, (await zip.file(name)?.async('uint8array')) ?? new Uint8Array());
-      maps.push(`--url-map:${uri}`, target);
+      // xmlsec1 looks an address up decoded, then as written.
+      for (const address of new Set([`pack:///${name}`, uri])) {
+        maps.push(`--url-map:${address}`, target);
+      }
     }
     await writeFile(path.join(directory, 'binding.xml'), binding);
     await writeFile(path.join(directory, 'certificate.pem'), certificate);

@@ -30,7 +30,8 @@ const BINDABLE_PART = new RegExp(
       String.raw`xl/richData/[^/]+\.xml`,
       String.raw`xl/chartsheets/sheet\d+\.xml`,
       String.raw`xl/queryTables/queryTable\d+\.xml`,
-      String.raw`xl/embeddings/.+`,
+      String.raw`xl/(embeddings|activeX|ctrlProps|ink)/.+`,
+      String.raw`docProps/thumbnail\.[^/]+`,
     ].join('|') +
     ')$',
 );
