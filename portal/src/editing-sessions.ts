@@ -51,8 +51,14 @@ export class EditingSessions {
   // The key of each document whose session the portal ended and whose last
   // save has not arrived yet.
   #retiring = new Map<string, { key: string; since: number }>();
+  // The periodic check under way, if any.
+  #checking: Promise<void> | null = null;
   // The ends of each document's sessions, one at a time.
   #ends = new DocumentQueues();
+  // By key, the document of each session the portal ended but whose
+  // connections it could not drop: each periodic check tries again, until
+  // they are dropped or the session's last save shows that everyone left.
+  #undropped = new Map<string, string>();
 
   constructor(commands: CommandService, documentAccess: DocumentAccessCheck, documents: SessionDocuments, journal: Journal, log: FastifyBaseLogger) {
     this.#commands = commands;
@@ -145,10 +151,7 @@ export class EditingSessions {
         return;
       }
       this.forget(key);
-      const dropped = await dropFromSession(this.#commands, key, null).catch((error: unknown) => {
-        this.#log.error({ documentId, err: error }, 'The connections to an ended editing session could not be dropped');
-        return false;
-      });
+      const dropped = await this.#drop(documentId, key);
       this.#journal.record({
         category: 'session',
         level: 'warn',
@@ -167,6 +170,16 @@ export class EditingSessions {
   async applyClearanceChange(email: string): Promise<void> {
     const editorUserIds = new Set([...this.#identities].filter(([, identity]) => sameEmailAddress(identity.email, email)).map(([id]) => id));
     await this.#endExcludedSessions(editorUserIds);
+  }
+
+  // Checks every session the portal knows of against the current clearances
+  // of the people who hold its configurations, as a clearance change made on
+  // the administration page does for its holder: an expiry, or a change made
+  // in the clearance directory itself, applies at the next check. A check
+  // still under way is not started again.
+  async checkClearances(): Promise<void> {
+    this.#checking ??= this.#checkEverySession();
+    return this.#checking;
   }
 
   // While true, the document's ended session may still send its last save,
@@ -189,6 +202,11 @@ export class EditingSessions {
 
   retired(documentId: string): void {
     this.#retiring.delete(documentId);
+    for (const [key, undroppedDocumentId] of this.#undropped) {
+      if (undroppedDocumentId === documentId) {
+        this.#undropped.delete(key);
+      }
+    }
   }
 
   async #refused(document: StoredDocument, editorUserIds: string[]): Promise<string[]> {
@@ -201,19 +219,43 @@ export class EditingSessions {
     return editorUserIds.filter((_id, index) => decisions[index] !== true);
   }
 
+  async #checkEverySession(): Promise<void> {
+    try {
+      await Promise.all([...this.#undropped].map(async ([key, documentId]) => this.#drop(documentId, key)));
+      await this.#endExcludedSessions(null);
+    } finally {
+      this.#checking = null;
+    }
+  }
+
+  // Drops every connection to the session of `key`, and remembers a failure
+  // for the next periodic check.
+  async #drop(documentId: string, key: string): Promise<boolean> {
+    const dropped = await dropFromSession(this.#commands, key, null).catch((error: unknown) => {
+      this.#log.error({ documentId, err: error }, 'The connections to an ended editing session could not be dropped');
+      return false;
+    });
+    if (dropped) {
+      this.#undropped.delete(key);
+    } else {
+      this.#undropped.set(key, documentId);
+    }
+    return dropped;
+  }
+
   // Ends, as `endIfExcluded` does, the sessions whose document's stored base
   // label refuses, for their clearance, one of their holders among
-  // `editorUserIds`. Each person's decisions
+  // `editorUserIds`, or any of them when it is null. Each person's decisions
   // come in one request; a decision the policy service could not make ends
   // nothing, and a failure leaves the other people and sessions checked.
-  async #endExcludedSessions(editorUserIds: ReadonlySet<string>): Promise<void> {
+  async #endExcludedSessions(editorUserIds: ReadonlySet<string> | null): Promise<void> {
     // The documents each of those people holds a configuration of, as they
     // are stored now: one that moved to a new key since has no session under
     // the earlier one.
     const documentsOf = new Map<string, StoredDocument[]>();
     await Promise.all(
       [...this.#keys].map(async ([key, { documentId, holders }]) => {
-        const picked = [...holders].filter((id) => editorUserIds.has(id));
+        const picked = [...holders].filter((id) => editorUserIds === null || editorUserIds.has(id));
         if (picked.length === 0) {
           return;
         }
