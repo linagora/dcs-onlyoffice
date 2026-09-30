@@ -104,6 +104,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     policyInternalUrl: config.policyInternalUrl,
     portalPublicUrl: config.portalPublicUrl,
     administrationSecret: config.directoryAdministrationSecret,
+    journal,
   });
   registerJournalAdmin(app, journal);
   registerOpentdfRelay(app, { opentdfInternalUrl: config.opentdfInternalUrl, accessTokens: new AccessTokens(oidc, sessions) });

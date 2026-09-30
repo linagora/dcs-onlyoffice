@@ -91,6 +91,7 @@ const JOURNAL_CATEGORY_NAMES: Readonly<Record<JournalCategory, string>> = {
   label: 'Label change',
   upload: 'Upload',
   save: 'Save',
+  clearance: 'Clearance change',
   session: 'Editing session',
   'stored-file': 'Stored file alert',
 };

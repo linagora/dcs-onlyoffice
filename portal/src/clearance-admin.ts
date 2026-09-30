@@ -3,6 +3,7 @@ import { forbidden, NO_FRAMING } from './administration.ts';
 import { isAdministrator } from './auth/administrators.ts';
 import { requireSession } from './auth/routes.ts';
 import type { UserIdentity } from './auth/sessions.ts';
+import { type Journal, journalPerson } from './journal.ts';
 import { type ClearanceChoices, type ClearanceEntry, type PageNotice, renderClearancesPage } from './pages.ts';
 import { identityHeaders } from './policy-relay.ts';
 import { firstInstant, instantAfter } from './validity-period.ts';
@@ -13,10 +14,18 @@ export interface ClearanceAdminDeps {
   // Shared with the policy service, which serves the directory's
   // administration to the portal only.
   administrationSecret: string;
+  journal: Journal;
+}
+
+// A clearance change, as the policy service answers it.
+interface ClearanceChange {
+  before: ClearanceEntry;
+  after: ClearanceEntry;
 }
 
 // Administrators see and edit every clearance of the directory, which the
-// policy service keeps. OpenTDF reads a change at the next key request.
+// policy service keeps. A change goes into the journal; OpenTDF reads it at
+// the next key request.
 export function registerClearanceAdmin(app: FastifyInstance, deps: ClearanceAdminDeps): FastifyInstance {
   app.get<{ Querystring: { saved?: unknown } }>('/admin/clearances', async (request, reply) => {
     const { user } = requireSession(request);
@@ -49,6 +58,16 @@ export function registerClearanceAdmin(app: FastifyInstance, deps: ClearanceAdmi
       body: JSON.stringify(terms),
     });
     if (response.ok) {
+      const change = clearanceChangeOf(await response.json());
+      deps.journal.record({
+        category: 'clearance',
+        level: 'info',
+        message: 'Clearance changed',
+        documentId: null,
+        fields: { policy: change.after.policy, before: termsOf(change.before), after: termsOf(change.after) },
+        // The directory knows its people by their email address.
+        people: [journalPerson('author', user), { role: 'holder', id: change.after.email, name: change.after.name, email: change.after.email }],
+      });
       return reply.redirect(`/admin/clearances?saved=${encodeURIComponent(email)}`, 303);
     }
     const body: unknown = await response.json();
@@ -96,6 +115,18 @@ function entriesOf(body: unknown): ClearanceEntry[] {
     throw new Error('Unexpected clearance list');
   }
   return list;
+}
+
+function clearanceChangeOf(body: unknown): ClearanceChange {
+  if (typeof body !== 'object' || body === null || !('before' in body) || !('after' in body) || !isClearanceEntry(body.before) || !isClearanceEntry(body.after)) {
+    throw new Error('Unexpected clearance change');
+  }
+  return { before: body.before, after: body.after };
+}
+
+// What a clearance lets its holder read, and when.
+function termsOf(entry: ClearanceEntry): Pick<ClearanceEntry, 'classification' | 'categories' | 'validFrom' | 'validUntil'> {
+  return { classification: entry.classification, categories: entry.categories, validFrom: entry.validFrom, validUntil: entry.validUntil };
 }
 
 function isClearanceEntry(value: unknown): value is ClearanceEntry {
