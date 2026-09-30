@@ -40,6 +40,29 @@ export async function upload(page: Page, file: UploadedFile, label: RequestedLab
   return (await response).status();
 }
 
+// Uploads a file with a base label, by its code, as the form of the portal's
+// home page sends it, but without opening the editor that the portal's
+// answer leads to: no editing session saves the document afterwards. Gives
+// the id of the document stored.
+export async function uploadedDocumentId(page: Page, file: UploadedFile, base: string): Promise<string> {
+  await page.goto('/');
+  const url = await page.evaluate(
+    async ({ name, mimeType, content, base }) => {
+      const form = new FormData();
+      form.append('base', base);
+      form.append('file', new Blob([Uint8Array.from(atob(content), (character) => character.charCodeAt(0))], { type: mimeType }), name);
+      const response = await fetch('/documents/upload', { method: 'POST', body: form, credentials: 'same-origin' });
+      return response.url;
+    },
+    { name: file.name, mimeType: file.mimeType, content: file.buffer.toString('base64'), base },
+  );
+  const documentId = /\/documents\/([a-z0-9-]+)\/edit$/.exec(new URL(url).pathname)?.[1];
+  if (documentId === undefined) {
+    throw new Error(`The upload led to ${url} rather than to the editor`);
+  }
+  return documentId;
+}
+
 // A DOCX with one more Custom XML part of the main document, with its
 // properties part, relationships and content type, as another labelling tool
 // would write it, under the name Office gives such parts unless another is

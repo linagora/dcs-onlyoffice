@@ -6,7 +6,7 @@ import { DOCX_TYPE, pageMarkingTexts } from '../tests/support/docx.ts';
 import type { MarkedText } from '../tests/support/marker.ts';
 import { bubble, pluginFrame, pluginPanel, selectParagraphs } from '../tests/support/plugin.ts';
 import { insertPortion, leaveAndWaitForSave, storedDocx, storedFile } from '../tests/support/portions.ts';
-import { demoCertificate, verifyBindingSignature } from '../tests/support/signature.ts';
+import { demoAuthorityCertificate, verifyBindingSignature } from '../tests/support/signature.ts';
 import { fillUploadForm } from '../tests/support/uploads.ts';
 import {
   cellValue,
@@ -157,7 +157,7 @@ async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOpt
     const stored = await storedDocx(alice, documentId);
     expect(new Set(pageMarkingTexts(stored))).toEqual(new Set([WITH_MORE_RESTRICTIVE_PORTIONS]));
     const bindable = stored.bindableParts;
-    expect(await verifyBindingSignature(await storedFile(alice, documentId), demoCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
+    expect(await verifyBindingSignature(await storedFile(alice, documentId), demoAuthorityCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
   });
 
   await test.step('9. The French officer ends the allied officer\'s clearance, and the document no longer opens for him', async () => {
@@ -316,7 +316,7 @@ async function playWorkbookPart({ alice, bob }: DemoPeople, options: DemoOptions
     expect(everySheetShows(stored, WITH_MORE_RESTRICTIVE_PORTIONS_CENTRE)).toBe(true);
     expect(stored.allText).not.toContain('Logistics group');
     const bindable = stored.bindableParts;
-    expect(await verifyBindingSignature(file, demoCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
+    expect(await verifyBindingSignature(file, demoAuthorityCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
   });
 }
 

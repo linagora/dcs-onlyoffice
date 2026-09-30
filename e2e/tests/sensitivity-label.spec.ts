@@ -7,7 +7,7 @@ import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { forceSavedDocx, insertPortion, storedFile } from './support/portions.ts';
-import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { demoAuthorityCertificate, verifyBindingSignature } from './support/signature.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -36,7 +36,7 @@ test('a saved document carries the sensitivity label of its document label, whic
   const stored = await storedFile(page, documentId);
   const bindable = (await inspectDocx(stored)).bindableParts;
   expect(bindable).toContain('docProps/custom.xml');
-  expect(await verifyBindingSignature(stored, demoCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
+  expect(await verifyBindingSignature(stored, demoAuthorityCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
 });
 
 test('a sensitivity label keeps its date and its action id from one save to the next', async ({ page }) => {

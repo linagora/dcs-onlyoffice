@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@noble/post-quantum": "0.6.1",
+    "@peculiar/asn1-schema": "2.10.0",
+    "@peculiar/asn1-x509": "2.10.0",
     "@xmldom/xmldom": "0.9.12",
     "fastify": "5.12.5",
     "jszip": "3.10.2",
@@ -17,8 +19,10 @@
     "xml-crypto": "6.3.2"
   },
   "devDependencies": {
+    "@peculiar/x509": "2.1.0",
     "@types/node": "^22.0.0",
     "@types/pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
     "typescript": "7.0.2"
   }
 }

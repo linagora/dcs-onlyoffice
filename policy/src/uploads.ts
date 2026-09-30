@@ -9,6 +9,7 @@ import { type LabelMapping, labelOfSensitivityLabel } from './label-mapping.ts';
 import { appendRelationship, CONTENT_TYPES_PART, customXmlParts, declareContentType, declaredContentTypes, loadPackage, mainPartOf, type PackageKind, RELATIONSHIPS_NAMESPACE, xmlPartOf } from './opc.ts';
 import { bindingLabelXml, bindingVerdict, DOCX_TYPE, type DocumentLabelOf, type PackageLabels, packageBody, readPackageLabels, XLSX_TYPE } from './package-signing.ts';
 import { removeLabelInformation } from './sensitivity-label.ts';
+import type { SignatureTrust } from './signature-trust.ts';
 import { parseXml } from './xml.ts';
 
 // The media type of a prepared package of each kind.
@@ -51,8 +52,8 @@ export type LabelSource = 'base-label' | 'binding' | 'sensitivity-label';
 // platform cannot take it.
 type CarriedLabel = { ok: true; code: string; source: LabelSource } | Extract<ReadLabel, { ok: false }>;
 
-// What the binding signature of an uploaded file says against the platform's
-// certificate.
+// What the binding signature of an uploaded file says under the platform's
+// trust.
 export type SignatureStatus = 'matched' | 'not-matched' | 'absent';
 
 const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
@@ -71,8 +72,8 @@ const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
 
 export interface UploadOptions {
   secret: string;
-  // The certificate a binding signature must match.
-  certificate: string;
+  // What a binding signature's certificate is trusted by.
+  trust: SignatureTrust;
   documentLabelOf: DocumentLabelOf;
   // A label code in its canonical form, or why it designates no label.
   readLabelCode: (code: string) => ReadLabel;
@@ -190,14 +191,14 @@ async function carriedLabel(zip: JSZip, labels: PackageLabels, options: UploadOp
   return mapped === null ? null : { ok: true, code: mapped, source: 'sensitivity-label' };
 }
 
-// Whether an uploaded file's binding signature matched the platform's
-// certificate over parts unchanged since signing, for the document label
+// Whether an uploaded file's binding signature holds with a certificate the
+// platform trusts, over parts unchanged since signing, for the document label
 // that its labels in clear still give.
 async function signatureStatus(zip: JSZip, labels: PackageLabels, options: UploadOptions): Promise<SignatureStatus> {
   if (labels.bindings.length === 0) {
     return 'absent';
   }
-  const verdict = await bindingVerdict(zip, labels, options.certificate);
+  const verdict = await bindingVerdict(zip, labels, options.trust);
   if (verdict.status !== 'valid') {
     return verdict.status === 'altered' ? 'not-matched' : 'absent';
   }

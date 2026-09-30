@@ -52,7 +52,7 @@ The page marking follows the document label, in a locked control of its own at t
 
 ## 8. The signed binding
 
-Once both leave the editor, the Document Server stores the document. At that save, the policy service computed the document label again from the labels in clear, bound it to the file's parts as ADatP-4778.2 prescribes, and signed that binding. To check it with `xmlsec1`, an independent verifier, download the document from the list and follow the check of [docs/hosting.md](hosting.md#checks) with the stack's certificate, the `BINDING_SIGNING_CERTIFICATE` of `deploy/.env`: the line `Manifests References (ok/all)` shows every part as matching. The portal also checks the signature whenever it serves the stored file: in `deploy`, `docker compose logs portal | grep 'Stored file'` shows a file changed outside the platform. No page of the platform shows the binding, so this step has no picture.
+Once both leave the editor, the Document Server stores the document. At that save, the policy service computed the document label again from the labels in clear, bound it to the file's parts as ADatP-4778.2 prescribes, and signed that binding. To check it with `xmlsec1`, an independent verifier, download the document from the list and follow the check of [docs/hosting.md](hosting.md#checks) with the certificate of the stack's demo authority, the first of the `BINDING_TRUST_ANCHORS` of `deploy/.env`: the line `Manifests References (ok/all)` shows every part as matching. The portal also checks the signature whenever it serves the stored file: in `deploy`, `docker compose logs portal | grep 'Stored file'` shows a file changed outside the platform. No page of the platform shows the binding, so this step has no picture.
 
 ## 9. A revocation
 

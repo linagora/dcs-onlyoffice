@@ -6,7 +6,7 @@ import { DOCX_TYPE, sensitivityLabelProperties } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { pluginPanel } from './support/plugin.ts';
 import { storedDocx, storedFile } from './support/portions.ts';
-import { demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { demoAuthorityCertificate, verifyBindingSignature } from './support/signature.ts';
 import { upload, type UploadedFile } from './support/uploads.ts';
 
 // A DOCX that the panel never labelled: the portal's template, as it stands
@@ -50,7 +50,7 @@ test('the French officer uploads an unlabelled DOCX, which opens in the editor w
   expect(stored.bindings.map((binding) => binding.label)).toEqual([{ policy: 'DEMO-FR', classification: DIFFUSION_RESTREINTE, categories: [] }]);
   expect(sensitivityLabelProperties(stored, DIFFUSION_RESTREINTE_LABEL)).toMatchObject({ Enabled: 'true', Name: 'DCS-Diffusion-Restreinte-Standard' });
   const bindable = stored.bindableParts;
-  expect(await verifyBindingSignature(await storedFile(page, documentId), demoCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
+  expect(await verifyBindingSignature(await storedFile(page, documentId), demoAuthorityCertificate())).toEqual({ status: 0, manifest: `${bindable.length}/${bindable.length}` });
 
   // The document appears in the list under the uploaded file's name, which
   // its download gives too.

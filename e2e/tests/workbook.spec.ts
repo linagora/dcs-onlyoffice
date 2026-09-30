@@ -8,7 +8,7 @@ import { sensitivityLabelProperties } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { commentOnCells, pluginFrame, pluginPanel } from './support/plugin.ts';
 import { forceSavedXlsx, storedFile } from './support/portions.ts';
-import { changedSinceSigning, demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { changedSinceSigning, demoAuthorityCertificate, verifyBindingSignature } from './support/signature.ts';
 import { inspectXlsx, XLSX_TYPE } from './support/xlsx.ts';
 
 const WORKBOOK_TEMPLATE = 'exercise-northwind-logistics.xlsx';
@@ -99,7 +99,7 @@ test('a workbook labelled in the panel gets a journal entry, and is stored with 
   expect(saved.bindings.map((binding) => binding.label)).toEqual([{ policy: 'DEMO-FR', classification: DIFFUSION_RESTREINTE, categories: [] }]);
   expect(saved.bindableParts).toEqual(expect.arrayContaining(['xl/workbook.xml', 'xl/worksheets/sheet1.xml', 'docProps/custom.xml']));
   const parts = saved.bindableParts.length;
-  expect(await verifyBindingSignature(download.body, demoCertificate())).toEqual({ status: 0, manifest: `${parts}/${parts}` });
+  expect(await verifyBindingSignature(download.body, demoAuthorityCertificate())).toEqual({ status: 0, manifest: `${parts}/${parts}` });
   const { ActionId, SetDate, ...label } = sensitivityLabelProperties(saved, DIFFUSION_RESTREINTE_LABEL);
   expect(label).toEqual({ Enabled: 'true', Method: 'Privileged', Name: 'DCS-Diffusion-Restreinte-Standard', SiteId: DEMO_TENANT, ContentBits: '0' });
   expect(ActionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
