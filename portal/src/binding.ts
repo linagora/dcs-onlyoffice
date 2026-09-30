@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { type Document, DOMParser, XMLSerializer } from '@xmldom/xmldom';
+import { type Document, XMLSerializer } from '@xmldom/xmldom';
 import JSZip from 'jszip';
+import { parsePackageXml } from './xml.ts';
 
 const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 const RELATIONSHIPS_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006/relationships';
@@ -51,7 +52,7 @@ export async function customXmlParts(zip: JSZip): Promise<{ name: string; docume
     }
     // Targets are relative to the part the relationships belong to.
     const base = match[1] ?? '';
-    const relationships = new DOMParser().parseFromString(xml, 'text/xml');
+    const relationships = parsePackageXml(xml);
     for (const relationship of Array.from(relationships.getElementsByTagNameNS(RELATIONSHIPS_NAMESPACE, 'Relationship'))) {
       const target = relationship.getAttribute('Target') ?? '';
       if (!CUSTOM_XML_RELATIONSHIPS.includes(relationship.getAttribute('Type') ?? '') || relationship.getAttribute('TargetMode') === 'External' || target === '') {
@@ -68,7 +69,7 @@ export async function customXmlParts(zip: JSZip): Promise<{ name: string; docume
   for (const name of [...names].sort()) {
     const xml = await zip.file(name)?.async('string');
     if (xml !== undefined) {
-      parts.push({ name, document: new DOMParser().parseFromString(xml, 'text/xml') });
+      parts.push({ name, document: parsePackageXml(xml) });
     }
   }
   return parts;

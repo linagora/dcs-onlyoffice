@@ -190,6 +190,26 @@ test('a base label part of any name decides who opens the uploaded document', as
   await chloe.context().close();
 });
 
+// Office writes some package parts with a UTF-8 byte order mark, which XML
+// allows; other tools write one in every part.
+test('a Word file whose XML parts start with a byte order mark gets the label it carries, and opens', async ({ page }) => {
+  const labelled = await withLabelMetadata(await readFile(TEMPLATE), {
+    properties: wordLabelProperties(NATO_SENSITIVITY_LABEL, DEMO_TENANT, 2),
+    labelList: wordLabelElement(NATO_SENSITIVITY_LABEL, DEMO_TENANT),
+  });
+  const zip = await JSZip.loadAsync(labelled);
+  for (const name of Object.keys(zip.files).filter((part) => /\.(xml|rels)$/.test(part))) {
+    zip.file(name, `\uFEFF${(await zip.file(name)?.async('string')) ?? ''}`);
+  }
+  const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+  expect(await upload(page, { name: 'Fictional report with byte order marks.docx', mimeType: DOCX_TYPE, buffer }, 'carried')).toBe(303);
+
+  const documentId = await openedDocumentId(page);
+  await expect(pluginPanel(page).getByLabel('Base label')).toHaveValue(CODES.nato);
+  expect((await storedDocx(page, documentId)).baseLabel).toBe(CODES.nato);
+});
+
 test('a Word file with a sensitivity label of the mapped tenant gets the label the mapping pairs with it', async ({ page }) => {
   const since = new Date();
   const otherTenantLabel = randomUUID();

@@ -649,6 +649,44 @@ describe('uploads', () => {
       return (await read(await withLabelMetadata(await minimalDocx(), metadata))).json;
     }
 
+    // A package whose XML parts all start with a UTF-8 byte order mark, which
+    // XML allows and Office writes in some files.
+    async function withByteOrderMarks(file: Uint8Array): Promise<Uint8Array> {
+      const zip = await JSZip.loadAsync(file);
+      for (const name of Object.keys(zip.files).filter((part) => /\.(xml|rels)$/.test(part))) {
+        zip.file(name, `\uFEFF${(await zip.file(name)?.async('string')) ?? ''}`);
+      }
+      return zip.generateAsync({ type: 'uint8array' });
+    }
+
+    it('reads, prepares and signs a Word file and a workbook whose XML parts start with a byte order mark', async () => {
+      // The Sensitivity Label Information part, which decides over the custom
+      // properties, gives DIFFUSION RESTREINTE only when it can be read.
+      const metadata = {
+        properties: wordLabelProperties(SENSITIVITY_LABELS.nato, DEMO_TENANT, 2),
+        labelList: wordLabelElement(SENSITIVITY_LABELS.diffusionRestreinte, DEMO_TENANT),
+      };
+      const docx = await withByteOrderMarks(await withLabelMetadata(await minimalDocx(), metadata));
+      const xlsx = await withByteOrderMarks(await withLabelMetadata(await minimalXlsx(), metadata));
+
+      const readLabel = { label: { code: DIFFUSION_RESTREINTE, source: 'sensitivity-label' }, signature: 'absent' };
+      assert.deepEqual(await read(docx), { statusCode: 200, json: readLabel });
+      assert.deepEqual(await read(xlsx, XLSX_TYPE), { statusCode: 200, json: readLabel });
+      const { docx: preparedDocx } = await prepared(docx, base(DIFFUSION_RESTREINTE));
+      const { xlsx: preparedXlsx } = await preparedWorkbook(xlsx, base(DIFFUSION_RESTREINTE));
+      assert.ok(preparedDocx !== null && preparedXlsx !== null);
+      const signedDocx = await signedAndStored(preparedDocx);
+      const signedXlsx = await signedAndStored(preparedXlsx, XLSX_TYPE);
+      assert.equal((await verifyWithXmlsec(signedDocx.stored, signedDocx.bindingXml, certificate)).status, 0);
+      assert.equal((await verifyWithXmlsec(signedXlsx.stored, signedXlsx.bindingXml, certificate)).status, 0);
+      // The base label's Custom XML part is read too, once the mark is added
+      // to the stored file, whose signature no longer matches it.
+      assert.deepEqual(await read(await withByteOrderMarks(signedDocx.stored)), {
+        statusCode: 200,
+        json: { label: { code: DIFFUSION_RESTREINTE, source: 'base-label' }, signature: 'not-matched' },
+      });
+    });
+
     it('reads the mapped tenant\'s label from its Sensitivity Label Information element, whatever the case of its ids', async () => {
       // Stale custom properties give another label: the element decides.
       const json = await readWith({
