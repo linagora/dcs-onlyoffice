@@ -467,6 +467,10 @@ common events are listed in [s-base-events]. What reaches a plugin in the cell e
 - **Following the cursor** (Inference): since `onTargetPositionChanged` and `onClick` do not fire on cell moves
   ([6](#6-events-following-the-cursor-and-co-authors)), the bubble would close and reopen from the `init` that a
   selection change triggers, and dismiss on `onKeyDown` Escape as today.
+- **File menu** (Tested, #124): no event that the editor sends to plugins, nor any that `attachEditorEvent`
+  subscribes to, tells that the File menu, its print preview among them, opens or closes. The bubble opened over a
+  placeholder stays over the print preview, and the panel's frame keeps its size and position under the menu, so
+  the panel cannot infer it. ONLYOFFICE was asked for such an event ([DocumentServer#3817][ds-3817]).
 
 ---
 
@@ -1063,6 +1067,7 @@ end-to-end test an answer names guards it; the other answers were checked once, 
 [r-hooks-events]: https://github.com/linagora/dcs-onlyoffice/blob/2af1dd44d74c21c1a9616932e85f79964d236034/plugin/src/hooks.ts#L102-L111
 [r-panel]: https://github.com/linagora/dcs-onlyoffice/blob/2af1dd44d74c21c1a9616932e85f79964d236034/plugin/src/Panel.tsx#L110-L114
 [r-bubble]: https://github.com/linagora/dcs-onlyoffice/blob/2af1dd44d74c21c1a9616932e85f79964d236034/plugin/src/bubble.ts#L56-L159
+[ds-3817]: https://github.com/ONLYOFFICE/DocumentServer/issues/3817
 [r-documents]: https://github.com/linagora/dcs-onlyoffice/blob/2af1dd44d74c21c1a9616932e85f79964d236034/portal/src/documents.ts#L19-L26
 [r-server]: https://github.com/linagora/dcs-onlyoffice/blob/2af1dd44d74c21c1a9616932e85f79964d236034/portal/src/server.ts#L145-L161
 [r-dsroutes]: https://github.com/linagora/dcs-onlyoffice/blob/2af1dd44d74c21c1a9616932e85f79964d236034/portal/src/document-server-routes.ts#L39-L52
