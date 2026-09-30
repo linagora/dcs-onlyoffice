@@ -752,6 +752,43 @@ Disconnect-ExchangeOnline
 14. **Encrypted files**: whether the root `\x05DocumentSummaryInformation` stream of a Purview-encrypted DOCX
     carries the `MSIP_Label_` properties, and whether a `LabelInfo` stream is present with co-authoring off.
 
+### 8.1 Answers from a demo tenant (#88)
+
+A Microsoft 365 Business tenant, its subscription upgraded to Business Premium, held the four labels of the demo
+policy, without encryption or content marking, published to every user; co-authoring of files with sensitivity labels
+stayed off. The checks used Word and Excel for the web, from OneDrive: Word for Mac did not activate with the tenant's
+licence during the test, so Word desktop remains to check. Each answer is **Tested** unless it says otherwise.
+
+- **1. Minimal property set.** The seven properties the platform writes are enough: Word for the web showed the label
+  of every file the platform stored, which carries only those seven. Word for the web itself writes an eighth,
+  `MSIP_Label_<GUID>_Tag`, with the value `10, 0, 1, 2`. Which of the seven Word could do without was not tried.
+- **2. Locations in practice.** With co-authoring off, Word for the web wrote the label in custom properties only, with
+  no LabelInfo part, and showed a label written in custom properties only. The other cases were not tried.
+- **4. Name and method.** Word for the web writes the label's unique name in `Name` (`DCS-Diffusion-Restreinte-Standard`
+  for DIFFUSION RESTREINTE), not its display name, and `Privileged` in `Method` when a person picks the label.
+- **6. Other tenants.** Word for the web showed no label for a file that carries another tenant's label, and kept its
+  seven properties unchanged when it saved the file, adding no LabelInfo part. An unknown GUID of the reader's
+  tenant was not tried.
+- **7. Word for the web.** The control that shows and applies labels is the shield next to the file name, above the
+  ribbon. A file the platform stored showed its label as soon as it was opened from OneDrive; Excel for the web
+  showed a workbook's label in the same way. `extractSensitivityLabels` was not tried.
+- **8. Ids.** The GUID Word writes is the `id` that Microsoft Graph gives the label
+  (`GET /security/dataSecurityAndGovernance/sensitivityLabels`, delegated permission `SensitivityLabel.Read`), whose
+  `name` is the display name. `Get-Label` and `ImmutableId` were not tried: Security & Compliance PowerShell needs
+  Windows.
+- **11. Delays.** About two and a half hours passed between publishing the labels and seeing them in Word for the web:
+  the label policy took over an hour to synchronise; labels had to be turned on for SharePoint and OneDrive, with the
+  Purview banner's **Turn on now**; and only a new, private browser session showed them.
+- **13. ONLYOFFICE output in Word.** Word for the web opened without complaint the DOCX and XLSX files that the
+  platform stored, saved by ONLYOFFICE, and showed their labels. Whether Word keeps the binding part when it saves
+  was not tried.
+- **Import.** Each document Word for the web labelled, uploaded to the portal with the label it carries, got the base
+  label the mapping pairs with its sensitivity label. One of them, saved by Word for the web, had a UTF-8 byte order
+  mark before the XML declaration of `[Content_Types].xml`, which XML allows and the platform refused until #136.
+
+Questions 3, 5, 9, 10, 12 and 14 need Word desktop, PowerShell on Windows, a new tenant or a label that applies
+encryption; they stay open.
+
 ---
 
 ## Appendix A. How the tests were run
