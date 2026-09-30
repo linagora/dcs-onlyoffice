@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentAccessCheck } from './document-access.ts';
+import { DocumentQueues } from './document-queues.ts';
 import type { StoredDocument } from './documents.ts';
 import { type Journal, type JournalPerson, type JournalRole, journalPersonById } from './journal.ts';
 import { type CommandService, dropFromSession, requestSession } from './onlyoffice.ts';
@@ -50,6 +51,8 @@ export class EditingSessions {
   // The key of each document whose session the portal ended and whose last
   // save has not arrived yet.
   #retiring = new Map<string, { key: string; since: number }>();
+  // The ends of each document's sessions, one at a time.
+  #ends = new DocumentQueues();
 
   constructor(commands: CommandService, documentAccess: DocumentAccessCheck, documents: SessionDocuments, journal: Journal, log: FastifyBaseLogger) {
     this.#commands = commands;
@@ -109,42 +112,51 @@ export class EditingSessions {
   // someone who holds a configuration naming it or who edits in it, or when
   // the portal cannot tell: after a restart, it no longer knows who holds one.
   // The document moves to a new key, and every connection goes, viewers
-  // included. With no session open under the key, there is none to end.
-  async endIfExcluded(document: StoredDocument, key: string, cause: SessionEndCause): Promise<void> {
-    const session = await requestSession(this.#commands, key);
-    if (session?.open === false) {
-      return;
-    }
-    const holders = this.#keys.get(key)?.holders;
-    const editors = session?.editors ?? [];
-    const refused = await this.#refused(document, [...new Set([...(holders ?? []), ...editors])]);
-    if (holders !== undefined && session !== null && refused.length === 0) {
-      return;
-    }
-    // Only editors send a last save; the Document Server may not have said
-    // whether there are any.
-    const saving = session === null || editors.length > 0;
-    if (saving) {
-      this.#retiring.set(document.id, { key, since: Date.now() });
-    }
-    if ((await this.#documents.moveToNewKey(document.id, key)) === null) {
-      if (saving) {
-        this.#retiring.delete(document.id);
+  // included. With no session open under the key, there is none to end, and
+  // a revocation waits for the next check when the Document Server cannot
+  // tell. Ends run one at a time per document: a later one finds the document
+  // under a new key already, and does nothing.
+  async endIfExcluded(documentId: string, key: string, cause: SessionEndCause): Promise<void> {
+    await this.#ends.run(documentId, async () => {
+      const document = await this.#documents.find(documentId);
+      if (document === null || document.key !== key) {
+        return;
       }
-      return;
-    }
-    this.forget(key);
-    const dropped = await dropFromSession(this.#commands, key, null).catch((error: unknown) => {
-      this.#log.error({ documentId: document.id, err: error }, 'The connections to an ended editing session could not be dropped');
-      return false;
-    });
-    this.#journal.record({
-      category: 'session',
-      level: 'warn',
-      message: ENDED_SESSION_MESSAGES[cause],
-      documentId: document.id,
-      fields: { excluded: refused, holdersKnown: holders !== undefined, dropped },
-      people: this.people('excluded', refused),
+      const session = await requestSession(this.#commands, key);
+      if (session?.open === false || (session === null && cause === 'revocation')) {
+        return;
+      }
+      const holders = this.#keys.get(key)?.holders;
+      const editors = session?.editors ?? [];
+      const refused = await this.#refused(document, [...new Set([...(holders ?? []), ...editors])]);
+      if (holders !== undefined && session !== null && refused.length === 0) {
+        return;
+      }
+      // Only editors send a last save; the Document Server may not have said
+      // whether there are any.
+      const retiring = session === null || editors.length > 0 ? { key, since: Date.now() } : null;
+      if (retiring !== null) {
+        this.#retiring.set(documentId, retiring);
+      }
+      if ((await this.#documents.moveToNewKey(documentId, key)) === null) {
+        if (retiring !== null && this.#retiring.get(documentId) === retiring) {
+          this.#retiring.delete(documentId);
+        }
+        return;
+      }
+      this.forget(key);
+      const dropped = await dropFromSession(this.#commands, key, null).catch((error: unknown) => {
+        this.#log.error({ documentId, err: error }, 'The connections to an ended editing session could not be dropped');
+        return false;
+      });
+      this.#journal.record({
+        category: 'session',
+        level: 'warn',
+        message: ENDED_SESSION_MESSAGES[cause],
+        documentId,
+        fields: { excluded: refused, holdersKnown: holders !== undefined, dropped },
+        people: this.people('excluded', refused),
+      });
     });
   }
 
@@ -167,7 +179,7 @@ export class EditingSessions {
           const document = await this.#documents.find(documentId);
           // A document that moved to a new key since has no session under this one.
           if (document !== null && document.key === key && (await this.#refusedForClearance(document, heldBy))) {
-            await this.endIfExcluded(document, key, 'revocation');
+            await this.endIfExcluded(document.id, key, 'revocation');
           }
         } catch (error: unknown) {
           this.#log.error({ documentId, err: error }, 'An editing session could not be checked after a clearance change');

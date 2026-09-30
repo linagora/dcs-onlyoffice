@@ -200,7 +200,7 @@ function followEditingSession(
   } else if (labelChanged && !lastOfEnded) {
     // Checked in the background: the Document Server waits for this answer.
     editingSessions
-      .endIfExcluded(saved, callback.key, 'base-label')
+      .endIfExcluded(saved.id, callback.key, 'base-label')
       .catch((error: unknown) => {
         log.error({ documentId: saved.id, err: error }, 'An editing session could not be checked against a new base label');
       });
