@@ -1,6 +1,8 @@
 import type { FastifyBaseLogger } from 'fastify';
 import JSZip from 'jszip';
+import type { UserIdentity } from './auth/sessions.ts';
 import { DOCUMENT_FORMATS, type DocumentFormat, formatOfContentType, type StoredDocument } from './documents.ts';
+import { type Journal, journalPerson } from './journal.ts';
 
 const SIGNATURE_TIMEOUT_MS = 30_000;
 const STORED_CUSTOM_PROPERTIES_HEADER = 'x-stored-custom-properties';
@@ -112,12 +114,20 @@ export interface UploadRefusal {
 export class BindingSignatures {
   #policyUrl: string;
   #secret: string;
+  #journal: Journal;
   #log: FastifyBaseLogger;
   #latestSignatureOf: (documentId: string) => Promise<string | null>;
 
-  constructor(policyInternalUrl: string, secret: string, log: FastifyBaseLogger, latestSignatureOf: (documentId: string) => Promise<string | null>) {
+  constructor(
+    policyInternalUrl: string,
+    secret: string,
+    journal: Journal,
+    log: FastifyBaseLogger,
+    latestSignatureOf: (documentId: string) => Promise<string | null>,
+  ) {
     this.#policyUrl = policyInternalUrl;
     this.#secret = secret;
+    this.#journal = journal;
     this.#log = log;
     this.#latestSignatureOf = latestSignatureOf;
   }
@@ -209,15 +219,16 @@ export class BindingSignatures {
 
   // Checks a stored file being served, aside: it is served all the same. A
   // file that no longer matches its binding's signature, or whose signature
-  // is not the latest the portal stored for the document, is logged, and so
-  // is one that holds none, until its next save signs it.
-  checkAside(file: Uint8Array, document: CheckedDocument, servedTo: ServedTo): void {
-    this.#check(file, document, servedTo).catch((error: unknown) => {
+  // is not the latest the portal stored for the document, goes into the
+  // journal, and so does one that holds none, until its next save signs it,
+  // with who downloaded it, if anyone did.
+  checkAside(file: Uint8Array, document: CheckedDocument, servedTo: ServedTo, downloader: UserIdentity | null): void {
+    this.#check(file, document, servedTo, downloader).catch((error: unknown) => {
       this.#log.error({ documentId: document.id, servedTo, err: error }, 'The signature of a stored file could not be checked');
     });
   }
 
-  async #check(file: Uint8Array, document: CheckedDocument, servedTo: ServedTo): Promise<void> {
+  async #check(file: Uint8Array, document: CheckedDocument, servedTo: ServedTo, downloader: UserIdentity | null): Promise<void> {
     const documentId = document.id;
     const served = { [DOCUMENT_ID_HEADER]: documentId, ...(document.latestSignature === null ? {} : { [LATEST_SIGNATURE_HEADER]: document.latestSignature }) };
     const verification = await this.#ask('/bindings/verify', file, document.format, readVerification, served);
@@ -225,16 +236,20 @@ export class BindingSignatures {
     // the latest signature on: the file served was the newer one.
     const superseded =
       verification.status === 'altered' && verification.reason === NOT_THE_LATEST && (await this.#latestSignatureOf(documentId)) !== document.latestSignature;
+    const people = downloader === null ? [] : [journalPerson('downloader', downloader)];
+    const alert = (level: 'info' | 'warn', message: string, fields: Record<string, unknown>): void => {
+      this.#journal.record({ category: 'stored-file', level, message, documentId, fields: { servedTo, ...fields }, people });
+    };
     if (verification.status === 'altered' && !superseded) {
       const { reason, changedParts } = verification;
-      this.#log.warn({ documentId, servedTo, reason, changedParts }, 'Stored file no longer matches its signature');
+      alert('warn', 'Stored file no longer matches its signature', { reason, changedParts });
     } else if (verification.status === 'unsigned') {
-      this.#log.info({ documentId, servedTo }, 'Stored file unsigned');
+      alert('info', 'Stored file unsigned', {});
     }
     // The platform never writes one (ADR 0005): it came from outside, and Word
     // could show its label instead of the signed one.
     if (verification.labelInformationPart !== null) {
-      this.#log.warn({ documentId, servedTo, part: verification.labelInformationPart }, 'Stored file holds a Sensitivity Label Information part');
+      alert('warn', 'Stored file holds a Sensitivity Label Information part', { part: verification.labelInformationPart });
     }
   }
 

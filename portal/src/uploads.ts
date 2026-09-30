@@ -17,7 +17,7 @@ export interface UploadOptions {
   policyInternalUrl: string;
   documentsDirectory: string;
   signatures: BindingSignatures;
-  journal: LabelJournal;
+  labelJournal: LabelJournal;
 }
 
 // A person brings a DOCX or an XLSX into the portal (an upload). Its base
@@ -94,7 +94,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
         return refuse(reply, 503, 'The policy service could not sign the document. Try again later.');
       }
       await storeNewDocument(options.documentsDirectory, documentId, signed.content, prepared.value.format, name, signed.signatureValue);
-      options.journal.recordUpload({ documentId, base: kept, read: carried, signature: reading.value.signature }, lowering, user.id);
+      options.labelJournal.recordUpload({ documentId, base: kept, read: carried, signature: reading.value.signature }, lowering, user);
       return reply.redirect(`/documents/${documentId}/edit`, 303);
     });
   });

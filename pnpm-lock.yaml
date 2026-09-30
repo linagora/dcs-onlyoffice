@@ -126,10 +126,16 @@ importers:
       openid-client:
         specifier: 6.8.8
         version: 6.8.8
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.4
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
       typescript:
         specifier: 7.0.2
         version: 7.0.2
