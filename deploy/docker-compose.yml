@@ -61,6 +61,10 @@ services:
       NODE_EXTRA_CA_CERTS: /pki/public/ca.crt
       POLICY_INTERNAL_URL: http://policy:3001
       OPENTDF_INTERNAL_URL: http://opentdf:8080
+      JOURNAL_DB_HOST: postgres
+      JOURNAL_DB_NAME: opentdf
+      JOURNAL_DB_USER: dcs_journal
+      JOURNAL_DB_PASSWORD: ${JOURNAL_DB_PASSWORD:?set JOURNAL_DB_PASSWORD in .env}
     volumes:
       - documents:/data/documents
       - ./demo/documents:/templates:ro
@@ -69,6 +73,8 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${PORTAL_PORT:-6140}:3000"
     depends_on:
       init:
+        condition: service_completed_successfully
+      database-setup:
         condition: service_completed_successfully
       policy:
         condition: service_healthy
@@ -166,8 +172,9 @@ services:
       - pki-private:/pki/private
 
   # Roles and schemas of the stack's PostgreSQL: the platform's, which OpenTDF
-  # owns, and the clearance directory's, which the policy service owns and
-  # OpenTDF's entity resolution reads.
+  # owns; the clearance directory's, which the policy service owns and
+  # OpenTDF's entity resolution reads; and the journal's, where the portal may
+  # only add entries and read them.
   database-setup:
     image: postgres:17.11-alpine
     command: ["/bin/sh", "/setup/setup.sh"]
@@ -181,6 +188,7 @@ services:
       OPENTDF_PLATFORM_DB_PASSWORD: ${OPENTDF_PLATFORM_DB_PASSWORD:?set OPENTDF_PLATFORM_DB_PASSWORD in .env}
       DIRECTORY_DB_PASSWORD: ${DIRECTORY_DB_PASSWORD:?set DIRECTORY_DB_PASSWORD in .env}
       DIRECTORY_READER_PASSWORD: ${DIRECTORY_READER_PASSWORD:?set DIRECTORY_READER_PASSWORD in .env}
+      JOURNAL_DB_PASSWORD: ${JOURNAL_DB_PASSWORD:?set JOURNAL_DB_PASSWORD in .env}
     volumes:
       - ./postgres/setup.sh:/setup/setup.sh:ro
     depends_on:
