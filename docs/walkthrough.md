@@ -130,4 +130,4 @@ Once both leave the editor, the stored workbook carries the page marking and a b
 
 ## The journal
 
-Every step that changes a label is in the portal's journal, which never holds a portion's text: in `deploy`, `docker compose logs portal | grep -E 'Base label|Portion|Document uploaded|Existing content'`.
+Every step that changes a label is in the journal, which never holds a portion's text: Alice, an administrator, opens **Journal** in the portal's header, and filters it by document, person, period or category. The portal also writes the journal to its log: in `deploy`, `docker compose logs portal | grep -E 'Base label|Portion|Document uploaded|Existing content'`.
