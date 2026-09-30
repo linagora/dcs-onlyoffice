@@ -4,7 +4,15 @@ import type JSZip from 'jszip';
 import { LABEL_NAMESPACE } from './adatp4774.ts';
 import { BINDING_NAMESPACE, bindablePartsOf } from './adatp4778.ts';
 import { holdsSecret } from './bearer.ts';
-import { type AlterationReason, bindingAltered, type BindingSigner, type BindingVerification, signedDocumentBinding, verifyDocumentBinding } from './binding-signature.ts';
+import {
+  type AlterationReason,
+  bindingAltered,
+  type BindingSigner,
+  type BindingVerification,
+  type ServedDocument,
+  signedDocumentBinding,
+  verifyDocumentBinding,
+} from './binding-signature.ts';
 import { customXmlParts, declaredContentTypes, loadPackage, mainPartOf, partNamesOf } from './opc.ts';
 import { labelInformationPartOf, type MappedSensitivityLabel, writeSensitivityLabel } from './sensitivity-label.ts';
 import { parseXml } from './xml.ts';
@@ -23,6 +31,10 @@ const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}'
 // Saved documents, pictures included, stay well below this.
 const PACKAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const STORED_CUSTOM_PROPERTIES_HEADER = 'x-stored-custom-properties';
+// The document the portal stores or serves a package as, and the latest
+// signature it stored for that document.
+const DOCUMENT_ID_HEADER = 'x-document-id';
+const LATEST_SIGNATURE_HEADER = 'x-latest-signature';
 
 // The document label that a base label and portion labels give, as the panel
 // computes it: its code and its ADatP-4774 label element.
@@ -94,8 +106,9 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // The binding references the parts the package holds, those written just
     // now included: only the saved package tells which parts exist.
     const parts = await partsOf(zip, await bindablePartsOf(zip, binding.part));
+    const signing = { signer: options.signer, now: options.now(), documentId: headerOf(request, DOCUMENT_ID_HEADER) };
     return {
-      signed: { part: binding.part, xml: signedDocumentBinding(computed.labelXml, parts, await declaredContentTypes(zip), options.signer, options.now()) },
+      signed: { part: binding.part, ...signedDocumentBinding(computed.labelXml, parts, await declaredContentTypes(zip), signing) },
       // The other parts written, which the portal stores with the binding.
       parts: await partsWritten(zip, writtenParts),
       replacement: before === computed.code ? null : { before, after: computed.code },
@@ -114,13 +127,20 @@ export function registerPackageSignatures(app: FastifyInstance, options: Package
     // A Sensitivity Label Information part could change the label Word shows,
     // and the signature does not cover it: the verdict names it.
     const labelInformationPart = await labelInformationPartOf(zip);
-    return { ...(await bindingVerdict(zip, await readPackageLabels(zip), options.signer.certificate)), labelInformationPart };
+    const served = { documentId: headerOf(request, DOCUMENT_ID_HEADER), latestSignature: headerOf(request, LATEST_SIGNATURE_HEADER) };
+    return { ...(await bindingVerdict(zip, await readPackageLabels(zip), options.signer.certificate, served)), labelInformationPart };
   });
 }
 
 // The parts written, as the portal stores them.
 async function partsWritten(zip: JSZip, names: string[]): Promise<{ part: string; xml: string }[]> {
   return Promise.all(names.map(async (part) => ({ part, xml: (await zip.file(part)?.async('string')) ?? '' })));
+}
+
+// A header the portal sends, null when it sends none.
+function headerOf(request: FastifyRequest, name: string): string | null {
+  const header = request.headers[name];
+  return typeof header === 'string' && header !== '' ? header : null;
 }
 
 // The custom properties part of the file as stored before this save, which the
@@ -167,8 +187,14 @@ export function bindingLabelXml(binding: PackageBinding): string | null {
 }
 
 // What a package's binding signature says against the certificate: valid,
-// altered, unsigned, or no labels at all.
-export async function bindingVerdict(zip: JSZip, labels: PackageLabels, certificate: string): Promise<BindingVerification | { status: 'unlabelled' }> {
+// altered, unsigned, or no labels at all. `served` says which document the
+// portal serves it as, if it does.
+export async function bindingVerdict(
+  zip: JSZip,
+  labels: PackageLabels,
+  certificate: string,
+  served: ServedDocument = { documentId: null, latestSignature: null },
+): Promise<BindingVerification | { status: 'unlabelled' }> {
   const sole = soleBinding(labels);
   if (!sole.ok) {
     return bindingAltered(sole.reason);
@@ -178,7 +204,7 @@ export async function bindingVerdict(zip: JSZip, labels: PackageLabels, certific
   }
   const bindingXml = (await zip.file(sole.binding.part)?.async('string')) ?? '';
   const names = partNamesOf(zip);
-  return verifyDocumentBinding(bindingXml, await partsOf(zip, names), await bindablePartsOf(zip, sole.binding.part), certificate);
+  return verifyDocumentBinding(bindingXml, await partsOf(zip, names), await bindablePartsOf(zip, sole.binding.part), certificate, served);
 }
 
 // The package's one binding, null when it holds neither a binding nor a base

@@ -14,7 +14,12 @@ const ECDSA_SHA256 = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256';
 const WSU_NAMESPACE = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd';
 const SIGNATURE_ID = 'binding-signature';
 const MANIFEST_ID = 'binding-parts';
+// The signature properties keep the Id they had when they held the signing
+// time alone, which earlier signatures reference.
 const PROPERTIES_ID = 'binding-signing-time';
+// The namespace of the signature property that names the document signed
+// for.
+const SIGNED_DOCUMENT_NAMESPACE = 'urn:linagora:dcs:signature:1';
 
 // Why a document label binding, or its package, no longer matches what the
 // policy service signed.
@@ -23,6 +28,9 @@ export type AlterationReason =
   | 'The binding holds what its signature does not cover'
   | 'The signature does not hold'
   | 'Parts changed since signing'
+  | 'Signed for another document'
+  | 'The signature names no document'
+  | 'Not the latest signed version'
   | 'The package has a base label but no document label binding'
   | 'The package holds several document label bindings, where ADatP-4778.2 allows one';
 
@@ -37,6 +45,28 @@ export type BindingVerification =
 export interface BindingSigner {
   privateKey: string;
   certificate: string;
+}
+
+// Who signs a binding, when, and for which document: the one the portal
+// stores the package as, null when it names none.
+export interface SigningContext {
+  signer: BindingSigner;
+  now: Date;
+  documentId: string | null;
+}
+
+// The document the portal serves a package as, and the value of the latest
+// signature it stored for that document; null where it does not say.
+export interface ServedDocument {
+  documentId: string | null;
+  latestSignature: string | null;
+}
+
+// A signed binding, and its signature's value, which the portal keeps as the
+// latest it stored for the document.
+export interface SignedBinding {
+  xml: string;
+  signatureValue: string;
 }
 
 class Sha384 implements HashAlgorithm {
@@ -84,15 +114,15 @@ function signedInfoBytes(signedInfo: BinaryLike): Uint8Array {
 // content types the package declares, and the parts go into a Manifest with
 // their SHA-384 digests: signature libraries do not read pack:/// addresses,
 // so a verifier digests those parts again itself. The signature also covers
-// the MetadataBinding, whose label it vouches for, and the signing time. It
-// goes first in the BindingInformation element.
+// the MetadataBinding, whose label it vouches for, and its properties: the
+// signing time and the document signed for. It goes first in the
+// BindingInformation element.
 export function signedDocumentBinding(
   labelXml: string,
   parts: ReadonlyMap<string, Uint8Array>,
   contentTypes: ReadonlyMap<string, string>,
-  signer: BindingSigner,
-  now: Date,
-): string {
+  { signer, now, documentId }: SigningContext,
+): SignedBinding {
   const references = Array.from(
     parts,
     ([name, bytes]) => `<Reference URI="${escapeXml(packUri(name))}"><DigestMethod Algorithm="${SHA384}"/><DigestValue>${sha384(bytes)}</DigestValue></Reference>`,
@@ -108,7 +138,11 @@ export function signedDocumentBinding(
           `<Manifest Id="${MANIFEST_ID}">${references.join('')}</Manifest>` +
           `<SignatureProperties Id="${PROPERTIES_ID}"><SignatureProperty Target="#${SIGNATURE_ID}">` +
           `<wsu:Timestamp xmlns:wsu="${WSU_NAMESPACE}"><wsu:Created>${now.toISOString()}</wsu:Created></wsu:Timestamp>` +
-          '</SignatureProperty></SignatureProperties>',
+          '</SignatureProperty>' +
+          (documentId === null
+            ? ''
+            : `<SignatureProperty Target="#${SIGNATURE_ID}"><sig:document xmlns:sig="${SIGNED_DOCUMENT_NAMESPACE}">${escapeXml(documentId)}</sig:document></SignatureProperty>`) +
+          '</SignatureProperties>',
       },
     ],
   });
@@ -130,7 +164,13 @@ export function signedDocumentBinding(
     attrs: { Id: SIGNATURE_ID },
     location: { reference: '/*', action: 'prepend' },
   });
-  return signature.getSignedXml();
+  const xml = signature.getSignedXml();
+  const parsed = parseXml(xml);
+  const signed = parsed.ok ? childrenNamed(parsed.root, SIGNATURE_NAMESPACE, 'Signature')[0] : undefined;
+  if (signed === undefined) {
+    throw new Error('A binding signed without its signature');
+  }
+  return { xml, signatureValue: signatureValueOf(signed) };
 }
 
 // Verifies a document label binding against the certificate the policy
@@ -138,11 +178,19 @@ export function signedDocumentBinding(
 // the signature and the MetadataBinding it covers, nothing beside them; the
 // signature's algorithms alone, the configured certificate rather than the
 // one in KeyInfo, and references to the MetadataBinding, the Manifest and the
-// signing time. The package parts the signed Manifest names are then digested
-// again. A part among `bindable`, those the binding would reference now, that
-// the Manifest does not name counts as changed too: it was added since
-// signing, or an earlier signature left it out.
-export function verifyDocumentBinding(bindingXml: string, parts: ReadonlyMap<string, Uint8Array>, bindable: readonly string[], certificate: string): BindingVerification {
+// signature properties. The package parts the signed Manifest names are then
+// digested again. A part among `bindable`, those the binding would reference
+// now, that the Manifest does not name counts as changed too: it was added
+// since signing, or an earlier signature left it out. A package whose parts
+// are unchanged is then checked against the document it is served as: the
+// one its signature names, and the latest signature the portal stored for it.
+export function verifyDocumentBinding(
+  bindingXml: string,
+  parts: ReadonlyMap<string, Uint8Array>,
+  bindable: readonly string[],
+  certificate: string,
+  served: ServedDocument,
+): BindingVerification {
   const parsed = parseXml(bindingXml);
   if (!parsed.ok) {
     return bindingAltered('The binding is not well-formed XML');
@@ -159,7 +207,7 @@ export function verifyDocumentBinding(bindingXml: string, parts: ReadonlyMap<str
   verifier.HashAlgorithms = { [SHA384]: Sha384 };
   const expectedReferences = [DOCUMENT_BINDING_ID, MANIFEST_ID, PROPERTIES_ID].map((id) => `#${id}`);
   const holds = signatureHolds(verifier, signature.toString(), bindingXml);
-  const manifest = holds ? signedManifest(verifier.getSignedReferences()) : null;
+  const manifest = holds ? signedElement(verifier.getSignedReferences(), 'Manifest') : null;
   if (manifest === null || verifier.getReferences().map((reference) => reference.uri).join(' ') !== expectedReferences.join(' ')) {
     return bindingAltered('The signature does not hold');
   }
@@ -176,7 +224,21 @@ export function verifyDocumentBinding(bindingXml: string, parts: ReadonlyMap<str
   const named = new Set(references.map(({ name }) => name));
   const unreferenced = bindable.filter((part) => !named.has(part));
   const changedParts = [...digestChanged, ...unreferenced].sort();
-  return changedParts.length === 0 ? { status: 'valid' } : { status: 'altered', reason: 'Parts changed since signing', changedParts };
+  if (changedParts.length > 0) {
+    return { status: 'altered', reason: 'Parts changed since signing', changedParts };
+  }
+  const properties = signedElement(verifier.getSignedReferences(), 'SignatureProperties');
+  const signedDocument = properties?.getElementsByTagNameNS(SIGNED_DOCUMENT_NAMESPACE, 'document')[0]?.textContent ?? null;
+  if (served.documentId !== null && signedDocument === null) {
+    return bindingAltered('The signature names no document');
+  }
+  if (served.documentId !== null && signedDocument !== served.documentId) {
+    return bindingAltered('Signed for another document');
+  }
+  if (served.latestSignature !== null && signatureValueOf(signature) !== served.latestSignature) {
+    return bindingAltered('Not the latest signed version');
+  }
+  return { status: 'valid' };
 }
 
 export function bindingAltered(reason: AlterationReason): BindingVerification {
@@ -185,7 +247,8 @@ export function bindingAltered(reason: AlterationReason): BindingVerification {
 
 // Whether a signed binding holds the elements signedDocumentBinding writes and
 // no other: first the signature, with its signed info, its value, the signing
-// certificate and one object holding the Manifest and the signing time; then
+// certificate and one object holding the Manifest and the signature
+// properties; then
 // one container of the MetadataBinding the signature references. Anything else,
 // a label a reader could take for the document's included, is unsigned.
 function holdsOnlySignedContent(root: Element): boolean {
@@ -232,11 +295,18 @@ function signatureHolds(verifier: SignedXml, signatureXml: string, bindingXml: s
   }
 }
 
-// The Manifest among the references a verified signature covers, as signed.
-function signedManifest(signedReferences: readonly string[]): Element | null {
+// A signature's value, as its SignatureValue element holds it, without the
+// line breaks a serialiser may add.
+function signatureValueOf(signature: Element): string {
+  return (childrenNamed(signature, SIGNATURE_NAMESPACE, 'SignatureValue')[0]?.textContent ?? '').replace(/\s/g, '');
+}
+
+// The element of that name, in the signature's namespace, among the
+// references a verified signature covers, as signed.
+function signedElement(signedReferences: readonly string[], localName: string): Element | null {
   for (const xml of signedReferences) {
     const parsed = parseXml(xml);
-    if (parsed.ok && parsed.root.namespaceURI === SIGNATURE_NAMESPACE && parsed.root.localName === 'Manifest') {
+    if (parsed.ok && parsed.root.namespaceURI === SIGNATURE_NAMESPACE && parsed.root.localName === localName) {
       return parsed.root;
     }
   }

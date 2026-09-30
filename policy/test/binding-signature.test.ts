@@ -19,6 +19,8 @@ const SECRET = 'fictional-binding-signature-secret';
 const BINDING_NAMESPACE = 'urn:nato:stanag:4778:bindinginformation:1:0';
 const SIGNATURE_NAMESPACE = 'http://www.w3.org/2000/09/xmldsig#';
 const WSU_NAMESPACE = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd';
+// The namespace of the signature property that names the document signed for.
+const SIGNED_DOCUMENT_NAMESPACE = 'urn:linagora:dcs:signature:1';
 // ADatP-4778.2 makes exclusive canonicalisation, SHA-384 digests and ECDSA
 // with SHA-256 signatures mandatory (Tables 2-2 to 2-4).
 const EXCLUSIVE_C14N = 'http://www.w3.org/2001/10/xml-exc-c14n#';
@@ -48,6 +50,7 @@ const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}'
 interface Signed {
   part: string;
   xml: string;
+  signatureValue: string;
 }
 
 // What a signed binding declares besides its values.
@@ -81,14 +84,14 @@ describe('the signature of the document label binding', () => {
     await rm(keys, { recursive: true, force: true });
   });
 
-  async function signingServer(name: string): Promise<FastifyInstance> {
+  async function signingServer(name: string, signingTime: Date = NOW): Promise<FastifyInstance> {
     return buildPolicyServer({
       spifDirectory: DEMO_SPIFS,
       bindingSignature: {
         secret: SECRET,
         signer: { privateKey: await readFile(path.join(keys, `${name}.key`), 'utf8'), certificate: await readFile(path.join(keys, `${name}.pem`), 'utf8') },
       },
-      now: () => NOW,
+      now: () => signingTime,
     });
   }
 
@@ -119,11 +122,18 @@ describe('the signature of the document label binding', () => {
       .sort();
   }
 
-  async function sign(docx: Uint8Array, secret: string | null = SECRET, type: string = DOCX_TYPE): Promise<{ statusCode: number; body: unknown }> {
+  // The portal's request to sign a package; `headers` may name the document
+  // the package is.
+  async function sign(
+    docx: Uint8Array,
+    secret: string | null = SECRET,
+    type: string = DOCX_TYPE,
+    headers: Record<string, string> = {},
+  ): Promise<{ statusCode: number; body: unknown }> {
     const response = await server.inject({
       method: 'POST',
       url: '/bindings/sign',
-      headers: { 'content-type': type, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
+      headers: { ...headers, 'content-type': type, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
       payload: Buffer.from(docx),
     });
     return { statusCode: response.statusCode, body: response.json() };
@@ -132,17 +142,17 @@ describe('the signature of the document label binding', () => {
   function signedOf(body: unknown): Signed {
     assert.ok(typeof body === 'object' && body !== null && 'signed' in body, 'expected a signed binding');
     const { signed } = body;
-    assert.ok(typeof signed === 'object' && signed !== null && 'part' in signed && 'xml' in signed, 'expected a signed binding');
-    assert.ok(typeof signed.part === 'string' && typeof signed.xml === 'string', 'expected a signed binding');
-    return { part: signed.part, xml: signed.xml };
+    assert.ok(typeof signed === 'object' && signed !== null && 'part' in signed && 'xml' in signed && 'signatureValue' in signed, 'expected a signed binding');
+    assert.ok(typeof signed.part === 'string' && typeof signed.xml === 'string' && typeof signed.signatureValue === 'string', 'expected a signed binding');
+    return { part: signed.part, xml: signed.xml, signatureValue: signed.signatureValue };
   }
 
   // A package whose binding `signer` signed, as the portal stores it.
-  async function signedPackage(docx: Uint8Array, signer: FastifyInstance = server, type: string = DOCX_TYPE): Promise<Uint8Array> {
+  async function signedPackage(docx: Uint8Array, signer: FastifyInstance = server, type: string = DOCX_TYPE, headers: Record<string, string> = {}): Promise<Uint8Array> {
     const response = await signer.inject({
       method: 'POST',
       url: '/bindings/sign',
-      headers: { 'content-type': type, authorization: `Bearer ${SECRET}` },
+      headers: { ...headers, 'content-type': type, authorization: `Bearer ${SECRET}` },
       payload: Buffer.from(docx),
     });
     const signed = signedOf(response.json());
@@ -167,12 +177,19 @@ describe('the signature of the document label binding', () => {
     return zip.generateAsync({ type: 'uint8array' });
   }
 
-  // The policy service's verdict on a package.
-  async function verdictOf(docx: Uint8Array, secret: string | null = SECRET, type: string = DOCX_TYPE): Promise<{ statusCode: number; body: unknown }> {
+  // The policy service's verdict on a package; `headers` may name the
+  // document the portal serves it as, and the latest signature it stored for
+  // that document.
+  async function verdictOf(
+    docx: Uint8Array,
+    secret: string | null = SECRET,
+    type: string = DOCX_TYPE,
+    headers: Record<string, string> = {},
+  ): Promise<{ statusCode: number; body: unknown }> {
     const response = await server.inject({
       method: 'POST',
       url: '/bindings/verify',
-      headers: { 'content-type': type, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
+      headers: { ...headers, 'content-type': type, ...(secret === null ? {} : { authorization: `Bearer ${secret}` }) },
       payload: Buffer.from(docx),
     });
     return { statusCode: response.statusCode, body: response.json() };
@@ -671,6 +688,83 @@ describe('the signature of the document label binding', () => {
     const docx = await withChangedPart(signed, 'word/document.xml', (xml) => `${xml}<!-- changed after signing -->`);
 
     assert.deepEqual(await verdictOf(docx), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'Parts changed since signing', changedParts: ['word/document.xml'], labelInformationPart: null },
+    });
+  });
+
+  it('names the document it signs for among its signature properties, and gives its signature value, as xmlsec1 verifies', async () => {
+    const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
+
+    const { statusCode, body } = await sign(docx, SECRET, DOCX_TYPE, { 'x-document-id': 'fictional-document' });
+
+    assert.equal(statusCode, 200);
+    const signed = signedOf(body);
+    const binding = new DOMParser().parseFromString(signed.xml, 'text/xml');
+    const named = Array.from(binding.getElementsByTagNameNS(SIGNED_DOCUMENT_NAMESPACE, 'document'));
+    assert.deepEqual(
+      named.map((element) => [element.parentNode?.localName, element.textContent]),
+      [['SignatureProperty', 'fictional-document']],
+    );
+    assert.deepEqual(
+      Array.from(binding.getElementsByTagNameNS(SIGNATURE_NAMESPACE, 'SignatureValue')).map((element) => (element.textContent ?? '').replace(/\s/g, '')),
+      [signed.signatureValue],
+    );
+    const verification = await verifyWithXmlsec(docx, signed.xml, certificate);
+    const count = bindableParts(await JSZip.loadAsync(docx)).length;
+    assert.deepEqual([verification.status, verification.manifest], [0, `${count}/${count}`]);
+  });
+
+  it('reports a stored file whose signature names another document, or none, and finds one that names its document valid', async () => {
+    const forAnother = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE), server, DOCX_TYPE, { 'x-document-id': 'fictional-other-document' });
+    const forNone = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE));
+    const servedAs = { 'x-document-id': 'fictional-document' };
+
+    assert.deepEqual(await verdictOf(forAnother, SECRET, DOCX_TYPE, servedAs), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'Signed for another document', changedParts: [], labelInformationPart: null },
+    });
+    assert.deepEqual(await verdictOf(forNone, SECRET, DOCX_TYPE, servedAs), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'The signature names no document', changedParts: [], labelInformationPart: null },
+    });
+    assert.deepEqual(await verdictOf(forAnother, SECRET, DOCX_TYPE, { 'x-document-id': 'fictional-other-document' }), {
+      statusCode: 200,
+      body: { status: 'valid', labelInformationPart: null },
+    });
+  });
+
+  it('reports a stored file whose signature is not the latest the portal stored for its document', async () => {
+    const docx = await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE);
+    const servedAs = { 'x-document-id': 'fictional-document' };
+    const earlier = signedOf((await sign(docx, SECRET, DOCX_TYPE, servedAs)).body);
+    // The next save, signed a minute later.
+    const laterSigner = await signingServer('signer', new Date(NOW.getTime() + 60_000));
+    const response = await laterSigner.inject({
+      method: 'POST',
+      url: '/bindings/sign',
+      headers: { ...servedAs, 'content-type': DOCX_TYPE, authorization: `Bearer ${SECRET}` },
+      payload: Buffer.from(docx),
+    });
+    await laterSigner.close();
+    const latest = signedOf(response.json());
+    const stored = await withParts(docx, { [earlier.part]: earlier.xml });
+
+    assert.deepEqual(await verdictOf(stored, SECRET, DOCX_TYPE, { ...servedAs, 'x-latest-signature': latest.signatureValue }), {
+      statusCode: 200,
+      body: { status: 'altered', reason: 'Not the latest signed version', changedParts: [], labelInformationPart: null },
+    });
+    assert.deepEqual(await verdictOf(stored, SECRET, DOCX_TYPE, { ...servedAs, 'x-latest-signature': earlier.signatureValue }), {
+      statusCode: 200,
+      body: { status: 'valid', labelInformationPart: null },
+    });
+  });
+
+  it('names the parts of a stored file changed since signing before the document its signature names', async () => {
+    const forAnother = await signedPackage(await labelledDocument(DIFFUSION_RESTREINTE, DIFFUSION_RESTREINTE), server, DOCX_TYPE, { 'x-document-id': 'fictional-other-document' });
+    const changed = await withChangedPart(forAnother, 'word/document.xml', (xml) => `${xml}<!-- changed after signing -->`);
+
+    assert.deepEqual(await verdictOf(changed, SECRET, DOCX_TYPE, { 'x-document-id': 'fictional-document' }), {
       statusCode: 200,
       body: { status: 'altered', reason: 'Parts changed since signing', changedParts: ['word/document.xml'], labelInformationPart: null },
     });
