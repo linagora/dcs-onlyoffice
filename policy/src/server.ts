@@ -193,12 +193,28 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     return clearanceDirectory === undefined || email === null ? null : currentClearanceOf(clearanceDirectory.store, email, policy.name, now());
   };
 
+  // The caller's valid clearance under each policy, read from the directory
+  // once per policy however many labels are decided.
+  const callerClearances = (request: FastifyRequest): ((policy: SecurityPolicy) => Promise<ClearanceTerms | null>) => {
+    const known = new Map<string, Promise<ClearanceTerms | null>>();
+    return async (policy) => {
+      const clearance = known.get(policy.name) ?? callerClearance(request, policy);
+      known.set(policy.name, clearance);
+      return clearance;
+    };
+  };
+
   registerPortionLocks(
     app,
     new PortionLocks(options.portionLockLeaseMs ?? DEFAULT_PORTION_LOCK_LEASE_MS),
-    async (request, code) => {
-      const decided = labelOfCode(code);
-      return decided === null ? null : accessDecision(decided.policy, await callerClearance(request, decided.policy), decided.label);
+    async (request, codes) => {
+      const clearanceUnder = callerClearances(request);
+      return Promise.all(
+        codes.map(async (code) => {
+          const decided = labelOfCode(code);
+          return decided === null ? null : accessDecision(decided.policy, await clearanceUnder(decided.policy), decided.label);
+        }),
+      );
     },
     now,
   );
@@ -326,19 +342,8 @@ export async function buildPolicyServer(options: PolicyServerOptions): Promise<F
     if (codes === null) {
       return reply.code(400).send({ error: 'Expected { codes: [label code or null] }' });
     }
-    const email = callerEmail(request);
     const language = request.query.lang ?? defaultLanguage;
-    // One reading of the directory per policy.
-    const clearances = new Map<string, Promise<ClearanceTerms | null>>();
-    const clearanceUnder = (policy: SecurityPolicy): Promise<ClearanceTerms | null> => {
-      const known =
-        clearances.get(policy.name) ??
-        (clearanceDirectory === undefined || email === null
-          ? Promise.resolve(null)
-          : currentClearanceOf(clearanceDirectory.store, email, policy.name, now()));
-      clearances.set(policy.name, known);
-      return known;
-    };
+    const clearanceUnder = callerClearances(request);
     const decisions = [];
     for (const code of codes) {
       const decided = code === null ? leastRestrictiveLabel() : labelOfCode(code);

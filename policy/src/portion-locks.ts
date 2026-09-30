@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { callerIdentity, type CallerIdentity } from './caller.ts';
-import { readField, readTextField } from './guards.ts';
+import { isStringList, readField, readTextField } from './guards.ts';
 
 export interface PortionLock {
   portion: string;
@@ -92,16 +92,17 @@ function entriesOf<T>(maps: Map<string, Map<string, T>>, document: string): Map<
   return entries;
 }
 
-// The access decision for the caller's clearance and a label: nobody changes
-// what they cannot read. Null when the label is not a valid one.
-export type LabelAccessDecision = (request: FastifyRequest, labelCode: string) => Promise<boolean | null>;
+// The access decisions for the caller's clearance and labels, one per label
+// code: nobody changes what they cannot read. Null for a code that is not a
+// valid label.
+export type LabelAccessDecisions = (request: FastifyRequest, labelCodes: string[]) => Promise<Array<boolean | null>>;
 
 interface PortionParams {
   document: string;
   portion: string;
 }
 
-export function registerPortionLocks(app: FastifyInstance, locks: PortionLocks, decideAccess: LabelAccessDecision, now: () => Date): void {
+export function registerPortionLocks(app: FastifyInstance, locks: PortionLocks, decideAccess: LabelAccessDecisions, now: () => Date): void {
   // Takes or, with `renewal`, renews a lock. The label is the one the caller
   // read the portion under: locks coordinate authors, and anyone able to edit
   // the document can write a portion's part without one.
@@ -114,7 +115,7 @@ export function registerPortionLocks(app: FastifyInstance, locks: PortionLocks, 
     if (code === null) {
       return reply.code(400).send({ error: 'Expected { code, renewal? }' });
     }
-    const granted = await decideAccess(request, code);
+    const [granted = null] = await decideAccess(request, [code]);
     if (granted === null) {
       return reply.code(422).send({ error: `${code} is not a valid label` });
     }
@@ -140,9 +141,31 @@ export function registerPortionLocks(app: FastifyInstance, locks: PortionLocks, 
       : reply.code(409).send({ error: 'Someone else holds the lock' });
   });
 
-  app.get<{ Params: { document: string } }>('/documents/:document/locks', async (request) =>
-    locks.list(request.params.document, now()).map(lockView),
-  );
+  // The document's locks and, among the labels asked, those the caller may
+  // read now: the panel asks each time it rereads the locks, and forgets what
+  // a revocation no longer lets its person read.
+  app.get<{ Params: { document: string }; Querystring: { label?: unknown } }>('/documents/:document/locks', async (request, reply) => {
+    const codes = labelCodesOf(request.query.label);
+    if (codes === null) {
+      return reply.code(400).send({ error: 'Expected label codes' });
+    }
+    const decisions = await decideAccess(request, codes);
+    return {
+      locks: locks.list(request.params.document, now()).map(lockView),
+      readable: codes.filter((_code, index) => decisions[index] === true),
+    };
+  });
+}
+
+// The label codes a query repeats, none when it names none.
+function labelCodesOf(value: unknown): string[] | null {
+  if (value === undefined) {
+    return [];
+  }
+  if (typeof value === 'string') {
+    return [value];
+  }
+  return isStringList(value) ? value : null;
 }
 
 function lockView(lock: PortionLock): { portion: string; holder: CallerIdentity; expiresAt: string } {

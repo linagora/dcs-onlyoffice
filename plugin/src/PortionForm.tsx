@@ -15,21 +15,36 @@ export type PortionFormPurpose =
 
 export interface PortionFormProps {
   labels: LabelView[];
+  // The labels the person may not read, which the form does not offer.
+  unreadable: ReadonlySet<string>;
   purpose: PortionFormPurpose;
   onSubmit: (label: LabelView, text: string) => Promise<WriteResult>;
 }
 
 // Protected text is typed here, never in the document body: text typed in the
 // body has already reached the co-editing server in clear.
-export function PortionForm({ labels, purpose, onSubmit }: PortionFormProps): JSX.Element {
+export function PortionForm({ labels: allLabels, unreadable, purpose, onSubmit }: PortionFormProps): JSX.Element {
   const [code, setCode] = useState<string | null>(purpose.kind === 'change' ? purpose.labelCode : null);
   const [text, setText] = useState(purpose.kind === 'change' ? purpose.text : '');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const labels = allLabels.filter((label) => !unreadable.has(label.code));
   const selected = labels.find((label) => label.code === code) ?? null;
   const tooLong = exceedsPortionTextLimit(text);
   const textArea = useRef<HTMLTextAreaElement>(null);
   const focused = purpose.kind === 'change' || purpose.requested;
+
+  // What was typed at a label the person may no longer read is erased, and
+  // the form says why.
+  useEffect(() => {
+    if (code !== null && unreadable.has(code)) {
+      setCode(null);
+      if (text !== '') {
+        setText('');
+        setFailure(messages.typedTextErased);
+      }
+    }
+  }, [code, unreadable, text]);
 
   useEffect(() => {
     if (focused) {

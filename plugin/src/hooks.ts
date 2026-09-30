@@ -254,7 +254,9 @@ const RETRY_INTERVAL_MS = 3_000;
 // What the panel can show of each portion, by portion id, each portion shown
 // as soon as it is read. A document that does not change re-renders nothing,
 // so failures worth retrying get their own timer.
-export function usePortionReadings(portions: StoredPortion[], reader: PortionReader | null): ReadonlyMap<string, PortionReading> {
+// Texts whose bound labels are among `unreadable` are forgotten, and shown as
+// refused.
+export function usePortionReadings(portions: StoredPortion[], reader: PortionReader | null, unreadable: ReadonlySet<string>): ReadonlyMap<string, PortionReading> {
   const [readings, setReadings] = useState<ReadonlyMap<string, PortionReading>>(new Map());
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -263,6 +265,7 @@ export function usePortionReadings(portions: StoredPortion[], reader: PortionRea
     }
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
+    reader.forget(unreadable);
     reader.retain(portions);
     const ids = new Set(portions.map((portion) => portion.id));
     setReadings((previous) => new Map([...previous].filter(([id]) => ids.has(id))));
@@ -289,7 +292,7 @@ export function usePortionReadings(portions: StoredPortion[], reader: PortionRea
         clearTimeout(retry);
       }
     };
-  }, [portions, reader, attempt]);
+  }, [portions, reader, attempt, unreadable]);
   return readings;
 }
 
@@ -405,20 +408,38 @@ export function usePortionBubble(pluginReady: Promise<PluginInfo>, content: Bubb
   }, [bubble, contentKey, selectionChanges]);
 }
 
-// Who else holds the lock of each portion of the document, by portion id,
-// reread as often as the document.
-export function usePortionLocks(documentId: string | null, userId: string | null): ReadonlyMap<string, LockHolder> {
+export interface PortionLocksView {
+  // Who else holds the lock of each portion of the document, by portion id.
+  othersLocks: ReadonlyMap<string, LockHolder>;
+  // The labels asked that the signed-in person may not read.
+  unreadable: ReadonlySet<string>;
+}
+
+// No label, the same set on every render.
+const NO_LABELS: ReadonlySet<string> = new Set();
+
+// The portion locks of the document, reread as often as the document, and,
+// among `labelCodes`, the labels the signed-in person may not read, which the
+// policy service decides at each reading: a revocation applies at once in the
+// panel. A reading that fails changes nothing.
+export function usePortionLocks(documentId: string | null, userId: string | null, labelCodes: readonly string[]): PortionLocksView {
   const [locks, setLocks] = useState<ReadonlyMap<string, LockHolder>>(new Map());
+  const [unreadable, setUnreadable] = useState<ReadonlySet<string>>(NO_LABELS);
+  // The codes, compared by value.
+  const asked = [...new Set(labelCodes)].sort().join('\n');
   useEffect(() => {
     if (documentId === null) {
       return;
     }
+    const askedCodes = asked === '' ? [] : asked.split('\n');
     let cancelled = false;
     const reread = async (): Promise<void> => {
-      const current = await fetchPortionLocks(documentId);
-      const others = new Map([...current].filter(([, holder]) => holder.id !== userId));
+      const current = await fetchPortionLocks(documentId, askedCodes);
+      const others = new Map([...current.locks].filter(([, holder]) => holder.id !== userId));
+      const refused = new Set(askedCodes.filter((code) => !current.readable.has(code)));
       if (!cancelled) {
         setLocks((previous) => (sameLocks(previous, others) ? previous : others));
+        setUnreadable((previous) => (sameCodes(previous, refused) ? previous : refused));
       }
     };
     const rereadInBackground = (): void => {
@@ -432,12 +453,16 @@ export function usePortionLocks(documentId: string | null, userId: string | null
       cancelled = true;
       clearInterval(timer);
     };
-  }, [documentId, userId]);
-  return locks;
+  }, [documentId, userId, asked]);
+  return { othersLocks: locks, unreadable };
 }
 
 function sameLocks(left: ReadonlyMap<string, LockHolder>, right: ReadonlyMap<string, LockHolder>): boolean {
   return left.size === right.size && [...left].every(([portion, holder]) => right.get(portion)?.id === holder.id);
+}
+
+function sameCodes(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  return left.size === right.size && [...left].every((code) => right.has(code));
 }
 
 // What the panel says next to one portion.
@@ -481,7 +506,9 @@ const EDIT_STEPS: Record<PortionEditKind, { writing: string; reporting: string }
 
 // A change or a deletion of a portion, under the portion lock the panel takes
 // first, renews at half its lease and releases once the change is saved, the
-// portion deleted or either dropped, or as the panel goes away.
+// portion deleted or either dropped, or as the panel goes away. A clearance
+// that no longer lets its person read the portion's label drops it at once,
+// and releases the lock.
 // `baseLabelCode` stands in for a document that has not stored its base label
 // yet.
 export function usePortionEdit(
@@ -490,6 +517,7 @@ export function usePortionEdit(
   refresh: () => Promise<DocumentState>,
   baseLabelCode: string | null,
   editor: EditorType | null,
+  unreadable: ReadonlySet<string>,
 ): PortionEditView {
   const [underWay, setUnderWay] = useState<(PortionEdit & { leaseMs: number }) | null>(null);
   const [notice, setNotice] = useState<PortionNotice | null>(null);
@@ -585,6 +613,21 @@ export function usePortionEdit(
     }
   };
 
+  const releaseAside = (portionId: string): void => {
+    release(portionId, null).catch((error: unknown) => {
+      logProblem('Releasing a portion lock', error);
+    });
+  };
+
+  useEffect(() => {
+    if (underWay === null || !unreadable.has(underWay.label.code) || holding.current !== underWay.portion.id) {
+      return;
+    }
+    setNotice({ portionId: underWay.portion.id, message: messages.portionNoLongerReadable });
+    releaseAside(underWay.portion.id);
+    // releaseAside changes with every render; the labels decide.
+  }, [underWay, unreadable]);
+
   // Writes with `writeWith` and the document's other labels, unless the
   // portion changed outside the panel since the lock was taken: writing would
   // drop that change. The lock is then released, with `nextVersionOnceWritten`
@@ -600,6 +643,11 @@ export function usePortionEdit(
     const { portion } = edit;
     const write = async (): Promise<WriteResult> => {
       const current = await refresh();
+      // A revocation, or a lock that lapsed, dropped the change or the
+      // deletion meanwhile.
+      if (holding.current !== portion.id) {
+        return { status: 'not-written' };
+      }
       const base = current.baseLabelCode ?? baseLabelCode;
       if (base === null) {
         return { status: 'not-written' };
@@ -619,6 +667,7 @@ export function usePortionEdit(
     if (result.status === 'cell-being-edited') {
       return result;
     }
+    const dropped = holding.current !== portion.id;
     await release(portion.id, result.status === 'written' ? nextVersionOnceWritten : null).catch((error: unknown) => {
       logProblem('Releasing a portion lock', error);
     });
@@ -630,8 +679,11 @@ export function usePortionEdit(
     await refresh().catch((error: unknown) => {
       logProblem('Rereading the document', error);
     });
-    const failure = writeFailureOf(edit.kind, result);
-    setNotice(failure === null ? null : { portionId: portion.id, message: failure });
+    // What dropped a change or a deletion that was not written keeps saying so.
+    if (!dropped || result.status === 'written') {
+      const failure = writeFailureOf(edit.kind, result);
+      setNotice(failure === null ? null : { portionId: portion.id, message: failure });
+    }
     return result;
   };
 
@@ -667,9 +719,7 @@ export function usePortionEdit(
 
   const cancel = (): void => {
     if (underWay !== null) {
-      release(underWay.portion.id, null).catch((error: unknown) => {
-        logProblem('Releasing a portion lock', error);
-      });
+      releaseAside(underWay.portion.id);
     }
   };
 

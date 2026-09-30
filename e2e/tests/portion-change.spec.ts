@@ -18,7 +18,8 @@ async function lockAnswer(page: Page, portion: SavedPortion): Promise<number> {
 
 // The portion locks of a document that the policy service lists.
 async function listedLocks(page: Page, portion: SavedPortion): Promise<unknown> {
-  return JSON.parse((await browserFetch(page, `/api/policy/documents/${portion.documentId}/locks`)).body.toString('utf8'));
+  const answer: unknown = JSON.parse((await browserFetch(page, `/api/policy/documents/${portion.documentId}/locks`)).body.toString('utf8'));
+  return typeof answer === 'object' && answer !== null && 'locks' in answer ? answer.locks : answer;
 }
 
 test('a portion changed under its lock is shown being changed to a co-author, then in its new version', async ({ page, browser }) => {

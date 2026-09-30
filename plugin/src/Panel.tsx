@@ -81,7 +81,6 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // The hint the insertion form gives, null when the panel offers none.
   const insertionHint = !readOnly && editor !== null && editor.insertsPortions ? editor.insertionHint : null;
   const offersPortions = insertionHint !== null;
-  const othersLocks = usePortionLocks(documentId, userId);
 
   const labelList = labels.status === 'loaded' ? labels.value : [];
   const policy = labelList[0]?.policy ?? null;
@@ -92,7 +91,17 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // Until the author picks one, the base label is the least restrictive.
   const storedBaseLabelCode = documentState?.baseLabelCode ?? null;
   const baseLabelCode = storedBaseLabelCode ?? labelList[0]?.code ?? null;
-  const edit = usePortionEdit(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh, baseLabelCode, editorType);
+  const portions = documentState?.portions ?? NO_PORTIONS;
+  // Who else is changing the portions, and which labels the person may no
+  // longer read, among those of the policy, which the forms offer, those of
+  // the portions and those bound to what the panel read: a revocation applies
+  // at once.
+  const { othersLocks, unreadable } = usePortionLocks(documentId, userId, [
+    ...labelList.map((label) => label.code),
+    ...portions.map((portion) => portion.labelCode),
+    ...(reader?.boundLabelCodes() ?? []),
+  ]);
+  const edit = usePortionEdit(documentId, envelopes.status === 'loaded' ? envelopes.value : null, refresh, baseLabelCode, editorType, unreadable);
   // Lowering the base label is reserved to administrators cleared for it.
   // Until the choices for the current label are known, only it is offered.
   const documentLoaded = documentState !== null;
@@ -105,8 +114,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
     baseChoices.status === 'loaded' && baseChoices.value !== null && baseChoices.value.current === storedBaseLabelCode
       ? baseChoices.value.choices
       : labelList.filter((label) => label.code === baseLabelCode);
-  const portions = documentState?.portions ?? NO_PORTIONS;
-  const readings = usePortionReadings(portions, reader);
+  const readings = usePortionReadings(portions, reader, unreadable);
 
   const activePortion = portions.find((portion) => portion.id === activePortionId) ?? null;
   usePortionBubble(pluginReady, activePortion === null ? null : bubbleContentOf(activePortion, readings.get(activePortion.id) ?? null, labelList), selectionChanges);
@@ -245,6 +253,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
               {offeredLabels !== null && offeredLabels.length > 0 && (
                 <PortionForm
                   labels={offeredLabels}
+                  unreadable={unreadable}
                   purpose={{ kind: 'insertion', requested: insertionRequested, hint: insertionHint, protection: protectionOffer }}
                   onSubmit={insert}
                 />
@@ -271,6 +280,7 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
                   edit.underWay.kind === 'change' ? (
                     <PortionForm
                       labels={edit.underWay.choices}
+                      unreadable={unreadable}
                       purpose={{ kind: 'change', labelCode: edit.underWay.label.code, text: edit.underWay.text, onCancel: edit.cancel }}
                       onSubmit={edit.save}
                     />
