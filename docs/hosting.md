@@ -40,6 +40,7 @@ Create `deploy/.env` with `deploy/scripts/init-env.sh`, which generates the secr
 | `OIDC_SCOPES` | `openid profile email groups` |
 | `OIDC_AUDIENCE` | only when access tokens do not carry `https://tdf.<DOMAIN>` in their audience |
 | `OPENTDF_PROVISIONER_CLIENT_SECRET` | the provisioning client's secret |
+| `CLEARANCE_CHECK_SECONDS` | remove the example's 10, meant for tests: the portal then checks the clearances of the people who hold an editing session's configuration every minute |
 | `PORTION_LOCK_LEASE_SECONDS` | remove the example's 20, meant for tests: an author then keeps a portion lock 5 minutes without renewing it |
 | `LABEL_MAPPING_FILE` | empty, until you have the label mapping of a real Microsoft 365 tenant: the example names a fictional one |
 
