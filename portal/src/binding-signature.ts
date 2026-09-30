@@ -4,6 +4,10 @@ import { DOCUMENT_FORMATS, type DocumentFormat, formatOfContentType, type Stored
 
 const SIGNATURE_TIMEOUT_MS = 30_000;
 const STORED_CUSTOM_PROPERTIES_HEADER = 'x-stored-custom-properties';
+// The document a file is stored or served as, and the latest signature the
+// portal stored for that document.
+const DOCUMENT_ID_HEADER = 'x-document-id';
+const LATEST_SIGNATURE_HEADER = 'x-latest-signature';
 // Beyond this, once encoded, a header could exceed what the policy service
 // accepts.
 const STORED_CUSTOM_PROPERTIES_LIMIT = 8 * 1024;
@@ -16,8 +20,13 @@ interface WrittenPart {
   xml: string;
 }
 
+// The signed binding, and its signature's value.
+interface SignedPart extends WrittenPart {
+  signatureValue: string;
+}
+
 interface SignatureAnswer {
-  signed: WrittenPart | null;
+  signed: SignedPart | null;
   // The other parts the policy service wrote, such as the custom properties
   // that hold the sensitivity label (ADR 0005).
   parts: WrittenPart[];
@@ -41,6 +50,22 @@ export type ServedTo = 'document-server' | 'download';
 
 // The stored document a package is, as the policy service needs to know it.
 type DocumentRef = Pick<StoredDocument, 'id' | 'format'>;
+
+// A stored document whose file is being served, with the latest signature
+// the portal stored for it when it looked the document up, before it read
+// the file.
+type CheckedDocument = Pick<StoredDocument, 'id' | 'format' | 'latestSignature'>;
+
+// The reason the policy service gives a file whose signature is not the
+// latest the portal sent it.
+const NOT_THE_LATEST = 'Not the latest signed version';
+
+// A file to store, and the value of its signature: null when the policy
+// service could not sign it.
+export interface SignedFile {
+  content: Uint8Array;
+  signatureValue: string | null;
+}
 
 // Where the label an uploaded file carries comes from: the platform's base
 // label part, an ADatP-4778 binding, or a sensitivity label that the label
@@ -88,19 +113,21 @@ export class BindingSignatures {
   #policyUrl: string;
   #secret: string;
   #log: FastifyBaseLogger;
+  #latestSignatureOf: (documentId: string) => Promise<string | null>;
 
-  constructor(policyInternalUrl: string, secret: string, log: FastifyBaseLogger) {
+  constructor(policyInternalUrl: string, secret: string, log: FastifyBaseLogger, latestSignatureOf: (documentId: string) => Promise<string | null>) {
     this.#policyUrl = policyInternalUrl;
     this.#secret = secret;
     this.#log = log;
+    this.#latestSignatureOf = latestSignatureOf;
   }
 
   // `stored` is the file as stored before this save: the editor never sees
   // the sensitivity label the policy service writes, so the label's date and
   // action id come from the stored file's custom properties.
-  async signed(file: Uint8Array, document: DocumentRef, stored: Uint8Array | null): Promise<Uint8Array> {
+  async signed(file: Uint8Array, document: DocumentRef, stored: Uint8Array | null): Promise<SignedFile> {
     const headers = await this.#storedPropertiesHeader(stored, document.id);
-    return (await this.#signedOrNull(file, document, headers, 'The binding of a save could not be signed')) ?? file;
+    return (await this.#signedOrNull(file, document, headers, 'The binding of a save could not be signed')) ?? { content: file, signatureValue: null };
   }
 
   // The label an uploaded file carries, where it comes from, and whether its
@@ -152,16 +179,17 @@ export class BindingSignatures {
 
   // A prepared upload with its binding signed; null when the policy service
   // could not sign it.
-  async signedUpload(prepared: PreparedUpload, documentId: string): Promise<Uint8Array | null> {
+  async signedUpload(prepared: PreparedUpload, documentId: string): Promise<SignedFile | null> {
     return this.#signedOrNull(prepared.file, { id: documentId, format: prepared.format }, {}, 'The binding of an upload could not be signed');
   }
 
   // The file with the parts the policy service wrote, its signed binding
-  // among them; null when it signed none, the failure then logged.
-  async #signedOrNull(file: Uint8Array, document: DocumentRef, headers: Record<string, string>, failure: string): Promise<Uint8Array | null> {
+  // among them, signed for the document; null when it signed none, the
+  // failure then logged.
+  async #signedOrNull(file: Uint8Array, document: DocumentRef, headers: Record<string, string>, failure: string): Promise<SignedFile | null> {
     let answer: SignatureAnswer;
     try {
-      answer = await this.#ask('/bindings/sign', file, document.format, readSignatureAnswer, headers);
+      answer = await this.#ask('/bindings/sign', file, document.format, readSignatureAnswer, { ...headers, [DOCUMENT_ID_HEADER]: document.id });
     } catch (error: unknown) {
       this.#log.error({ documentId: document.id, err: error }, failure);
       return null;
@@ -176,22 +204,28 @@ export class BindingSignatures {
     for (const written of [...answer.parts, answer.signed]) {
       zip.file(written.part, written.xml);
     }
-    return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+    return { content: await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }), signatureValue: answer.signed.signatureValue };
   }
 
   // Checks a stored file being served, aside: it is served all the same. A
-  // file that no longer matches its binding's signature is logged, and so is
-  // one that holds none, until its next save signs it.
-  checkAside(file: Uint8Array, document: DocumentRef, servedTo: ServedTo): void {
+  // file that no longer matches its binding's signature, or whose signature
+  // is not the latest the portal stored for the document, is logged, and so
+  // is one that holds none, until its next save signs it.
+  checkAside(file: Uint8Array, document: CheckedDocument, servedTo: ServedTo): void {
     this.#check(file, document, servedTo).catch((error: unknown) => {
       this.#log.error({ documentId: document.id, servedTo, err: error }, 'The signature of a stored file could not be checked');
     });
   }
 
-  async #check(file: Uint8Array, document: DocumentRef, servedTo: ServedTo): Promise<void> {
+  async #check(file: Uint8Array, document: CheckedDocument, servedTo: ServedTo): Promise<void> {
     const documentId = document.id;
-    const verification = await this.#ask('/bindings/verify', file, document.format, readVerification);
-    if (verification.status === 'altered') {
+    const served = { [DOCUMENT_ID_HEADER]: documentId, ...(document.latestSignature === null ? {} : { [LATEST_SIGNATURE_HEADER]: document.latestSignature }) };
+    const verification = await this.#ask('/bindings/verify', file, document.format, readVerification, served);
+    // A save that came between the lookup and the reading of the file moved
+    // the latest signature on: the file served was the newer one.
+    const superseded =
+      verification.status === 'altered' && verification.reason === NOT_THE_LATEST && (await this.#latestSignatureOf(documentId)) !== document.latestSignature;
+    if (verification.status === 'altered' && !superseded) {
       const { reason, changedParts } = verification;
       this.#log.warn({ documentId, servedTo, reason, changedParts }, 'Stored file no longer matches its signature');
     } else if (verification.status === 'unsigned') {
@@ -272,7 +306,9 @@ function readSignatureAnswer(body: unknown): SignatureAnswer | null {
     return null;
   }
   const { signed, parts, replacement } = body;
-  const signedPart = writtenPartOf(signed);
+  const written = writtenPartOf(signed);
+  const signatureValue: unknown = typeof signed === 'object' && signed !== null && 'signatureValue' in signed ? signed.signatureValue : null;
+  const signedPart = written === null || typeof signatureValue !== 'string' ? null : { ...written, signatureValue };
   if (!Array.isArray(parts)) {
     return null;
   }

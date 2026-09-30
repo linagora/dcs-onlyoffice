@@ -93,7 +93,7 @@ export function registerUploads(app: FastifyInstance, options: UploadOptions): v
       if (signed === null) {
         return refuse(reply, 503, 'The policy service could not sign the document. Try again later.');
       }
-      await storeNewDocument(options.documentsDirectory, documentId, signed, prepared.value.format, name);
+      await storeNewDocument(options.documentsDirectory, documentId, signed.content, prepared.value.format, name, signed.signatureValue);
       options.journal.recordUpload({ documentId, base: kept, read: carried, signature: reading.value.signature }, lowering, user.id);
       return reply.redirect(`/documents/${documentId}/edit`, 303);
     });
