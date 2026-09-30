@@ -3,6 +3,7 @@ import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentDecision, Marking } from './document-access.ts';
 import { DOCUMENT_FORMATS, type DocumentTemplate, FORMAT_NAMES, type StoredDocument } from './documents.ts';
 import type { SignedEditorConfig } from './editor-config.ts';
+import { JOURNAL_CATEGORIES, type JournalCategory, type JournalPage, type JournalPerson, type StoredJournalEntry } from './journal.ts';
 import { firstDayOf, lastDayOf } from './validity-period.ts';
 
 // A clearance as the policy service's directory shows it.
@@ -28,6 +29,17 @@ export interface ClearanceChoices {
 export interface PageNotice {
   saved: string | null;
   error: string | null;
+}
+
+// The journal's filters as its page's form sends them, each empty when left
+// out; `before` is the identifier of the last entry of the newer page.
+export interface JournalQuery {
+  document: string;
+  person: string;
+  from: string;
+  through: string;
+  category: JournalCategory | '';
+  before: string;
 }
 
 export interface EditorPageOptions {
@@ -70,7 +82,18 @@ const STYLE = `
   .notice { padding: 0.5rem 0.8rem; border-radius: 4px; background: #e3f9e5; }
   .notice.error { background: #ffe3e3; }
   .label-swatch { display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.4rem; border-radius: 2px; vertical-align: middle; }
+  form.journal-filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin-bottom: 1rem; }
+  table.journal { font-size: 0.9rem; }
+  table.journal td { word-break: break-word; }
 `;
+
+const JOURNAL_CATEGORY_NAMES: Readonly<Record<JournalCategory, string>> = {
+  label: 'Label change',
+  upload: 'Upload',
+  save: 'Save',
+  session: 'Editing session',
+  'stored-file': 'Stored file alert',
+};
 
 // A label a person may give an uploaded document.
 export interface UploadLabel {
@@ -268,6 +291,70 @@ export function renderClearancesPage(
   );
 }
 
+// The journal, newest first, one page at a time, with the form of its filters.
+export function renderJournalPage(user: UserIdentity, query: JournalQuery, journal: JournalPage): string {
+  const categories = JOURNAL_CATEGORIES.map(
+    (category) => `<option value="${category}"${category === query.category ? ' selected' : ''}>${JOURNAL_CATEGORY_NAMES[category]}</option>`,
+  ).join('');
+  const rows = journal.entries.map(renderJournalEntry).join('');
+  const filtered = (changes: Partial<JournalQuery>): string => {
+    const parameters = new URLSearchParams(Object.entries({ ...query, ...changes }).filter(([, value]) => value !== ''));
+    return `/admin/journal${parameters.size === 0 ? '' : `?${parameters.toString()}`}`;
+  };
+  const navigation = [
+    query.before === '' ? '' : `<a href="${escapeHtml(filtered({ before: '' }))}">Newest entries</a>`,
+    journal.older === null ? '' : `<a href="${escapeHtml(filtered({ before: journal.older }))}">Older entries</a>`,
+  ]
+    .filter((link) => link !== '')
+    .join(' ');
+  return page(
+    'Journal',
+    `${renderHeader(user)}
+<main>
+  <h2>Journal</h2>
+  <p>Every change of labels and of access, and every alert on a stored file, newest first. Entries are only ever added. Times are UTC.</p>
+  <form class="journal-filters" method="get" action="/admin/journal" aria-label="Journal filters">
+    <label>Document <input name="document" value="${escapeHtml(query.document)}"></label>
+    <label>Person <input name="person" value="${escapeHtml(query.person)}"></label>
+    <label>From <input type="date" name="from" value="${escapeHtml(query.from)}"></label>
+    <label>Through <input type="date" name="through" value="${escapeHtml(query.through)}"></label>
+    <label>Category <select name="category"><option value="">All</option>${categories}</select></label>
+    <button type="submit">Filter</button>
+  </form>
+  <table class="journal">
+    <thead><tr><th>Time</th><th>Category</th><th>Entry</th><th>Document</th><th>People</th><th>Details</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  ${journal.entries.length === 0 ? '<p>No entry.</p>' : ''}
+  <nav>${navigation}</nav>
+</main>`,
+  );
+}
+
+function renderJournalEntry(entry: StoredJournalEntry): string {
+  const document =
+    entry.documentId === null
+      ? ''
+      : `<a href="${escapeHtml(`/admin/journal?${new URLSearchParams({ document: entry.documentId }).toString()}`)}">${escapeHtml(entry.documentId)}</a>`;
+  const fields = Object.entries(entry.fields)
+    .map(([name, value]) => `${escapeHtml(name)}: ${escapeHtml(value === null ? 'none' : typeof value === 'string' ? value : JSON.stringify(value))}`)
+    .join('<br>');
+  return `<tr>
+  <td>${escapeHtml(entry.recordedAt.toISOString().replace('T', ' ').slice(0, 19))}</td>
+  <td>${JOURNAL_CATEGORY_NAMES[entry.category]}</td>
+  <td>${escapeHtml(entry.message)}</td>
+  <td>${document}</td>
+  <td>${entry.people.map(renderJournalPerson).join('<br>')}</td>
+  <td>${fields}</td>
+</tr>`;
+}
+
+// A person as the portal knew them, else by their identifier.
+function renderJournalPerson(person: JournalPerson): string {
+  const email = person.email === null ? '' : ` <${person.email}>`;
+  return `${escapeHtml(`${person.name ?? person.id}${email}`)} (${escapeHtml(person.role)})`;
+}
+
 export function renderMessagePage(title: string, message: string): string {
   return page(
     title,
@@ -309,7 +396,7 @@ export function renderEditorPage(options: EditorPageOptions): string {
 function renderHeader(user: UserIdentity): string {
   return `<header>
   <h1><a href="/">DCS ONLYOFFICE</a></h1>
-  ${isAdministrator(user) ? '<a href="/admin/clearances">Clearances</a>' : ''}
+  ${isAdministrator(user) ? '<a href="/admin/clearances">Clearances</a> <a href="/admin/journal">Journal</a>' : ''}
   <span>Signed in as ${escapeHtml(user.name)}</span>
   <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>
 </header>`;

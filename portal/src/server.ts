@@ -12,6 +12,7 @@ import { BindingSignatures } from './binding-signature.ts';
 import { registerClearanceAdmin } from './clearance-admin.ts';
 import type { PortalConfig } from './config.ts';
 import { Journal } from './journal.ts';
+import { registerJournalAdmin } from './journal-admin.ts';
 import { LabelJournal, type PortionState } from './label-journal.ts';
 import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts';
 import { StoredLabels } from './document-labels.ts';
@@ -104,6 +105,7 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     portalPublicUrl: config.portalPublicUrl,
     administrationSecret: config.directoryAdministrationSecret,
   });
+  registerJournalAdmin(app, journal);
   registerOpentdfRelay(app, { opentdfInternalUrl: config.opentdfInternalUrl, accessTokens: new AccessTokens(oidc, sessions) });
 
   app.post('/documents', async (request, reply) => {
