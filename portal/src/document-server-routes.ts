@@ -161,7 +161,11 @@ async function storeCallbackFile(
     (bytes) => ({ ok: true as const, bytes }),
     (error: unknown) => ({ ok: false as const, error }),
   );
-  const content = await services.signatures.signed(await withoutSignature(new Uint8Array(await response.arrayBuffer())), document, stored.ok ? stored.bytes : null);
+  const { content, signatureValue } = await services.signatures.signed(
+    await withoutSignature(new Uint8Array(await response.arrayBuffer())),
+    document,
+    stored.ok ? stored.bytes : null,
+  );
   // Reading the labels must not cost the save: unreadable ones skip the log.
   const [before, after] = await Promise.all([
     readLabels(log, documentId, async () => {
@@ -176,7 +180,7 @@ async function storeCallbackFile(
   // who held a configuration for the session may have made the change too.
   const sessionUsers = [...new Set([...callback.users, ...editingSessions.holdersOf(callback.key)])];
   // The document already moved to a new key when its session was ended.
-  const saved = await saveDocumentContent(config.documentsDirectory, documentId, content, lastOfEnded ? 'forced' : kind);
+  const saved = await saveDocumentContent(config.documentsDirectory, documentId, content, lastOfEnded ? 'forced' : kind, signatureValue);
   if (saved === null) {
     return 'failed';
   }

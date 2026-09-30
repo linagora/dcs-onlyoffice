@@ -5,9 +5,10 @@ import { documentLogEntries, storeDocument } from './support/deployment.ts';
 import { openDocument, openNewDocument } from './support/documents.ts';
 import { BINDING_NAMESPACE, inspectDocx } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
+import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
-import { forceSavedDocx, storedFile } from './support/portions.ts';
-import { changedSinceSigning, demoCertificate, verifyBindingSignature } from './support/signature.ts';
+import { forceSavedDocx, insertPortion, leaveAndWaitForSave, storedFile } from './support/portions.ts';
+import { changedSinceSigning, demoCertificate, signatureMismatch, verifyBindingSignature } from './support/signature.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -79,6 +80,36 @@ test('a stored file whose base label was lowered outside the portal is logged, w
   await expect
     .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
     .toContainEqual(changedSinceSigning('document-server', [baseLabelPart]));
+});
+
+test("another document's signed file put in a document's place is logged, when it is served, as signed for another document, and still opens", async ({ page }) => {
+  const since = new Date();
+  const documentId = await storedAsNewDocument(await signedFile(page));
+
+  await openDocument(page, documentId);
+
+  await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
+    .toContainEqual(signatureMismatch('document-server', 'Signed for another document'));
+});
+
+test('an earlier signed version of a document put back in its place is logged, when it is served, as not the latest, and still opens', async ({ page }) => {
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  await pluginPanel(page).getByLabel('Base label').selectOption({ label: DIFFUSION_RESTREINTE });
+  await forceSavedDocx(page, documentId, (saved) => saved.bindings[0]?.signed === true);
+  const earlier = await storedFile(page, documentId);
+  await insertPortion(page, { marking: DIFFUSION_RESTREINTE, text: markedText('Fictional paragraph of a later version') });
+  await leaveAndWaitForSave([page], documentId, 1);
+  const since = new Date();
+  await storeDocument(documentId, earlier);
+
+  await openDocument(page, documentId);
+
+  await expect(pluginPanel(page).getByTestId('document-label-marking')).toHaveText(DIFFUSION_RESTREINTE);
+  await expect
+    .poll(() => documentLogEntries(since, 'Stored file no longer matches its signature', documentId))
+    .toContainEqual(signatureMismatch('document-server', 'Not the latest signed version'));
 });
 
 test('a file stored before signing existed is logged as unsigned, opens, and is signed at its next save', async ({ page }) => {

@@ -12,6 +12,9 @@ export interface StoredDocument {
   fileName: string;
   filePath: string;
   key: string;
+  // The value of the latest signature the portal stored for the document;
+  // null before it stored a signed file.
+  latestSignature: string | null;
 }
 
 export interface DocumentTemplate {
@@ -68,6 +71,9 @@ interface DocumentMetadata {
 }
 
 const METADATA_EXTENSION = '.meta.json';
+// Beside a document's file, the value of the latest signature the portal
+// stored for it, in a file of its own that metadata writes never touch.
+const LATEST_SIGNATURE_EXTENSION = '.signature';
 const DOCUMENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,99}$/;
 
 export async function listDocuments(directory: string): Promise<StoredDocument[]> {
@@ -88,7 +94,14 @@ export async function findDocument(directory: string, id: string): Promise<Store
   }
   const metadata = await readOrCreateMetadata(directory, id);
   const filePath = documentPath(directory, id, format);
-  return { id, format, fileName: metadata.name ?? fileNameOf(id, format), filePath, key: documentKey(id, metadata) };
+  return {
+    id,
+    format,
+    fileName: metadata.name ?? fileNameOf(id, format),
+    filePath,
+    key: documentKey(id, metadata),
+    latestSignature: await latestSignatureOf(directory, id),
+  };
 }
 
 export async function listTemplates(directory: string): Promise<DocumentTemplate[]> {
@@ -124,14 +137,24 @@ export function newDocumentId(name: string): string {
 }
 
 // Stores a new document of a format under an identifier that names no stored
-// document, with the name of the file it comes from: the file appears whole,
-// and with its name, or not at all.
-export async function storeNewDocument(directory: string, id: string, content: Uint8Array, format: DocumentFormat, name: string): Promise<StoredDocument> {
+// document, with the name of the file it comes from and the value of its
+// signature: the file appears whole, and with its name, or not at all.
+export async function storeNewDocument(
+  directory: string,
+  id: string,
+  content: Uint8Array,
+  format: DocumentFormat,
+  name: string,
+  latestSignature: string | null,
+): Promise<StoredDocument> {
   if (!DOCUMENT_ID_PATTERN.test(id)) {
     throw new Error(`Invalid document identifier ${id}`);
   }
   const shown = shownName(name);
   await writeMetadata(directory, id, { epoch: randomBytes(4).toString('hex'), version: 1, ...(shown === null ? {} : { name: shown }) });
+  if (latestSignature !== null) {
+    await recordLatestSignature(directory, id, latestSignature);
+  }
   const filePath = documentPath(directory, id, format);
   const temporaryPath = `${filePath}.${randomBytes(4).toString('hex')}.tmp`;
   await writeFile(temporaryPath, content);
@@ -157,12 +180,16 @@ function shownName(name: string): string | null {
 // A forced save keeps the editing session open, so the key must not change:
 // co-authors joining later would otherwise land in a separate session. Only a
 // save that ends the session moves the document to a new key, besides the
-// portal ending a session (moveDocumentToNewKey).
+// portal ending a session (moveDocumentToNewKey). The value of the saved
+// file's signature becomes the latest the portal stored; a file saved
+// unsigned leaves the earlier value, which an earlier version put back in its
+// place still fails to match.
 export async function saveDocumentContent(
   directory: string,
   id: string,
   content: Uint8Array,
   kind: SaveKind,
+  latestSignature: string | null,
 ): Promise<StoredDocument | null> {
   const current = await findDocument(directory, id);
   if (current === null) {
@@ -171,6 +198,9 @@ export async function saveDocumentContent(
   const temporaryPath = `${current.filePath}.${randomBytes(4).toString('hex')}.tmp`;
   await writeFile(temporaryPath, content);
   await rename(temporaryPath, current.filePath);
+  if (latestSignature !== null) {
+    await recordLatestSignature(directory, id, latestSignature);
+  }
   if (kind === 'session-ended') {
     await incrementVersion(directory, id);
   }
@@ -240,6 +270,27 @@ async function readMetadata(directory: string, id: string): Promise<DocumentMeta
     }
     throw error;
   }
+}
+
+// The value of the latest signature the portal stored for a document; null
+// before it stored a signed file.
+export async function latestSignatureOf(directory: string, id: string): Promise<string | null> {
+  try {
+    return (await readFile(path.join(directory, `${id}${LATEST_SIGNATURE_EXTENSION}`), 'utf8')).trim() || null;
+  } catch (error: unknown) {
+    if (isNotFound(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+// Replaces the value whole, so that a reader never sees half of one.
+async function recordLatestSignature(directory: string, id: string, value: string): Promise<void> {
+  const filePath = path.join(directory, `${id}${LATEST_SIGNATURE_EXTENSION}`);
+  const temporaryPath = `${filePath}.${randomBytes(4).toString('hex')}.tmp`;
+  await writeFile(temporaryPath, value);
+  await rename(temporaryPath, filePath);
 }
 
 async function writeMetadata(directory: string, id: string, metadata: DocumentMetadata): Promise<DocumentMetadata> {

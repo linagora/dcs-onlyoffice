@@ -20,6 +20,13 @@ export function changedSinceSigning(servedTo: 'document-server' | 'download', ch
   return expect.objectContaining({ servedTo, reason: 'Parts changed since signing', changedParts });
 }
 
+// What the portal logs when it serves a stored file whose signature holds
+// over unchanged parts but names another document, or none, or is not the
+// latest it stored for the document.
+export function signatureMismatch(servedTo: 'document-server' | 'download', reason: string): unknown {
+  return expect.objectContaining({ servedTo, reason, changedParts: [] });
+}
+
 // The demo certificate init-env.sh generated, as deploy/.env holds it.
 export function demoCertificate(): string {
   return Buffer.from(deploymentSetting('BINDING_SIGNING_CERTIFICATE'), 'base64').toString('utf8');

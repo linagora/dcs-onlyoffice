@@ -16,7 +16,7 @@ import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts
 import { StoredLabels } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { EditingSessions } from './editing-sessions.ts';
-import { createDocumentFromTemplate, DOCUMENT_FORMATS, fileNameOf, findDocument, listDocuments, listTemplates } from './documents.ts';
+import { createDocumentFromTemplate, DOCUMENT_FORMATS, fileNameOf, findDocument, latestSignatureOf, listDocuments, listTemplates } from './documents.ts';
 import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
 import { type CommandService, requestForceSave } from './onlyoffice.ts';
 import { registerOpentdfRelay } from './opentdf-relay.ts';
@@ -66,7 +66,9 @@ export function buildServer(config: PortalConfig): FastifyInstance {
   const storedLabels = new StoredLabels();
   const documentAccess = new DocumentAccessCheck(config.policyInternalUrl, storedLabels, app.log);
   const labelJournal = new LabelJournal(config.policyInternalUrl, app.log);
-  const bindingSignatures = new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, app.log);
+  const bindingSignatures = new BindingSignatures(config.policyInternalUrl, config.bindingSignatureSecret, app.log, async (id) =>
+    latestSignatureOf(config.documentsDirectory, id),
+  );
   const commands: CommandService = { internalUrl: config.onlyofficeInternalUrl, secret: config.onlyofficeJwtSecret };
   const editingSessions = new EditingSessions(commands, documentAccess, app.log);
   // A document the person may not open answers every address the same way,
