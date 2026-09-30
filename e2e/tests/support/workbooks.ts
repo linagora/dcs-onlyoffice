@@ -139,7 +139,10 @@ export async function editorHeadersAndFooters(page: Page): Promise<Record<Header
 }
 
 // Types into a cell through the editor's grid, and closes the warnings the
-// editor shows, one per key, when the cell is not allowed for editing.
+// editor shows, one per key, when the cell is not allowed for editing. A
+// formula typed here holds no letter: a letter opens the editor's list of
+// functions, which a slow machine can show after the next keys, and whose
+// first function Enter then takes instead of leaving the cell (#134).
 export async function typeIntoCell(page: Page, reference: string, text: string): Promise<void> {
   await startTypingInCell(page, reference, text);
   await page.keyboard.press('Enter');

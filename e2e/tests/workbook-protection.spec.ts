@@ -92,7 +92,9 @@ test('cancelling a protection changes nothing, and cells the panel cannot protec
   await protect.click();
   await expect(failure).toHaveText(SELECTION_EMPTY);
 
-  await typeIntoCell(page, 'F10', '=D4+D5');
+  // A formula without letters, which typeIntoCell needs.
+  await typeIntoCell(page, 'F10', '=1200+8000');
+  await expect.poll(() => cellValue(page, 'F10')).toBe('9200');
   await selectCells(page, 'F10');
   await protect.click();
   await expect(failure).toHaveText('The selected cells hold a formula: turn it into its value first.');
