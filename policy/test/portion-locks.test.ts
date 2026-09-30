@@ -29,6 +29,7 @@ function identity(person: Person): Record<string, string> {
 
 describe('portion locks', () => {
   let server: FastifyInstance;
+  const store = new MemoryClearanceStore();
   let clock = START;
   let documentId = '';
   let documents = 0;
@@ -47,8 +48,19 @@ describe('portion locks', () => {
       headers: identity(person),
       payload: version === null ? {} : { version },
     });
-  const listed = async (person: Person): Promise<unknown> =>
-    (await server.inject({ method: 'GET', url: `/documents/${documentId}/locks`, headers: identity(person) })).json();
+  // The locks of the document and, among `labels`, those the person may read.
+  const listedWith = async (person: Person, labels: string[]): Promise<unknown> =>
+    (
+      await server.inject({
+        method: 'GET',
+        url: `/documents/${documentId}/locks?${new URLSearchParams(labels.map((label): [string, string] => ['label', label])).toString()}`,
+        headers: identity(person),
+      })
+    ).json();
+  const listed = async (person: Person): Promise<unknown> => {
+    const answer = await listedWith(person, []);
+    return typeof answer === 'object' && answer !== null && 'locks' in answer ? answer.locks : answer;
+  };
   const advance = (milliseconds: number): void => {
     clock = new Date(clock.getTime() + milliseconds);
   };
@@ -56,7 +68,7 @@ describe('portion locks', () => {
   before(async () => {
     server = await buildPolicyServer({
       spifDirectory: DEMO_SPIFS,
-      clearanceDirectory: { store: new MemoryClearanceStore(), seedFolder: DEMO_SEEDS },
+      clearanceDirectory: { store, seedFolder: DEMO_SEEDS },
       portionLockLeaseMs: LEASE_MS,
       now: () => clock,
     });
@@ -148,6 +160,23 @@ describe('portion locks', () => {
     assert.deepEqual(await listed(ALICE), [{ portion: 'p-2', holder: { id: 'bob', name: 'Bob Walker' }, expiresAt: '2026-09-28T10:00:30.000Z' }]);
     documentId = 'another-document';
     assert.deepEqual(await listed(ALICE), []);
+  });
+
+  it('answers, with the locks, which of the labels asked the caller may read, as the clearance directory holds it at each listing', async () => {
+    assert.equal((await lock(BOB, 'p-1', DIFFUSION_RESTREINTE)).statusCode, 200);
+    const asked = [DIFFUSION_RESTREINTE, SPECIAL_FRANCE, 'DEMO-FR:not-a-label'];
+    const locks = [{ portion: 'p-1', holder: { id: 'bob', name: 'Bob Walker' }, expiresAt: '2026-09-28T10:00:20.000Z' }];
+    assert.deepEqual(await listedWith(ALICE, asked), { locks, readable: [DIFFUSION_RESTREINTE, SPECIAL_FRANCE] });
+    assert.deepEqual(await listedWith(BOB, asked), { locks, readable: [DIFFUSION_RESTREINTE] });
+
+    const alice = await store.clearanceOf(ALICE.email, 'DEMO-FR');
+    assert.ok(alice !== null);
+    try {
+      await store.update({ ...alice, categories: alice.categories.filter((category) => category.name !== 'SPECIAL FRANCE') });
+      assert.deepEqual(await listedWith(ALICE, asked), { locks, readable: [DIFFUSION_RESTREINTE] });
+    } finally {
+      await store.update(alice);
+    }
   });
 
   it('refuses a caller without an identity, and a label the policy does not know', async () => {

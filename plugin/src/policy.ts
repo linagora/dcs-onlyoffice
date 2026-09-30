@@ -188,19 +188,29 @@ export function releasePortionLockOnLeave(documentId: string, portionId: string)
   navigator.sendBeacon(`${lockUrl(documentId, portionId)}/release`, new Blob(['{}'], { type: 'application/json' }));
 }
 
-// Who holds each locked portion of a document, by portion id.
-export async function fetchPortionLocks(documentId: string): Promise<ReadonlyMap<string, LockHolder>> {
-  const body = await getJson(`${RELAY}/documents/${encodeURIComponent(documentId)}/locks`);
-  if (!Array.isArray(body)) {
+// Who holds each locked portion of a document, by portion id, and the labels
+// among those asked that the signed-in person may read now, as the policy
+// service decides from their clearance in the clearance directory.
+export interface PortionLocksAnswer {
+  locks: ReadonlyMap<string, LockHolder>;
+  readable: ReadonlySet<string>;
+}
+
+export async function fetchPortionLocks(documentId: string, labelCodes: string[]): Promise<PortionLocksAnswer> {
+  const query = new URLSearchParams(labelCodes.map((code): [string, string] => ['label', code])).toString();
+  const body = await getJson(`${RELAY}/documents/${encodeURIComponent(documentId)}/locks${query === '' ? '' : `?${query}`}`);
+  const entries: unknown = typeof body === 'object' && body !== null && 'locks' in body ? body.locks : null;
+  const readable: unknown = typeof body === 'object' && body !== null && 'readable' in body ? body.readable : null;
+  if (!Array.isArray(entries) || !Array.isArray(readable)) {
     throw new Error('Unexpected lock list');
   }
   const locks = new Map<string, LockHolder>();
-  for (const entry of body) {
+  for (const entry of entries) {
     if (typeof entry === 'object' && entry !== null && 'portion' in entry && typeof entry.portion === 'string' && 'holder' in entry && isLockHolder(entry.holder)) {
       locks.set(entry.portion, entry.holder);
     }
   }
-  return locks;
+  return { locks, readable: new Set(readable.filter((code: unknown): code is string => typeof code === 'string')) };
 }
 
 function lockUrl(documentId: string, portionId: string): string {

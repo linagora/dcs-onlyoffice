@@ -415,8 +415,8 @@ export function usePortionLocks(documentId: string | null, userId: string | null
     }
     let cancelled = false;
     const reread = async (): Promise<void> => {
-      const current = await fetchPortionLocks(documentId);
-      const others = new Map([...current].filter(([, holder]) => holder.id !== userId));
+      const current = await fetchPortionLocks(documentId, []);
+      const others = new Map([...current.locks].filter(([, holder]) => holder.id !== userId));
       if (!cancelled) {
         setLocks((previous) => (sameLocks(previous, others) ? previous : others));
       }
