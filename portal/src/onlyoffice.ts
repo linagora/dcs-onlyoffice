@@ -106,16 +106,18 @@ export async function requestForceSave(service: CommandService, key: string): Pr
   }
 }
 
-// The ids of the editors connected to the session of a key: none when no
-// session is open, null when the Document Server does not answer. Viewers
-// are not listed.
-export async function requestSessionEditors(service: CommandService, key: string): Promise<string[] | null> {
+// The session of a key, as the Document Server knows it: none open, or the
+// ids of the editors connected to it, viewers not listed; null when it does
+// not answer.
+export type DocumentServerSession = { open: false } | { open: true; editors: string[] } | null;
+
+export async function requestSession(service: CommandService, key: string): Promise<DocumentServerSession> {
   const result = await sendCommand(service, { c: 'info', key });
   switch (commandError(result)) {
     case COMMAND_ERROR.unknownKey:
-      return [];
+      return { open: false };
     case COMMAND_ERROR.none:
-      return Array.isArray(result?.users) ? stringsOf(result.users) : null;
+      return Array.isArray(result?.users) ? { open: true, editors: stringsOf(result.users) } : null;
     default:
       return null;
   }

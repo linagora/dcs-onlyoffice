@@ -3,49 +3,69 @@ import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentAccessCheck } from './document-access.ts';
 import type { StoredDocument } from './documents.ts';
 import { type Journal, type JournalPerson, type JournalRole, journalPersonById } from './journal.ts';
-import { type CommandService, dropFromSession, requestSessionEditors } from './onlyoffice.ts';
+import { type CommandService, dropFromSession, requestSession } from './onlyoffice.ts';
 
 // How long new editor configurations wait for the last save of a session the
 // portal ended, before they are signed anyway.
 const RETIRING_TIMEOUT_MS = 30_000;
+
+// What leads the portal to end a document's session: a new base label, or a
+// clearance change that lets someone read less.
+export type SessionEndCause = 'base-label' | 'revocation';
+
+const ENDED_SESSION_MESSAGES: Readonly<Record<SessionEndCause, string>> = {
+  'base-label': 'Ended an editing session that the base label excludes someone from',
+  revocation: 'Ended an editing session that a revocation excludes someone from',
+};
+
+// The portal's documents, as the editing sessions need them: a document as
+// it is stored now, and its move to a new key; null when the document is
+// gone or, for a move, no longer under `fromKey`.
+export interface SessionDocuments {
+  find: (documentId: string) => Promise<StoredDocument | null>;
+  moveToNewKey: (documentId: string, fromKey: string) => Promise<StoredDocument | null>;
+}
 
 // The Document Server's editing sessions outlive the decisions that let
 // people in: a signed editor configuration joins its document's session
 // whenever it connects, and reconnects after any interruption. The portal
 // therefore decides again for whoever joins a session as an editor, and ends
 // the session of a document whose base label now excludes someone holding a
-// configuration for it: the document moves to a new key, and the Document
+// configuration for it, after a new base label or a clearance change that
+// lets them read less: the document moves to a new key, and the Document
 // Server refuses the configurations that name the old one once its last save
 // is stored.
 export class EditingSessions {
   #commands: CommandService;
   #documentAccess: DocumentAccessCheck;
+  #documents: SessionDocuments;
   #journal: Journal;
   #log: FastifyBaseLogger;
   // Whom each editor user id stands for, as of the last configuration the
   // portal signed for them. Kept in memory: a restart forgets it.
   #identities = new Map<string, UserIdentity>();
-  // The editor user ids that received a configuration naming each key, since
-  // the portal started.
-  #holders = new Map<string, Set<string>>();
+  // By key, the document it names and the editor user ids that received a
+  // configuration naming it, since the portal started.
+  #keys = new Map<string, { documentId: string; holders: Set<string> }>();
   // The key of each document whose session the portal ended and whose last
   // save has not arrived yet.
   #retiring = new Map<string, { key: string; since: number }>();
 
-  constructor(commands: CommandService, documentAccess: DocumentAccessCheck, journal: Journal, log: FastifyBaseLogger) {
+  constructor(commands: CommandService, documentAccess: DocumentAccessCheck, documents: SessionDocuments, journal: Journal, log: FastifyBaseLogger) {
     this.#commands = commands;
     this.#documentAccess = documentAccess;
+    this.#documents = documents;
     this.#journal = journal;
     this.#log = log;
   }
 
   // Called whenever the portal signs a configuration, whether to edit or to
-  // view: both can join the session of its key.
-  remember(key: string, user: UserIdentity): void {
+  // view: both can join the session of the document's key.
+  remember(document: Pick<StoredDocument, 'id' | 'key'>, user: UserIdentity): void {
     this.#identities.set(user.id, user);
-    const holders = this.#holders.get(key) ?? new Set<string>();
-    holders.add(user.id);
-    this.#holders.set(key, holders);
+    const known = this.#keys.get(document.key) ?? { documentId: document.id, holders: new Set<string>() };
+    known.holders.add(user.id);
+    this.#keys.set(document.key, known);
   }
 
   // The people editor user ids stand for, as of the last configuration the
@@ -57,13 +77,13 @@ export class EditingSessions {
   // The editor user ids that received a configuration naming `key`, to edit
   // or to view, as far as the portal knows since it started.
   holdersOf(key: string): string[] {
-    return [...(this.#holders.get(key) ?? [])];
+    return [...(this.#keys.get(key)?.holders ?? [])];
   }
 
   // The session of `key` ended with a save: no configuration naming it can
   // join a session any more.
   forget(key: string): void {
-    this.#holders.delete(key);
+    this.#keys.delete(key);
   }
 
   // Disconnects, from the session of `key`, the editors who joined it and
@@ -88,28 +108,72 @@ export class EditingSessions {
   // Ends the session of `key` when the document's stored base label excludes
   // someone who holds a configuration naming it or who edits in it, or when
   // the portal cannot tell: after a restart, it no longer knows who holds one.
-  async endIfExcluded(document: StoredDocument, key: string, moveToNewKey: () => Promise<StoredDocument | null>): Promise<void> {
-    const holders = this.#holders.get(key);
-    const editors = await requestSessionEditors(this.#commands, key);
-    const refused = await this.#refused(document, [...new Set([...(holders ?? []), ...(editors ?? [])])]);
-    if (holders !== undefined && editors !== null && refused.length === 0) {
+  // The document moves to a new key, and every connection goes, viewers
+  // included. With no session open under the key, there is none to end.
+  async endIfExcluded(document: StoredDocument, key: string, cause: SessionEndCause): Promise<void> {
+    const session = await requestSession(this.#commands, key);
+    if (session?.open === false) {
       return;
     }
-    this.#retiring.set(document.id, { key, since: Date.now() });
-    if ((await moveToNewKey()) === null) {
-      this.#retiring.delete(document.id);
+    const holders = this.#keys.get(key)?.holders;
+    const editors = session?.editors ?? [];
+    const refused = await this.#refused(document, [...new Set([...(holders ?? []), ...editors])]);
+    if (holders !== undefined && session !== null && refused.length === 0) {
+      return;
+    }
+    // Only editors send a last save; the Document Server may not have said
+    // whether there are any.
+    const saving = session === null || editors.length > 0;
+    if (saving) {
+      this.#retiring.set(document.id, { key, since: Date.now() });
+    }
+    if ((await this.#documents.moveToNewKey(document.id, key)) === null) {
+      if (saving) {
+        this.#retiring.delete(document.id);
+      }
       return;
     }
     this.forget(key);
-    const dropped = await dropFromSession(this.#commands, key, null);
+    const dropped = await dropFromSession(this.#commands, key, null).catch((error: unknown) => {
+      this.#log.error({ documentId: document.id, err: error }, 'The connections to an ended editing session could not be dropped');
+      return false;
+    });
     this.#journal.record({
       category: 'session',
       level: 'warn',
-      message: 'Ended an editing session that the base label excludes someone from',
+      message: ENDED_SESSION_MESSAGES[cause],
       documentId: document.id,
       fields: { excluded: refused, holdersKnown: holders !== undefined, dropped },
       people: this.people('excluded', refused),
     });
+  }
+
+  // Ends the sessions of the documents whose stored base label no longer
+  // lets in the person with the email address `email`, where they hold a
+  // configuration, as `endIfExcluded` does: a clearance change that lets them
+  // read less applies at once, and one that lets them read more ends nothing.
+  // Only a refusal for their clearance counts: a decision the policy service
+  // could not make ends nothing here. A failure on one document leaves the
+  // others checked.
+  async applyClearanceChange(email: string): Promise<void> {
+    const editorUserIds = [...this.#identities].filter(([, identity]) => sameEmailAddress(identity.email, email)).map(([id]) => id);
+    await Promise.all(
+      [...this.#keys].map(async ([key, { documentId, holders }]) => {
+        const heldBy = editorUserIds.filter((id) => holders.has(id));
+        if (heldBy.length === 0) {
+          return;
+        }
+        try {
+          const document = await this.#documents.find(documentId);
+          // A document that moved to a new key since has no session under this one.
+          if (document !== null && document.key === key && (await this.#refusedForClearance(document, heldBy))) {
+            await this.endIfExcluded(document, key, 'revocation');
+          }
+        } catch (error: unknown) {
+          this.#log.error({ documentId, err: error }, 'An editing session could not be checked after a clearance change');
+        }
+      }),
+    );
   }
 
   // While true, the document's ended session may still send its last save,
@@ -143,4 +207,22 @@ export class EditingSessions {
     );
     return editorUserIds.filter((_id, index) => decisions[index] !== true);
   }
+
+  // Whether the stored base label refuses one of these people for their
+  // clearance, as the policy service decides.
+  async #refusedForClearance(document: StoredDocument, editorUserIds: string[]): Promise<boolean> {
+    const decisions = await Promise.all(
+      editorUserIds.map(async (id) => {
+        const identity = this.#identities.get(id);
+        return identity === undefined ? null : this.#documentAccess.decideOne(identity, document);
+      }),
+    );
+    return decisions.some((decision) => decision?.open === false && decision.reason === 'clearance');
+  }
+}
+
+// Whether an identity's email address is `email`, whatever the case: the
+// clearance directory writes addresses in lowercase.
+function sameEmailAddress(address: string | null, email: string): boolean {
+  return address !== null && address.toLowerCase() === email.toLowerCase();
 }
