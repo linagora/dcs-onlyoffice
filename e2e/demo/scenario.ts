@@ -5,7 +5,7 @@ import { dismissEditorTip, editorDisconnection, moveCursorToStart, openDocument,
 import { DOCX_TYPE, pageMarkingTexts } from '../tests/support/docx.ts';
 import type { MarkedText } from '../tests/support/marker.ts';
 import { bubble, pluginFrame, pluginPanel, selectParagraphs } from '../tests/support/plugin.ts';
-import { insertPortion, leaveAndWaitForSave, storedDocx, storedFile } from '../tests/support/portions.ts';
+import { insertPortion, leaveAndWaitForSave, portionPageAddress, storedDocx, storedFile } from '../tests/support/portions.ts';
 import { demoAuthorityCertificate, verifyBindingSignature } from '../tests/support/signature.ts';
 import { fillUploadForm } from '../tests/support/uploads.ts';
 import {
@@ -64,21 +64,31 @@ export interface DemoOptions {
 }
 
 // The demo scenario, step by step, as docs/walkthrough.md tells it: in a text
-// document, then in a workbook. It checks each step's outcome, so that a
-// broken demo fails.
+// document, then in a workbook, and last on a portion page. It checks each
+// step's outcome, so that a broken demo fails.
 export async function playDemo(people: DemoPeople, options: DemoOptions): Promise<void> {
-  await playTextDocumentPart(people, options);
+  const raised = await playTextDocumentPart(people, options);
   await playWorkbookPart(people, options);
+  await playPortionPagePart(people, options, raised);
+}
+
+// The text document's portion raised to SPECIAL FRANCE, with its text.
+interface RaisedPortion {
+  documentId: string;
+  portionId: string;
+  text: MarkedText;
 }
 
 // Steps 1 to 11, in a text document. It gives the allied officer his
-// clearance back, which it ends, whatever happens.
-async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOptions): Promise<void> {
+// clearance back, which it ends, whatever happens, and returns the portion
+// raised to SPECIAL FRANCE.
+async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOptions): Promise<RaisedPortion> {
   const alicePanel = pluginPanel(alice);
   const aliceItem = (id: string) => portionItem(alice, id);
   const bobItem = (id: string) => portionItem(bob, id);
   const first = options.text('Fictional paragraph: the liaison officers join the control cell on day 1.');
   const second = options.text('Fictional paragraph: the logistics group reaches the rear base on day 2.');
+  const changed = options.text('Fictional paragraph, changed: the liaison officers join the control cell on day 2.');
 
   const documentId = await test.step('1. The French officer gives a new document its base label', async () => {
     const id = await openNewDocument(alice, 'exercise-northwind.docx');
@@ -112,7 +122,6 @@ async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOpt
     const textbox = aliceItem(firstId).getByRole('textbox', { name: 'Portion text' });
     await expect(textbox).toHaveValue(first);
     await expect(bobItem(firstId).getByTestId('portion-status')).toHaveText('Being changed by Alice Martin.');
-    const changed = options.text('Fictional paragraph, changed: the liaison officers join the control cell on day 2.');
     await textbox.fill(changed);
     await options.capture(bob, '04-being-changed');
     await aliceItem(firstId).getByRole('button', { name: 'Save the change' }).click();
@@ -198,6 +207,25 @@ async function playTextDocumentPart({ alice, bob }: DemoPeople, options: DemoOpt
     await confirmation.getByRole('button', { name: 'Protect the selection' }).click();
     await expect(alicePanel.getByTestId('portion-text')).toHaveText([REPORT_TRANSPORT.text]);
     await expect(alicePanel.getByTestId('document-label-marking')).toHaveText(`${RELEASABLE_TO_NATO} – CONTIENT DES PORTIONS PLUS RESTRICTIVES`);
+  });
+
+  return { documentId, portionId: firstId, text: changed };
+}
+
+// Step 21, back in the text document: the portion raised to SPECIAL FRANCE,
+// read outside the editor on the portion page that its placeholder links to
+// in the stored file.
+async function playPortionPagePart({ alice, bob }: DemoPeople, options: DemoOptions, raised: RaisedPortion): Promise<void> {
+  await test.step('21. The placeholder links to the portion page, where the French officer reads the portion and the allied officer is refused', async () => {
+    const [link] = (await storedDocx(alice, raised.documentId)).contentControls.flatMap((control) => control.links);
+    expect(link?.target).toBe(portionPageAddress(raised));
+    await alice.goto(link?.target ?? '');
+    await expect(alice.getByTestId('portion-marking')).toHaveText(SPECIAL_FRANCE);
+    await expect(alice.getByTestId('portion-text')).toHaveText(raised.text);
+    await options.capture(alice, '21-portion-page');
+    await bob.goto(link?.target ?? '');
+    await expect(bob.getByTestId('portion-notice')).toHaveText('Access denied');
+    await options.capture(bob, '21-portion-page-refused');
   });
 }
 
