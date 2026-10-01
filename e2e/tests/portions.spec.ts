@@ -5,8 +5,8 @@ import { envelopeManifest } from './support/envelopes.ts';
 import { expect, test } from './support/fixtures.ts';
 import { canaryText, markedText, PORTION_MARKER } from './support/marker.ts';
 import { PLATFORM, platformBaseKey } from './support/opentdf.ts';
-import { insertMovedEnvelope, insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
-import { fillPortionForm, forceSavedDocx, insertPortion, leaveAndWaitForSave, shownPortions } from './support/portions.ts';
+import { insertEnvelope, insertUnencryptedPortion, labelXmlOf, pluginFrame, pluginPanel } from './support/plugin.ts';
+import { fillPortionForm, forceSavedDocx, insertPortion, leaveAndWaitForSave, placeholderLinks, shownPortions } from './support/portions.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -23,12 +23,20 @@ test('an inserted portion is stored as an envelope and read back in the panel', 
   await expect(panel.getByTestId('portion-text')).toHaveText([secret]);
 
   const docx = await forceSavedDocx(page, documentId, (saved) => saved.portionParts.length === 1);
-  expect(docx.contentControls).toEqual([
-    { alias: 'Protected portion', tag: expect.any(String), lock: 'sdtContentLocked', text: `${SPECIAL_FRANCE} – protected portion` },
-  ]);
   const tag: unknown = JSON.parse(docx.contentControls[0]?.tag ?? 'null');
   expect(tag).toEqual({ v: 1, id: expect.stringMatching(UUID), label: 'DEMO-FR:2/1.1' });
   const portionId = (tag as { id: string }).id; // SAFETY: shape asserted just above
+  // The whole placeholder links to the portion's page.
+  const placeholder = `${SPECIAL_FRANCE} – protected portion`;
+  expect(docx.contentControls).toEqual([
+    {
+      alias: 'Protected portion',
+      tag: expect.any(String),
+      lock: 'sdtContentLocked',
+      text: placeholder,
+      links: placeholderLinks({ documentId, portionId }, placeholder),
+    },
+  ]);
   expect(docx.portionParts).toEqual([
     { id: portionId, version: '1', label: 'DEMO-FR:2/1.1', labelXml: expect.any(String), encoding: 'ztdf', content: expect.any(String) },
   ]);
@@ -147,7 +155,7 @@ test('an envelope moved under a lower label shows the label bound to it, with a 
   await openNewDocument(page, 'exercise-northwind.docx');
   const frame = await pluginFrame(page);
   const placeholder = `${DIFFUSION_RESTREINTE} – protected portion`;
-  await insertMovedEnvelope(frame, { labelCode: 'DEMO-FR:2', labelXml: await labelXmlOf(frame, 'DEMO-FR', 'DEMO-FR:2'), placeholder, envelope: part.content });
+  await insertEnvelope(frame, { labelCode: 'DEMO-FR:2', labelXml: await labelXmlOf(frame, 'DEMO-FR', 'DEMO-FR:2'), placeholder, envelope: part.content });
 
   await expect
     .poll(() => shownPortions(page))

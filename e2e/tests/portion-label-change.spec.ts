@@ -6,7 +6,7 @@ import { pageMarkingTexts, parsedTag } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, relabelPortionPart } from './support/plugin.ts';
-import { documentWithPortion, forceSavedDocx, insertPortion, savedPortion } from './support/portions.ts';
+import { documentWithPortion, forceSavedDocx, insertPortion, placeholderLinks, savedPortion } from './support/portions.ts';
 
 const NON_PROTEGE = 'NON PROTÉGÉ';
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
@@ -60,6 +60,7 @@ test('the French officer raises a portion to SPÉCIAL FRANCE, which the allied o
       tag: { v: 1, id: portion.portionId, label: SPECIAL_FRANCE_CODE },
       lock: 'sdtContentLocked',
       text: `${SPECIAL_FRANCE} – protected portion`,
+      links: placeholderLinks(portion, `${SPECIAL_FRANCE} – protected portion`),
     },
   ]);
   expect(pageMarkingTexts(docx)).toEqual(Array.from({ length: 6 }, () => WITH_MORE_RESTRICTIVE_PORTIONS));

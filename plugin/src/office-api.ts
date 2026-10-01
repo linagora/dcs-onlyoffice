@@ -14,6 +14,8 @@ export interface ApiRun {
 export interface ApiParagraph {
   GetClassType(): 'paragraph';
   AddText(text: string): ApiRun;
+  // Makes the paragraph's whole content a link to the address.
+  AddHyperlink(address: string): unknown;
   RemoveAllElements(): boolean;
   // Its text, list numbering included unless `Numbering` is false.
   GetText(options?: { Numbering?: boolean; NewLineSeparator?: string }): string;
@@ -212,6 +214,16 @@ export interface InternalRange {
   bbox: { contains(column: number, row: number): boolean };
   // The merged area it intersects, null when none.
   hasMerged(): unknown;
+  // Links the range, in the editor's history; `withoutStyle` leaves its font
+  // as it is.
+  setHyperlink(link: InternalHyperlink, withoutStyle: boolean): void;
+}
+
+// A link on cells in the editor's model: the cells it covers, and the
+// address it leads to.
+export interface InternalHyperlink {
+  Ref: InternalRange | null;
+  Hyperlink: string | null;
 }
 
 export interface ApiRange {
@@ -234,6 +246,7 @@ export interface ApiRange {
   // validation and the conditional formatting.
   Clear(): unknown;
   SetBold(bold: boolean): unknown;
+  SetUnderline(underline: 'none' | 'single'): unknown;
   SetWrap(wrap: boolean): unknown;
   SetAlignHorizontal(alignment: 'center'): unknown;
   SetAlignVertical(alignment: 'center'): unknown;

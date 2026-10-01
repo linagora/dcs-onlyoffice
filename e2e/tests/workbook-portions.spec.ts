@@ -4,7 +4,7 @@ import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginFrame, pluginPanel, removeUserProtectedRange } from './support/plugin.ts';
-import { forceSavedXlsx, shownPortions } from './support/portions.ts';
+import { forceSavedXlsx, portionPageAddress, shownPortions } from './support/portions.ts';
 import {
   cellValue,
   fillWorkbookPortionForm,
@@ -44,6 +44,8 @@ test('a portion inserted into empty cells is stored in a merged, marked placehol
   const [sheet] = saved.worksheets;
   expect(sheet?.userProtectedRanges).toEqual([{ name: portionId, reference: EMPTY_CELLS, users: [] }]);
   expect(sheet?.mergedCells).toContain(EMPTY_CELLS);
+  // The whole placeholder links to the portion's page.
+  expect(sheet?.links).toEqual([{ reference: EMPTY_CELLS, target: portionPageAddress({ documentId, portionId }) }]);
   expect(sheet?.cellTexts.get('F4')).toBe(PLACEHOLDER);
   expect(saved.portionParts).toEqual([expect.objectContaining({ id: portionId, label: SPECIAL_FRANCE_CODE, encoding: 'ztdf' })]);
   expect(saved.portionParts[0]?.content).not.toBe('');
@@ -118,6 +120,7 @@ test('a single undo removes a portion inserted into cells, with its placeholder,
   expect(saved.portionParts).toEqual([]);
   expect(saved.worksheets[0]?.userProtectedRanges).toEqual([]);
   expect(saved.worksheets[0]?.mergedCells).toEqual([]);
+  expect(saved.worksheets[0]?.links).toEqual([]);
   expect(saved.worksheets[0]?.cellTexts.has('F4')).toBe(false);
 });
 

@@ -1,6 +1,6 @@
 # Demo walkthrough
 
-The demo scenario, step by step, on the standalone stack and its fictional accounts: in a text document, then, from step 12, in a workbook. Alice Martin, a French officer and an administrator, is cleared for every label of the demo security policy; Bob Walker, an allied officer, for every label but DIFFUSION RESTREINTE – SPÉCIAL FRANCE. The documents, their portions and every text below are fictional.
+The demo scenario, step by step, on the standalone stack and its fictional accounts: in a text document, then, from step 12, in a workbook, and last, in step 21, on a portion page. Alice Martin, a French officer and an administrator, is cleared for every label of the demo security policy; Bob Walker, an allied officer, for every label but DIFFUSION RESTREINTE – SPÉCIAL FRANCE. The documents, their portions and every text below are fictional.
 
 `pnpm --filter @dcs/e2e demo` replays the same scenario and records a video of each person's browser, `alice.webm` and `bob.webm`, under `e2e/test-results/demo`; the CI replays it after the end-to-end suite and keeps the videos for 14 days, as the `demo-videos` artefact of each run. The pictures below come from the same scenario, taken with `pnpm --filter @dcs/e2e captures` on a fresh stack.
 
@@ -92,7 +92,7 @@ Alice selects empty cells, picks a label and types a text in the panel, as in th
 
 ## 14. Co-editing a workbook
 
-Bob opens the workbook: his panel reads both portions. When he selects a placeholder, the panel highlights its portion, and a bubble shows him its text over the placeholder.
+Bob opens the workbook: his panel reads both portions. When he selects a placeholder, with the keyboard or a long press, the panel highlights its portion, and a bubble shows him its text over the placeholder; a short click on it opens the portion's page, as step 21 shows.
 
 ![Bob's editor, where the bubble shows the portion whose placeholder he selected](screenshots/walkthrough/14-workbook-co-editing.png)
 
@@ -129,6 +129,14 @@ A workbook's page marking goes into the centre of every sheet's headers and foot
 ## 20. The signed binding of a workbook
 
 Once both leave the editor, the stored workbook carries the page marking and a binding signed as a text document's, over the parts that ADatP-4778.2 lists for a workbook and those that can hold its content beyond them: `xmlsec1` verifies it the same way, as [step 8](#8-the-signed-binding) tells. This step has no picture.
+
+## 21. A portion page
+
+Each placeholder links to its portion's page on the portal, in the stored file and in any copy of it. The replay takes the link of the paragraph that step 5 raised to SPÉCIAL FRANCE from the stored file, and opens it, as a reader would from a copy of the file: by hand, download the document from the list, open it, and follow the link of its placeholder; a reader who is not signed in signs in first. Alice, cleared for SPÉCIAL FRANCE, reads the paragraph there, decrypted in her browser. Bob, who may open the document but not read the paragraph, gets "Access denied": OpenTDF decides at each opening. The page shows the portion as the platform stores it, and reading it leaves the journal unchanged.
+
+![The portion page, where Alice reads the paragraph raised to SPÉCIAL FRANCE](screenshots/walkthrough/21-portion-page.png)
+
+![The same portion page, which shows "Access denied" to Bob](screenshots/walkthrough/21-portion-page-refused.png)
 
 ## The journal
 

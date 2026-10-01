@@ -48,7 +48,7 @@ interface SandboxApi {
       getUserProtectedRangeByName(name: string): { obj: SandboxUserProtectedRange } | null;
       editUserProtectedRanges(from: SandboxUserProtectedRange, to: null, addToHistory: true): unknown;
     };
-    GetRange(reference: string): { Merge(across: boolean): unknown; AddComment(text: string, author: string): unknown };
+    GetRange(reference: string): { Merge(across: boolean): unknown; AddComment(text: string, author: string): unknown; ClearHyperlinks(): unknown };
   };
   GetDocument(): {
     GetElement(index: number): SandboxParagraph;
@@ -220,8 +220,9 @@ export interface UnencryptedPortion extends WrittenPortion {
   text: string;
 }
 
-// An envelope taken from another portion, under the label given here.
-export interface MovedEnvelope extends WrittenPortion {
+// A portion written with an envelope taken from another portion, under the
+// label given here.
+export interface EnvelopePortion extends WrittenPortion {
   envelope: string;
 }
 
@@ -231,9 +232,11 @@ export async function insertUnencryptedPortion(frame: Frame, portion: Unencrypte
   await writePortion(frame, portion, 'base64', Buffer.from(portion.text).toString('base64'));
 }
 
-// Writes a portion as a co-author able to edit the file could: an existing
-// envelope, under a label that is not the one bound to it.
-export async function insertMovedEnvelope(frame: Frame, portion: MovedEnvelope): Promise<void> {
+// Writes a portion with an existing envelope, as a co-author able to edit
+// the file could, under a label that is not the one bound to it, or as the
+// panel did before placeholders linked to their portions' pages: its
+// placeholder holds no link.
+export async function insertEnvelope(frame: Frame, portion: EnvelopePortion): Promise<void> {
   await writePortion(frame, portion, 'ztdf', portion.envelope);
 }
 
@@ -480,16 +483,25 @@ export async function rewordPageMarking(frame: Frame, words: string): Promise<vo
 // Merges cells of a workbook's active sheet, bypassing the panel, as a
 // co-author does in the editor.
 export async function mergeCells(frame: Frame, reference: string): Promise<void> {
-  await changeCells(frame, { reference, comment: null });
+  await changeCells(frame, { reference, kind: 'merge' });
 }
 
 // Comments on the first of the cells of a workbook's active sheet, bypassing
 // the panel, as a co-author does in the editor.
 export async function commentOnCells(frame: Frame, reference: string, comment: string): Promise<void> {
-  await changeCells(frame, { reference, comment });
+  await changeCells(frame, { reference, kind: 'comment', comment });
 }
 
-async function changeCells(frame: Frame, change: { reference: string; comment: string | null }): Promise<void> {
+// Takes the links off cells of a workbook's active sheet, bypassing the
+// panel, as the panel wrote placeholders before they linked to their
+// portions' pages.
+export async function unlinkCells(frame: Frame, reference: string): Promise<void> {
+  await changeCells(frame, { reference, kind: 'unlink' });
+}
+
+type CellChange = { reference: string } & ({ kind: 'merge' } | { kind: 'comment'; comment: string } | { kind: 'unlink' });
+
+async function changeCells(frame: Frame, change: CellChange): Promise<void> {
   await whilePanelCommandsHeld(frame, async () =>
     frame.evaluate(
       async (scope) =>
@@ -505,12 +517,14 @@ async function changeCells(frame: Frame, change: { reference: string; comment: s
             runtime.plugin,
             () => {
               // Runs in the editor's sandbox, with Api and Asc.scope only.
-              const { reference, comment } = Asc.scope as { reference: string; comment: string | null }; // SAFETY: the scope set just above
-              const cells = Api.GetActiveSheet().GetRange(reference);
-              if (comment === null) {
+              const cellChange = Asc.scope as CellChange; // SAFETY: the scope set just above
+              const cells = Api.GetActiveSheet().GetRange(cellChange.reference);
+              if (cellChange.kind === 'merge') {
                 cells.Merge(false);
+              } else if (cellChange.kind === 'comment') {
+                cells.AddComment(cellChange.comment, 'Fictional co-author');
               } else {
-                cells.AddComment(comment, 'Fictional co-author');
+                cells.ClearHyperlinks();
               }
               return true;
             },

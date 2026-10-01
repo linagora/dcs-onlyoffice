@@ -7,11 +7,14 @@ export interface PartReplacement {
   xml: string;
 }
 
-// What a portion's placeholder block shows of its label.
+// What a portion's placeholder holds: the tag that names the portion and its
+// label, the label's colour and marking, and the link to the portion's page.
 export interface PortionBlockScope {
   tag: string;
   color: string | null;
   placeholder: string;
+  // The address of the portion's page, which the whole placeholder links to.
+  link: string;
 }
 
 // A portion the command writes, with its part: a new one, where the author

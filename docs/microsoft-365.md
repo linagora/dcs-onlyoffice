@@ -16,13 +16,15 @@ A protected portion is a paragraph, or cells, whose label may be more restrictiv
 
 In Word or Excel, the reader of such a file sees the document's sensitivity label, its content in clear, the page marking the platform wrote, and the placeholder of each portion, never the portion's text. No Office application opens the envelope, and OpenTDF gives its key only through the platform, to someone whose clearance allows the portion's label. The same holds for anyone who gets the file by other means.
 
+Each placeholder links to its portion's page on the portal: the text of a text document's placeholder, and the cells of a workbook's. A reader in Word or Excel who follows the link signs in to the platform if needed, and the page shows the portion's text, decrypted in the reader's browser, to someone who may open the document and whose clearance allows the portion's label, and "Access denied" to anyone else. Nothing is installed on the Microsoft side, and the file still holds no portion's text. The page shows the portion as the platform stores it now, which the copy at hand may no longer match.
+
 For instance, a DIFFUSION RESTREINTE document that holds one paragraph labelled DIFFUSION RESTREINTE – SPÉCIAL FRANCE:
 
 | | In the platform, cleared for SPÉCIAL FRANCE | In the platform, cleared for DIFFUSION RESTREINTE only | In Word or Excel |
 | --- | --- | --- | --- |
 | Label shown | DIFFUSION RESTREINTE – CONTIENT DES PORTIONS PLUS RESTRICTIVES, the document label | The same | DIFFUSION RESTREINTE, the sensitivity label |
 | Content in clear | Read | Read | Read |
-| The SPÉCIAL FRANCE paragraph | Read in the labelling panel | Access denied | Its placeholder only: DIFFUSION RESTREINTE – SPÉCIAL FRANCE – protected portion |
+| The SPÉCIAL FRANCE paragraph | Read in the labelling panel | Access denied | Its placeholder only: DIFFUSION RESTREINTE – SPÉCIAL FRANCE – protected portion, whose link opens the portion's page, with the platform's answer |
 
 The sensitivity label follows the document label without its informative category: Office shows DIFFUSION RESTREINTE, the classification of the content it can read, while the more restrictive paragraph stays encrypted. The file of this example that the platform stored for the tests with a Microsoft 365 tenant holds the paragraph's text encrypted in its envelope, and in clear in none of its parts.
 
@@ -54,6 +56,7 @@ The sensitivity label follows the document label without its informative categor
 - **One sensitivity label per label, and one label per sensitivity label.** A label without an entry gets no sensitivity label. At upload, a sensitivity label that the mapping does not know counts as none, and so do a label of another tenant, several labels of the tenant, and one that the mapping pairs with several labels: the person uploading the file then chooses its base label.
 - **The setting.** Keep the mapping of a real tenant in `deploy/spif`, under a name that starts with `local-`, which Git ignores, and set `LABEL_MAPPING_FILE`, for instance to `/spif/local-label-mapping.json`. Then restart the policy service: it reads the mapping when it starts, and does not start on one that names a label its security policy lacks. The [hosting guide](hosting.md#configuration) describes the setting.
 - **The upload.** To keep the label that Office set, choose **The label the file carries** when uploading the file.
+- **The portion pages.** A placeholder's link works from a machine that reaches the portal's public address, for a person who has an account on the platform. A portion written before placeholders linked to their pages gets its link at its next change in the panel.
 
 ## Trying it
 
@@ -77,6 +80,7 @@ Word for Mac was not shown the other three labels. It would show them the same w
 - Office sees one label per document. The platform's finer labels, those of the protected portions and the document label's informative category, stay in the platform.
 - The binding signature, which shows that the platform computed the document label, does not survive a change made in Office: the platform detects it, logs it, and signs the file afresh at upload.
 - Whether a document's protected portions survive a change made in Office was not tried.
+- Whether Word and Excel follow a link inside a locked placeholder, in Protected View too, and what Safe Links makes of it, was not tried.
 - A label mapping covers one tenant.
 
 [SECURITY.md](../SECURITY.md) lists these properties with the platform's others.

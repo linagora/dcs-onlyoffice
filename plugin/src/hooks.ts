@@ -696,7 +696,9 @@ export function usePortionEdit(
     return writeUnderLock(
       underWay,
       async (others) =>
-        envelopes === null || editor === null ? { status: 'not-written' } : changePortion({ portion, label, text }, others, envelopes, editor),
+        envelopes === null || editor === null || documentId === null
+          ? { status: 'not-written' }
+          : changePortion({ portion, label, text }, others, { envelopes, editor, documentId }),
       version,
       async (id) => reportPortionChange(id, portion.id, { label: underWay.label.code, version: portion.version }, { label: label.code, version }),
     );

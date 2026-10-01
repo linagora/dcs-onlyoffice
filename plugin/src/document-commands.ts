@@ -132,18 +132,21 @@ export function writeLabellingCommand(): WriteOutcome {
     return block;
   };
 
-  const showPortionLabel = (paragraph: ApiParagraph | null, control: ApiBlockLvlSdt, block: PortionBlockScope): void => {
+  // The placeholder shows the portion's label, and its whole text links to
+  // the portion's page.
+  const showPlaceholder = (paragraph: ApiParagraph | null, control: ApiBlockLvlSdt, block: PortionBlockScope): void => {
     if (block.color !== null) {
       control.SetBorderColor(Api.HexColor(block.color));
     }
     paragraph?.RemoveAllElements();
     paragraph?.AddText(block.placeholder);
+    paragraph?.AddHyperlink(block.link);
   };
 
   // An insertion and a protection make the portion's block alike.
   const portionBlock = (portion: { alias: string; block: PortionBlockScope }): ApiBlockLvlSdt =>
     lockedBlock(portion.block.tag, portion.alias, (paragraph, control) => {
-      showPortionLabel(paragraph, control, portion.block);
+      showPlaceholder(paragraph, control, portion.block);
     });
 
   const insertPortionBlock = (portion: Extract<PortionWriteScope, { kind: 'insertion' }>): void => {
@@ -226,7 +229,7 @@ export function writeLabellingCommand(): WriteOutcome {
       control.SetLock('unlocked');
       control.SetTag(change.block.tag);
       const first = control.GetContent().GetElement(0);
-      showPortionLabel(isParagraph(first) ? first : null, control, change.block);
+      showPlaceholder(isParagraph(first) ? first : null, control, change.block);
       control.SetLock('sdtContentLocked');
     }
     return true;

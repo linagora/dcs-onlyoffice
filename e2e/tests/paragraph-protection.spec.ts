@@ -15,7 +15,7 @@ import {
   selectUntilParagraph,
   trackChanges,
 } from './support/plugin.ts';
-import { forceSavedDocx } from './support/portions.ts';
+import { forceSavedDocx, placeholderLinks } from './support/portions.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -70,8 +70,15 @@ test('the French officer protects a paragraph already written, which becomes a S
   }
   const saved = await forceSavedDocx(page, documentId, (docx) => docx.portionParts.length === 1);
   expect(saved.portionParts[0]).toMatchObject({ label: SPECIAL_FRANCE_CODE, encoding: 'ztdf' });
+  const placeholder = `${SPECIAL_FRANCE} – protected portion`;
   expect(saved.contentControls).toEqual([
-    { alias: 'Protected portion', tag: expect.any(String), lock: 'sdtContentLocked', text: `${SPECIAL_FRANCE} – protected portion` },
+    {
+      alias: 'Protected portion',
+      tag: expect.any(String),
+      lock: 'sdtContentLocked',
+      text: placeholder,
+      links: placeholderLinks({ documentId, portionId: saved.portionParts[0]?.id ?? '' }, placeholder),
+    },
   ]);
   // The block stands where the paragraph stood, between the headings around it.
   expect(saved.bodyText).toContain(`4. Logistics\n${SPECIAL_FRANCE} – protected portion\n5. Points of contact`);

@@ -43,6 +43,7 @@ test('after an insertion, the page marking opens every header and closes every f
       tag: { v: 1, kind: 'page-marking', label: NON_PROTEGE_WITH_MORE_RESTRICTIVE_PORTIONS_CODE },
       lock: 'sdtContentLocked',
       text: NON_PROTEGE_WITH_MORE_RESTRICTIVE_PORTIONS,
+      links: [],
     },
     color: NON_PROTEGE_COLOR,
   };
