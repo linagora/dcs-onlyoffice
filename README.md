@@ -243,7 +243,7 @@ Sign in with one of the fictional accounts below: the password is the login.
 
 ### Walk through the demo
 
-[docs/walkthrough.md](docs/walkthrough.md) follows the demo scenario step by step, with pictures: a base label, portions, co-editing, a change the co-author sees, a raise to SPÉCIAL FRANCE that shuts the allied officer out, a deletion, the page markings, the signed binding, a revocation, an upload and the protection of a paragraph already written, then, in a workbook, the steps from the base label to the signed binding, with the protection of rows already filled, its page marking showing in the print preview. `pnpm --filter @dcs/e2e demo` replays it with a video of each person's browser, and the CI keeps each run's videos for 14 days.
+[docs/walkthrough.md](docs/walkthrough.md) follows the demo scenario step by step, with pictures: a base label, portions, co-editing, a change the co-author sees, a raise to SPÉCIAL FRANCE that shuts the allied officer out, a deletion, the page markings, the signed binding, a revocation, an upload and the protection of a paragraph already written, then, in a workbook, the steps from the base label to the signed binding, with the protection of rows already filled, its page marking showing in the print preview, and last, a portion read on the portion page that its placeholder links to. `pnpm --filter @dcs/e2e demo` replays it with a video of each person's browser, and the CI keeps each run's videos for 14 days.
 
 ### Deploy
 
