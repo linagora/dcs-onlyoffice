@@ -162,8 +162,9 @@ export function lastCommandAnswerAt(): number | null {
 }
 
 // The command is serialised with toString() and runs in the editor's sandbox:
-// it may only use `Api` and the JSON data passed as `Asc.scope`. No network
-// call may happen inside it.
+// it may only use `Api` and the JSON data passed as `Asc.scope`, and in a
+// workbook the editor's model of a link on cells, which no call of `Api`
+// creates. No network call may happen inside it.
 export function runCommand<T>(
   command: () => unknown,
   scope: Record<string, unknown>,

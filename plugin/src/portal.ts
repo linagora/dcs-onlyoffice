@@ -9,6 +9,12 @@ export function documentIdOf(info: PluginInfo): string | null {
     : null;
 }
 
+// The public address of a stored portion's portion page, on the portal the
+// panel runs on, which names the document and the portion only.
+export function portionPageAddress(documentId: string, portionId: string): string {
+  return `${window.location.origin}/documents/${encodeURIComponent(documentId)}/portions/${encodeURIComponent(portionId)}`;
+}
+
 // Tells the portal about a base label change the panel made: the portal logs
 // it with the signed-in person and saves the document at once, since it
 // checks who opens a document against the stored label.

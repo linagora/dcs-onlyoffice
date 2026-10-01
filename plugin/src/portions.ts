@@ -26,7 +26,7 @@ import {
   type LabelView,
   type PackageKind,
 } from './policy.ts';
-import type { PortionState } from './portal.ts';
+import { portionPageAddress, type PortionState } from './portal.ts';
 import {
   placeholderAtActiveCellCommand,
   readSelectionCommand,
@@ -231,24 +231,34 @@ export interface PortionChange {
   text: string;
 }
 
+// What writes a portion into a document: the client that seals its text into
+// an envelope, the document's editor, and the document's id, which the
+// placeholder's link names.
+export interface PortionWriter {
+  envelopes: EnvelopeClient;
+  editor: EditorType;
+  documentId: string;
+}
+
 // The text is sealed before anything reaches the document: a text that cannot
 // be encrypted is not inserted.
-export async function insertPortion(portion: NewPortion, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<WriteResult> {
-  const { result } = await writeNewPortion(portion, others, envelopes, editor, (fields) => ({ kind: 'insertion', ...fields }));
+export async function insertPortion(portion: NewPortion, others: OtherLabels, writer: PortionWriter): Promise<WriteResult> {
+  const { result } = await writeNewPortion(portion, others, writer, (fields) => ({ kind: 'insertion', ...fields }));
   return result;
 }
 
 // The new text is sealed before anything reaches the document: a text that
 // cannot be encrypted changes nothing. Under a new label, the placeholder,
 // the document label and the page marking change with it.
-export async function changePortion(change: PortionChange, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<WriteResult> {
+export async function changePortion(change: PortionChange, others: OtherLabels, writer: PortionWriter): Promise<WriteResult> {
   const { label, portion } = change;
-  const sealed = await sealPortion(label, change.text, others, envelopes, editor);
+  const sealed = await sealPortion(label, change.text, others, writer);
   if (sealed.status === 'not-encrypted') {
     return sealed;
   }
   const xml = buildPortionPart({ id: portion.id, version: nextVersion(portion), labelCode: label.code, labelXml: sealed.labelXml, envelope: sealed.envelope });
-  return writeLabelling({ kind: 'change', id: portion.id, block: portionBlockScope(portion.id, label), xml }, sealed.documentLabel, others, editor);
+  const block = portionBlockScope(portion.id, label, writer.documentId);
+  return writeLabelling({ kind: 'change', id: portion.id, block, xml }, sealed.documentLabel, others, writer.editor);
 }
 
 // Reads the selected content the panel protects, or why it refuses it; null
@@ -279,33 +289,27 @@ export function textOfSelection(content: SelectedContent): string {
 // when it cannot be encrypted, nor when the content changed since the panel
 // read it. The content went through ONLYOFFICE in clear before: the panel
 // warned the author before they confirmed.
-export async function protectSelection(
-  protection: SelectionToProtect,
-  others: OtherLabels,
-  envelopes: EnvelopeClient,
-  editor: EditorType,
-): Promise<NewPortionWrite> {
+export async function protectSelection(protection: SelectionToProtect, others: OtherLabels, writer: PortionWriter): Promise<NewPortionWrite> {
   const { label, content } = protection;
-  return writeNewPortion({ label, text: textOfSelection(content) }, others, envelopes, editor, (fields) => ({ kind: 'protection', content, ...fields }));
+  return writeNewPortion({ label, text: textOfSelection(content) }, others, writer, (fields) => ({ kind: 'protection', content, ...fields }));
 }
 
 // A new portion's first version, which `placed` puts where it goes.
 async function writeNewPortion(
   portion: NewPortion,
   others: OtherLabels,
-  envelopes: EnvelopeClient,
-  editor: EditorType,
+  writer: PortionWriter,
   placed: (fields: { id: string; alias: string; block: PortionBlockScope; xml: string }) => PortionWriteScope,
 ): Promise<NewPortionWrite> {
   const portionId = crypto.randomUUID();
   const state = { label: portion.label.code, version: 1 };
-  const sealed = await sealPortion(portion.label, portion.text, others, envelopes, editor);
+  const sealed = await sealPortion(portion.label, portion.text, others, writer);
   if (sealed.status === 'not-encrypted') {
     return { portionId, state, result: sealed };
   }
   const xml = buildPortionPart({ id: portionId, version: state.version, labelCode: state.label, labelXml: sealed.labelXml, envelope: sealed.envelope });
-  const scope = placed({ id: portionId, alias: messages.portionAlias, block: portionBlockScope(portionId, portion.label), xml });
-  return { portionId, state, result: await writeLabelling(scope, sealed.documentLabel, others, editor) };
+  const scope = placed({ id: portionId, alias: messages.portionAlias, block: portionBlockScope(portionId, portion.label, writer.documentId), xml });
+  return { portionId, state, result: await writeLabelling(scope, sealed.documentLabel, others, writer.editor) };
 }
 
 // The document label that a request gives, with a binding over the parts of
@@ -340,7 +344,7 @@ type SealedPortion =
 
 // Seals a portion's text under its label, and computes the document label
 // that the portion's label gives the document.
-async function sealPortion(label: LabelView, text: string, others: OtherLabels, envelopes: EnvelopeClient, editor: EditorType): Promise<SealedPortion> {
+async function sealPortion(label: LabelView, text: string, others: OtherLabels, { envelopes, editor }: PortionWriter): Promise<SealedPortion> {
   const [labelXml, attributes, documentLabel] = await Promise.all([
     fetchAdatp4774(label.policy, label.code),
     fetchLabelAttributes(label.policy, label.code),
@@ -350,9 +354,14 @@ async function sealPortion(label: LabelView, text: string, others: OtherLabels, 
   return sealed.status === 'failed' ? { status: 'not-encrypted', reason: sealed.reason } : { status: 'sealed', labelXml, envelope: sealed.envelope, documentLabel };
 }
 
-function portionBlockScope(id: string, label: LabelView): PortionBlockScope {
+function portionBlockScope(id: string, label: LabelView, documentId: string): PortionBlockScope {
   const tag: PortionTag = { v: 1, id, label: label.code };
-  return { tag: JSON.stringify(tag), color: label.marking.color, placeholder: messages.portionPlaceholder(label.marking.text) };
+  return {
+    tag: JSON.stringify(tag),
+    color: label.marking.color,
+    placeholder: messages.portionPlaceholder(label.marking.text),
+    link: portionPageAddress(documentId, id),
+  };
 }
 
 async function writeLabelling(portion: PortionWriteScope, documentLabel: DocumentLabel, others: OtherLabels, editor: EditorType): Promise<WriteResult> {

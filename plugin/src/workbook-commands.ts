@@ -7,14 +7,16 @@ import type {
   SelectionScope,
   WriteOutcome,
 } from './commands.ts';
-import type { ApiRange, ApiWorksheet, InternalUserProtectedRange, SpreadsheetApi } from './office-api.ts';
+import type { ApiRange, ApiWorksheet, InternalHyperlink, InternalUserProtectedRange, SpreadsheetApi } from './office-api.ts';
 
 // The commands the panel runs in the spreadsheet editor. As those of the
 // text editor, each is serialised with toString() and runs in the editor's
-// sandbox, where it may only use `Api` and `Asc.scope`.
+// sandbox, where it may only use `Api` and `Asc.scope`, and the editor's
+// model of a link on cells, which no call of `Api` creates.
 
 declare const Api: SpreadsheetApi;
 declare const Asc: { scope: CommandScope & SelectionScope & SelectionReadingScope };
+declare const AscCommonExcel: { Hyperlink?: new () => InternalHyperlink } | undefined;
 
 // What a workbook holds of the panel's parts, its user protected ranges, on
 // every sheet, which the portions' placeholders are, the centre section of
@@ -138,10 +140,12 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
   }
   const parts = sheet.GetCustomXmlParts();
   const portion = scope.portion;
-  // An insertion and a change show the marking alike.
-  const showMarking = (cells: ApiRange, block: PortionBlockScope): void => {
+  // An insertion and a change show the marking alike, and make the whole
+  // placeholder a link to the portion's page.
+  const showPlaceholder = (cells: ApiRange, block: PortionBlockScope): void => {
     cells.SetValue(block.placeholder);
     cells.SetBold(true);
+    cells.SetUnderline('single');
     cells.SetWrap(true);
     cells.SetAlignHorizontal('center');
     cells.SetAlignVertical('center');
@@ -151,6 +155,18 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
     cells.SetFontColor(color);
     for (const edge of ['Top', 'Bottom', 'Left', 'Right'] as const) {
       cells.SetBorders(edge, 'Medium', color);
+    }
+    // `Api` links one cell through the editor's view, which first asks the
+    // co-editing service to lock it; the model links the whole range at once,
+    // within this command, and leaves the marking's colour. An editor that no
+    // longer offers that model gets the placeholder without its link, rather
+    // than half written.
+    const Hyperlink = typeof AscCommonExcel === 'undefined' ? undefined : AscCommonExcel.Hyperlink;
+    if (Hyperlink !== undefined && typeof cells.range.setHyperlink === 'function') {
+      const link = new Hyperlink();
+      link.Ref = cells.range;
+      link.Hyperlink = block.link;
+      cells.range.setHyperlink(link, true);
     }
   };
   if (portion !== null && (portion.kind === 'change' || portion.kind === 'deletion')) {
@@ -187,7 +203,7 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
         for (const part of portionParts) {
           part.Delete();
         }
-        showMarking(cells, portion.block);
+        showPlaceholder(cells, portion.block);
       } else {
         // The range goes first: should the editor refuse to remove it,
         // nothing is written, and the portion stays whole.
@@ -219,7 +235,7 @@ export function writeWorkbookLabellingCommand(): WriteOutcome {
   // An insertion and a protection make the placeholder alike, in empty cells.
   const addPlaceholder = (cellsSheet: ApiWorksheet, cells: ApiRange, added: { id: string; block: PortionBlockScope; xml: string }): void => {
     cells.Merge(false);
-    showMarking(cells, added.block);
+    showPlaceholder(cells, added.block);
     // A sheet's name is quoted in a reference, its quotes doubled.
     const reference = `'${cellsSheet.GetName().replace(/'/g, "''")}'!${cells.GetAddress(true, true, 'xlA1', false) ?? ''}`;
     const created = cellsSheet.AddProtectedRange(added.id, reference);

@@ -37,6 +37,7 @@ import {
   EDITORS,
   insertPortion,
   type OtherLabels,
+  type PortionWriter,
   protectSelection,
   readSelection,
   type StoredPortion,
@@ -148,24 +149,23 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   // A new portion is sealed with the envelopes and computed with the
   // document's other labels, read afresh; the panel reads the document again
   // once it is written.
-  const writeNewPortion = async (
-    write: (others: OtherLabels, client: EnvelopeClient, editorType: EditorType) => Promise<WriteResult>,
-  ): Promise<WriteResult> => {
+  const writeNewPortion = async (write: (others: OtherLabels, writer: PortionWriter) => Promise<WriteResult>): Promise<WriteResult> => {
     if (envelopes.status === 'failed') {
       return { status: 'not-encrypted', reason: envelopes.reason };
     }
-    if (baseLabelCode === null || envelopes.status === 'loading') {
+    // A placeholder links to its portion's page, which names the document.
+    if (baseLabelCode === null || envelopes.status === 'loading' || documentId === null) {
       return { status: 'not-written' };
     }
     const current = await refresh();
     const others = { baseLabelCode, portionLabelCodes: current.portions.map((portion) => portion.labelCode) };
-    const result = await write(others, envelopes.value, editorTypeOf(await pluginReady));
+    const result = await write(others, { envelopes: envelopes.value, editor: editorTypeOf(await pluginReady), documentId });
     await refresh();
     return result;
   };
 
   const insert = async (label: LabelView, text: string): Promise<WriteResult> => {
-    const result = await writeNewPortion(async (others, client, editorType) => insertPortion({ label, text }, others, client, editorType));
+    const result = await writeNewPortion(async (others, writer) => insertPortion({ label, text }, others, writer));
     if (result.status === 'written') {
       setInsertionRequested(false);
     }
@@ -173,10 +173,10 @@ export function Panel({ pluginReady }: PanelProps): JSX.Element {
   };
 
   const protect = async (label: LabelView, content: SelectedContent): Promise<WriteResult> =>
-    writeNewPortion(async (others, client, editorType) => {
-      const written = await protectSelection({ label, content }, others, client, editorType);
-      if (written.result.status === 'written' && documentId !== null) {
-        reportExistingContentProtection(documentId, written.portionId, written.state).catch((error: unknown) => {
+    writeNewPortion(async (others, writer) => {
+      const written = await protectSelection({ label, content }, others, writer);
+      if (written.result.status === 'written') {
+        reportExistingContentProtection(writer.documentId, written.portionId, written.state).catch((error: unknown) => {
           logProblem('Reporting a protection of existing content', error);
         });
       }
