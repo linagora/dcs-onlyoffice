@@ -85,6 +85,11 @@ const STYLE = `
   form.journal-filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin-bottom: 1rem; }
   table.journal { font-size: 0.9rem; }
   table.journal td { word-break: break-word; }
+  .portion { border: 1px solid #e4e7eb; border-radius: 4px; padding: 0.8rem 1rem; display: grid; gap: 0.6rem; justify-items: start; }
+  .portion-marking { font-weight: 600; }
+  .portion-text { white-space: pre-wrap; }
+  .portion-notice.muted { color: #616e7c; }
+  .portion-notice.warning { color: #b44d12; }
 `;
 
 const JOURNAL_CATEGORY_NAMES: Readonly<Record<JournalCategory, string>> = {
@@ -392,6 +397,32 @@ export function renderEditorPage(options: EditorPageOptions): string {
   <script src="/static/editor.js"></script>
 </body>
 </html>`;
+}
+
+// What a portion page shows: one protected portion of a stored document,
+// read outside the editor.
+export interface PortionPageOptions {
+  document: StoredDocument;
+  portionId: string;
+  // The OpenTDF platform that the page's script asks for the portion's key.
+  opentdfUrl: string;
+}
+
+// The page's script comes from the plugin's build: it reads the portion's
+// part as the platform stores it, and opens its envelope in the reader's
+// browser, as the panel does. What it shows comes after the page, and screen
+// readers announce it.
+export function renderPortionPage(user: UserIdentity, options: PortionPageOptions): string {
+  return page(
+    'Protected portion',
+    `${renderHeader(user)}
+<main>
+  <h2>Protected portion</h2>
+  <p>A portion of ${escapeHtml(options.document.fileName)}. This page shows it as the platform stores it now: a copy of the document you hold may differ.</p>
+  <div id="portion" class="portion" aria-live="polite" data-document="${escapeHtml(options.document.id)}" data-portion="${escapeHtml(options.portionId)}" data-opentdf="${escapeHtml(options.opentdfUrl)}"></div>
+  <script type="module" src="/plugin/portion.js"></script>
+</main>`,
+  );
 }
 
 function renderHeader(user: UserIdentity): string {
