@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { UserIdentity } from './auth/sessions.ts';
 import type { DocumentAccessCheck } from './document-access.ts';
+import { DocumentQueues } from './document-queues.ts';
 import type { StoredDocument } from './documents.ts';
 import { type Journal, type JournalPerson, type JournalRole, journalPersonById } from './journal.ts';
 import { type CommandService, dropFromSession, requestSession } from './onlyoffice.ts';
@@ -50,6 +51,14 @@ export class EditingSessions {
   // The key of each document whose session the portal ended and whose last
   // save has not arrived yet.
   #retiring = new Map<string, { key: string; since: number }>();
+  // The periodic check under way, if any.
+  #checking: Promise<void> | null = null;
+  // The ends of each document's sessions, one at a time.
+  #ends = new DocumentQueues();
+  // By key, the document of each session the portal ended but whose
+  // connections it could not drop: each periodic check tries again, until
+  // they are dropped or the session's last save shows that everyone left.
+  #undropped = new Map<string, string>();
 
   constructor(commands: CommandService, documentAccess: DocumentAccessCheck, documents: SessionDocuments, journal: Journal, log: FastifyBaseLogger) {
     this.#commands = commands;
@@ -109,71 +118,68 @@ export class EditingSessions {
   // someone who holds a configuration naming it or who edits in it, or when
   // the portal cannot tell: after a restart, it no longer knows who holds one.
   // The document moves to a new key, and every connection goes, viewers
-  // included. With no session open under the key, there is none to end.
-  async endIfExcluded(document: StoredDocument, key: string, cause: SessionEndCause): Promise<void> {
-    const session = await requestSession(this.#commands, key);
-    if (session?.open === false) {
-      return;
-    }
-    const holders = this.#keys.get(key)?.holders;
-    const editors = session?.editors ?? [];
-    const refused = await this.#refused(document, [...new Set([...(holders ?? []), ...editors])]);
-    if (holders !== undefined && session !== null && refused.length === 0) {
-      return;
-    }
-    // Only editors send a last save; the Document Server may not have said
-    // whether there are any.
-    const saving = session === null || editors.length > 0;
-    if (saving) {
-      this.#retiring.set(document.id, { key, since: Date.now() });
-    }
-    if ((await this.#documents.moveToNewKey(document.id, key)) === null) {
-      if (saving) {
-        this.#retiring.delete(document.id);
+  // included. With no session open under the key, there is none to end, and
+  // a revocation waits for the next check when the Document Server cannot
+  // tell. Ends run one at a time per document: a later one finds the document
+  // under a new key already, and does nothing.
+  async endIfExcluded(documentId: string, key: string, cause: SessionEndCause): Promise<void> {
+    await this.#ends.run(documentId, async () => {
+      const document = await this.#documents.find(documentId);
+      if (document === null || document.key !== key) {
+        return;
       }
-      return;
-    }
-    this.forget(key);
-    const dropped = await dropFromSession(this.#commands, key, null).catch((error: unknown) => {
-      this.#log.error({ documentId: document.id, err: error }, 'The connections to an ended editing session could not be dropped');
-      return false;
-    });
-    this.#journal.record({
-      category: 'session',
-      level: 'warn',
-      message: ENDED_SESSION_MESSAGES[cause],
-      documentId: document.id,
-      fields: { excluded: refused, holdersKnown: holders !== undefined, dropped },
-      people: this.people('excluded', refused),
+      const session = await requestSession(this.#commands, key);
+      if (session?.open === false || (session === null && cause === 'revocation')) {
+        return;
+      }
+      const holders = this.#keys.get(key)?.holders;
+      const editors = session?.editors ?? [];
+      const refused = await this.#refused(document, [...new Set([...(holders ?? []), ...editors])]);
+      if (holders !== undefined && session !== null && refused.length === 0) {
+        return;
+      }
+      // Only editors send a last save; the Document Server may not have said
+      // whether there are any.
+      const retiring = session === null || editors.length > 0 ? { key, since: Date.now() } : null;
+      if (retiring !== null) {
+        this.#retiring.set(documentId, retiring);
+      }
+      if ((await this.#documents.moveToNewKey(documentId, key)) === null) {
+        if (retiring !== null && this.#retiring.get(documentId) === retiring) {
+          this.#retiring.delete(documentId);
+        }
+        return;
+      }
+      this.forget(key);
+      const dropped = await this.#drop(documentId, key);
+      this.#journal.record({
+        category: 'session',
+        level: 'warn',
+        message: ENDED_SESSION_MESSAGES[cause],
+        documentId,
+        fields: { excluded: refused, holdersKnown: holders !== undefined, dropped },
+        people: this.people('excluded', refused),
+      });
     });
   }
 
   // Ends the sessions of the documents whose stored base label no longer
   // lets in the person with the email address `email`, where they hold a
-  // configuration, as `endIfExcluded` does: a clearance change that lets them
-  // read less applies at once, and one that lets them read more ends nothing.
-  // Only a refusal for their clearance counts: a decision the policy service
-  // could not make ends nothing here. A failure on one document leaves the
-  // others checked.
+  // configuration: a clearance change that lets them read less applies at
+  // once, and one that lets them read more ends nothing.
   async applyClearanceChange(email: string): Promise<void> {
-    const editorUserIds = [...this.#identities].filter(([, identity]) => sameEmailAddress(identity.email, email)).map(([id]) => id);
-    await Promise.all(
-      [...this.#keys].map(async ([key, { documentId, holders }]) => {
-        const heldBy = editorUserIds.filter((id) => holders.has(id));
-        if (heldBy.length === 0) {
-          return;
-        }
-        try {
-          const document = await this.#documents.find(documentId);
-          // A document that moved to a new key since has no session under this one.
-          if (document !== null && document.key === key && (await this.#refusedForClearance(document, heldBy))) {
-            await this.endIfExcluded(document, key, 'revocation');
-          }
-        } catch (error: unknown) {
-          this.#log.error({ documentId, err: error }, 'An editing session could not be checked after a clearance change');
-        }
-      }),
-    );
+    const editorUserIds = new Set([...this.#identities].filter(([, identity]) => sameEmailAddress(identity.email, email)).map(([id]) => id));
+    await this.#endExcludedSessions(editorUserIds);
+  }
+
+  // Checks every session the portal knows of against the current clearances
+  // of the people who hold its configurations, as a clearance change made on
+  // the administration page does for its holder: an expiry, or a change made
+  // in the clearance directory itself, applies at the next check. A check
+  // still under way is not started again.
+  async checkClearances(): Promise<void> {
+    this.#checking ??= this.#checkEverySession();
+    return this.#checking;
   }
 
   // While true, the document's ended session may still send its last save,
@@ -196,6 +202,11 @@ export class EditingSessions {
 
   retired(documentId: string): void {
     this.#retiring.delete(documentId);
+    for (const [key, undroppedDocumentId] of this.#undropped) {
+      if (undroppedDocumentId === documentId) {
+        this.#undropped.delete(key);
+      }
+    }
   }
 
   async #refused(document: StoredDocument, editorUserIds: string[]): Promise<string[]> {
@@ -208,16 +219,86 @@ export class EditingSessions {
     return editorUserIds.filter((_id, index) => decisions[index] !== true);
   }
 
-  // Whether the stored base label refuses one of these people for their
-  // clearance, as the policy service decides.
-  async #refusedForClearance(document: StoredDocument, editorUserIds: string[]): Promise<boolean> {
-    const decisions = await Promise.all(
-      editorUserIds.map(async (id) => {
-        const identity = this.#identities.get(id);
-        return identity === undefined ? null : this.#documentAccess.decideOne(identity, document);
+  async #checkEverySession(): Promise<void> {
+    try {
+      await Promise.all([...this.#undropped].map(async ([key, documentId]) => this.#drop(documentId, key)));
+      await this.#endExcludedSessions(null);
+    } finally {
+      this.#checking = null;
+    }
+  }
+
+  // Drops every connection to the session of `key`, and remembers a failure
+  // for the next periodic check.
+  async #drop(documentId: string, key: string): Promise<boolean> {
+    const dropped = await dropFromSession(this.#commands, key, null).catch((error: unknown) => {
+      this.#log.error({ documentId, err: error }, 'The connections to an ended editing session could not be dropped');
+      return false;
+    });
+    if (dropped) {
+      this.#undropped.delete(key);
+    } else {
+      this.#undropped.set(key, documentId);
+    }
+    return dropped;
+  }
+
+  // Ends, as `endIfExcluded` does, the sessions whose document's stored base
+  // label refuses, for their clearance, one of their holders among
+  // `editorUserIds`, or any of them when it is null. Each person's decisions
+  // come in one request; a decision the policy service could not make ends
+  // nothing, and a failure leaves the other people and sessions checked.
+  async #endExcludedSessions(editorUserIds: ReadonlySet<string> | null): Promise<void> {
+    // The documents each of those people holds a configuration of, as they
+    // are stored now: one that moved to a new key since has no session under
+    // the earlier one.
+    const documentsOf = new Map<string, StoredDocument[]>();
+    await Promise.all(
+      [...this.#keys].map(async ([key, { documentId, holders }]) => {
+        const picked = [...holders].filter((id) => editorUserIds === null || editorUserIds.has(id));
+        if (picked.length === 0) {
+          return;
+        }
+        const document = await this.#documents.find(documentId).catch((error: unknown) => {
+          this.#log.error({ documentId, err: error }, 'A document could not be read to check its editing session');
+          return null;
+        });
+        if (document === null || document.key !== key) {
+          return;
+        }
+        for (const id of picked) {
+          documentsOf.set(id, [...(documentsOf.get(id) ?? []), document]);
+        }
       }),
     );
-    return decisions.some((decision) => decision?.open === false && decision.reason === 'clearance');
+    // By key, the documents whose stored base label refuses one of them.
+    const excluding = new Map<string, StoredDocument>();
+    await Promise.all(
+      [...documentsOf].map(async ([id, documents]) => {
+        const identity = this.#identities.get(id);
+        if (identity === undefined) {
+          return;
+        }
+        try {
+          const decisions = await this.#documentAccess.decide(identity, documents);
+          documents.forEach((document, index) => {
+            const decision = decisions[index];
+            if (decision !== undefined && !decision.open && decision.reason === 'clearance') {
+              excluding.set(document.key, document);
+            }
+          });
+        } catch (error: unknown) {
+          this.#log.error({ editorUserId: id, err: error }, 'The clearance of someone holding an editor configuration could not be checked');
+        }
+      }),
+    );
+    await Promise.all(
+      [...excluding.values()].map(async (document) =>
+        this.endIfExcluded(document.id, document.key, 'revocation').catch((error: unknown) => {
+          this.#log.error({ documentId: document.id, err: error }, 'An editing session could not be ended after a revocation');
+        }),
+      ),
+    );
   }
 }
 

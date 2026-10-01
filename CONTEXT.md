@@ -117,5 +117,5 @@ Whether a clearance lets its holder read a label, by the rules of the label's se
 _Avoid_: authorization, entitlement check
 
 **Revocation**:
-A change of a clearance that lets its holder read less than before: a lower classification, fewer categories, a validity period that ends sooner, or its expiry. It applies at once to the holder's open editing sessions and to what their panel has read.
+A change of a clearance that lets its holder read less than before: a lower classification, fewer categories, a validity period that ends sooner, or its expiry. It applies to the holder's open editing sessions at once when made on the administration page, within a minute otherwise, and within seconds to what their panel has read.
 _Avoid_: withdrawal, de-authorisation

@@ -20,6 +20,9 @@ export interface PortalConfig {
   bindingSignatureSecret: string;
   // Language editors open in, unless a document's address asks for another.
   editorLanguage: EditorLanguage;
+  // How often the portal checks the clearances of the people who hold an
+  // editing session's configuration.
+  clearanceCheckSeconds: number;
   documentsDirectory: string;
   templatesDirectory: string;
   pluginDirectory: string;
@@ -48,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PortalConfig {
     directoryAdministrationSecret: requireEnv(env, 'DIRECTORY_ADMINISTRATION_SECRET'),
     bindingSignatureSecret: requireEnv(env, 'BINDING_SIGNATURE_SECRET'),
     editorLanguage: readEditorLanguage(env),
+    clearanceCheckSeconds: readClearanceCheckSeconds(env),
     documentsDirectory: env.DOCUMENTS_DIR ?? '/data/documents',
     templatesDirectory: env.TEMPLATES_DIR ?? '/templates',
     pluginDirectory: env.PLUGIN_DIR ?? path.join(import.meta.dirname, '..', 'plugin-dist'),
@@ -76,6 +80,14 @@ function readEditorLanguage(env: NodeJS.ProcessEnv): EditorLanguage {
     throw new Error(`EDITOR_LANGUAGE must be one of ${EDITOR_LANGUAGES.join(', ')}`);
   }
   return language;
+}
+
+function readClearanceCheckSeconds(env: NodeJS.ProcessEnv): number {
+  const seconds = Number(env.CLEARANCE_CHECK_SECONDS ?? '60');
+  if (!Number.isInteger(seconds) || seconds <= 0) {
+    throw new Error('CLEARANCE_CHECK_SECONDS must be a positive number of seconds');
+  }
+  return seconds;
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, name: string): string {

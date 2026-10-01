@@ -93,6 +93,17 @@ export function buildServer(config: PortalConfig): FastifyInstance {
     journal,
     app.log,
   );
+  // Every so often, the portal checks the clearances of the people who hold
+  // an editing session's configuration: an expiry, or a change made in the
+  // clearance directory itself, applies within the interval.
+  const clearanceCheck = setInterval(() => {
+    editingSessions.checkClearances().catch((error: unknown) => {
+      app.log.error({ err: error }, 'The editing sessions could not be checked against the clearances');
+    });
+  }, config.clearanceCheckSeconds * 1_000);
+  app.addHook('onClose', async () => {
+    clearInterval(clearanceCheck);
+  });
   // A document the person may not open answers every address the same way,
   // without its name.
   const refuse = (reply: FastifyReply, user: UserIdentity, decision: Exclude<DocumentDecision, { open: true }>): FastifyReply =>

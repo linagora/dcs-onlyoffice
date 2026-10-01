@@ -1,6 +1,6 @@
 import { DEMO_ACCOUNTS, signedInPage } from './support/accounts.ts';
 import { BOB, BOB_TERMS, type Terms, today, withTerms, yesterday } from './support/clearances.ts';
-import { withValidUntilInDirectory } from './support/deployment.ts';
+import { deploymentSetting, withValidUntilInDirectory } from './support/deployment.ts';
 import {
   earlierEditorEvents,
   editorDisconnection as disconnection,
@@ -21,6 +21,8 @@ const RELEASABLE_TO_NATO = 'DIFFUSION RESTREINTE – DIFFUSION OTAN';
 const RELEASABLE_TO_NATO_CODE = 'DEMO-FR:2/2.1';
 // Longer than the portal takes to end a session after a revocation.
 const REVOCATION_APPLIED_MS = 5_000;
+// How long after the test sets it a clearance expires.
+const EXPIRY_DELAY_MS = 5_000;
 
 // A signed editor configuration joins its document's editing session
 // whenever it connects. When the base label comes to exclude someone who
@@ -58,8 +60,11 @@ for (const { kind, template } of [
 
 // Whoever joins a session is decided again: a clearance changed outside the
 // administration page since the configuration was signed, which the portal
-// does not learn of, no longer lets its holder in.
-test('someone whose clearance no longer allows the document is disconnected when they join its session', async ({ page, browser }) => {
+// learns of only at its next periodic check, no longer lets its holder in.
+test('someone whose clearance no longer allows the document does not get back into its session with a configuration signed earlier', async ({
+  page,
+  browser,
+}) => {
   // alice keeps the document's editing session open.
   const documentId = await openNewDocument(page, 'exercise-northwind.docx');
   const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
@@ -70,7 +75,43 @@ test('someone whose clearance no longer allows the document is disconnected when
   // Its last valid day becomes yesterday.
   await withValidUntilInDirectory(BOB, `${today()}T00:00:00Z`, async () => {
     await openWithEarlierConfig(bob, bobConfig);
-    await expect(disconnection(bob)).toBeVisible();
+    // The portal disconnects him as he joins, unless its periodic check
+    // ended the session first: the Document Server then asks for a new
+    // configuration, which the portal no longer signs for him.
+    await expect
+      .poll(async () => (await disconnection(bob).isVisible()) || (await earlierEditorEvents(bob)).includes('onRequestRefreshFile'))
+      .toBe(true);
+    if (await disconnection(bob).isVisible()) {
+      // The decision made as he joined disconnected him, not a later check.
+      // alice, an administrator, reads the journal.
+      await journalRow(page, { document: documentId, category: 'session' }, 'Disconnected editors whom the base label excludes from an editing session');
+    }
+  });
+  await bob.context().close();
+});
+
+// Every few seconds for the tests, every minute by default, the portal checks
+// the clearances of the people who hold a configuration of an editing
+// session: an expiry, or a change made in the clearance directory itself,
+// ends the sessions it excludes them from within that interval.
+test('a clearance that expires during an editing session ends it within the interval of the periodic check, and the journal says so', async ({
+  page,
+  browser,
+}) => {
+  const interval = Number(deploymentSetting('CLEARANCE_CHECK_SECONDS'));
+  expect(interval, 'the stack runs with CLEARANCE_CHECK_SECONDS=10, as deploy/.env.example sets it').toBeLessThanOrEqual(15);
+  const intervalMs = interval * 1_000;
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  const bob = await signedInPage(browser, DEMO_ACCOUNTS.bob);
+  await openDocument(bob, documentId);
+
+  // In the clearance directory itself, which the portal learns nothing from.
+  await withValidUntilInDirectory(BOB, new Date(Date.now() + EXPIRY_DELAY_MS).toISOString(), async () => {
+    await expect(disconnection(bob)).toBeVisible({ timeout: EXPIRY_DELAY_MS + intervalMs + REVOCATION_APPLIED_MS });
+    await expect(disconnection(page)).toBeVisible();
+    // alice, an administrator, then reads the journal.
+    const row = await journalRow(page, { document: documentId, category: 'session' }, 'Ended an editing session that a revocation excludes someone from');
+    await expect(row).toContainText('Bob Walker <bob.walker@dcs.test> (excluded)');
   });
   await bob.context().close();
 });
