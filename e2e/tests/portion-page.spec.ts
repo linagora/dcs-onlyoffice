@@ -1,12 +1,22 @@
 import type { Page } from '@playwright/test';
+import JSZip from 'jszip';
 import { DEMO_ACCOUNTS, fillIdpLoginForm, signedInPage } from './support/accounts.ts';
 import { ALICE, ALICE_TERMS, withTerms } from './support/clearances.ts';
 import { PORTAL, withUnreadableDirectory } from './support/deployment.ts';
 import { browserFetch, openDocument, openNewDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
-import { pluginFrame, pluginPanel, removeUserProtectedRange } from './support/plugin.ts';
-import { documentWithPortion, forceSavedDocx, forceSavedXlsx, portionPagePath } from './support/portions.ts';
+import { addCustomXmlParts, labelXmlOf, pluginFrame, pluginPanel, portionPartXml, removeUserProtectedRange } from './support/plugin.ts';
+import {
+  documentWithPortion,
+  forceSavedDocx,
+  forceSavedXlsx,
+  insertPortion,
+  portionPagePath,
+  savedPortion,
+  shownPortions,
+  storedFile,
+} from './support/portions.ts';
 import { insertWorkbookPortion } from './support/workbooks.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
@@ -29,6 +39,19 @@ async function shownPortion(page: Page): Promise<{ marking: string | null; text:
     text: (await text.count()) === 0 ? null : await text.textContent(),
     notice: (await notice.count()) === 0 ? null : await notice.textContent(),
   };
+}
+
+// The names of a package's Custom XML parts that hold a text, in the order
+// of their numbers.
+async function partNamesHolding(file: Buffer, text: string): Promise<string[]> {
+  const zip = await JSZip.loadAsync(file);
+  const names: string[] = [];
+  for (const name of Object.keys(zip.files).filter((file) => /^customXml\/item\d+\.xml$/.test(file))) {
+    if ((await zip.file(name)?.async('string'))?.includes(text) === true) {
+      names.push(name);
+    }
+  }
+  return names.sort((first, second) => first.localeCompare(second, 'en', { numeric: true }));
 }
 
 // The rows of the journal page for a document.
@@ -154,6 +177,39 @@ test('a portion whose placeholder the stored file no longer holds is reported as
 
   expect(withoutRange.portionParts.map((part) => part.id)).toEqual([portionId]);
   await expect(page.getByTestId('portion-notice')).toHaveText('The stored document no longer holds this portion.');
+});
+
+// A file whose parts name a portion twice, as an editor outside the panel
+// could write it: the portion page reads the later part, as the panel does.
+// Parts of another tool, one before the portion and others after it, number
+// the earlier part from 2 to 9 and the later one from 10 to 19, which name
+// order alone would put first: customXml/item10.xml before item2.xml.
+test('a portion that two parts name shows the later one on its portion page, as in the panel', async ({ page }) => {
+  const later = markedText('Fictional paragraph of the later part');
+  const source = await documentWithPortion(page, { marking: DIFFUSION_RESTREINTE, text: later });
+  const documentId = await openNewDocument(page, 'exercise-northwind.docx');
+  const frame = await pluginFrame(page);
+  const otherPart = (index: number): string => `<other xmlns="urn:example:fictional-tool" index="${index}"/>`;
+  await addCustomXmlParts(frame, [otherPart(0)]);
+  await insertPortion(page, { marking: DIFFUSION_RESTREINTE, text: markedText('Fictional paragraph of the earlier part') });
+  const portion = await savedPortion(page, documentId);
+  const labelXml = await labelXmlOf(frame, 'DEMO-FR', source.labelCode);
+  await addCustomXmlParts(frame, [
+    ...Array.from({ length: 9 }, (_, index) => otherPart(index + 1)),
+    portionPartXml({ id: portion.portionId, labelCode: source.labelCode, labelXml, encoding: 'ztdf', content: source.envelope }),
+  ]);
+  await expect.poll(async () => (await shownPortions(page)).map((shown) => shown.text)).toEqual([later]);
+  await forceSavedDocx(page, documentId, (saved) => saved.portionParts.length === 2);
+  const numbers = (await partNamesHolding(await storedFile(page, documentId), portion.portionId)).map((name) => Number(/(\d+)\.xml$/.exec(name)?.[1]));
+  expect(numbers).toHaveLength(2);
+  expect(numbers[0]).toBeGreaterThan(1);
+  expect(numbers[0]).toBeLessThan(10);
+  expect(numbers[1]).toBeGreaterThan(9);
+  expect(numbers[1]).toBeLessThan(20);
+
+  await page.goto(portionPagePath(portion));
+
+  expect(await shownPortion(page)).toEqual({ marking: DIFFUSION_RESTREINTE, text: later, notice: null });
 });
 
 test('a portion that cannot be read for now says so, and is read once the page is reloaded', async ({ page }) => {

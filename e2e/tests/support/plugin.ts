@@ -668,12 +668,18 @@ function portionScope(portion: WrittenPortion, encoding: StoredEncoding, content
   return {
     tag: JSON.stringify({ v: 1, id, label: portion.labelCode }),
     placeholder: portion.placeholder,
-    xml:
-      `<dcs:portion xmlns:dcs="${PORTION_NAMESPACE}" id="${id}" version="1" label="${portion.labelCode}">` +
-      `<dcs:label>${portion.labelXml}</dcs:label>` +
-      `<dcs:content encoding="${encoding}">${content}</dcs:content>` +
-      '</dcs:portion>',
+    xml: portionPartXml({ id, labelCode: portion.labelCode, labelXml: portion.labelXml, encoding, content }),
   };
+}
+
+// A portion's part, as the panel writes its first version.
+export function portionPartXml(part: { id: string; labelCode: string; labelXml: string; encoding: StoredEncoding; content: string }): string {
+  return (
+    `<dcs:portion xmlns:dcs="${PORTION_NAMESPACE}" id="${part.id}" version="1" label="${part.labelCode}">` +
+    `<dcs:label>${part.labelXml}</dcs:label>` +
+    `<dcs:content encoding="${part.encoding}">${part.content}</dcs:content>` +
+    '</dcs:portion>'
+  );
 }
 
 // The ADatP-4774 XML of a label, as the plugin gets it from the policy
