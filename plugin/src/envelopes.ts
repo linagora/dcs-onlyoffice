@@ -7,6 +7,7 @@ import {
   type OpenTDFOptions,
   PermissionDeniedError,
 } from '@opentdf/sdk';
+import { field } from './json.ts';
 import { describeError } from './log.ts';
 import { messages } from './messages.ts';
 import type { PluginInfo } from './onlyoffice.ts';
@@ -84,10 +85,6 @@ function rewrapErrors(message: unknown): string[] {
 function errorOf(outcome: unknown): string | null {
   const value = field(outcome, 'value');
   return field(outcome, 'case') === 'error' && typeof value === 'string' ? value : null;
-}
-
-function field(value: unknown, name: string): unknown {
-  return typeof value === 'object' && value !== null && name in value ? (value as Record<string, unknown>)[name] : null; // SAFETY: object checked just before
 }
 
 function listField(value: unknown, name: string): unknown[] {

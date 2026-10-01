@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import type { Document } from '@xmldom/xmldom';
+import { type Document, XMLSerializer } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 import { customXmlParts } from './binding.ts';
 import type { StoredDocument } from './documents.ts';
@@ -38,6 +38,38 @@ const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}'
 
 export async function fileLabelsOf(file: Uint8Array): Promise<FileLabels> {
   const zip = await JSZip.loadAsync(file);
+  return labelsIn(zip, await customXmlParts(zip));
+}
+
+// A portion of a stored file, as its portion page reads it: the label code its
+// placeholder names, and its part, envelope included, null when the file
+// holds none.
+export interface StoredPortionPart {
+  placeholderLabelCode: string;
+  part: string | null;
+}
+
+// Null when the file holds no placeholder for the portion: as everywhere in
+// the platform, a portion goes with its placeholder, whatever becomes of its
+// part.
+export async function storedPortionPartOf(file: Uint8Array, portionId: string): Promise<StoredPortionPart | null> {
+  const zip = await JSZip.loadAsync(file);
+  const parts = await customXmlParts(zip);
+  const placeholderLabelCode = (await labelsIn(zip, parts)).portions.get(portionId)?.tag ?? null;
+  if (placeholderLabelCode === null) {
+    return null;
+  }
+  const part = parts.find(({ document }) => portionIdOf(document) === portionId);
+  return { placeholderLabelCode, part: part === undefined ? null : new XMLSerializer().serializeToString(part.document) };
+}
+
+// The id of the portion whose part a document is, null for any other part.
+function portionIdOf(document: Document): string | null {
+  const root = document.documentElement;
+  return root?.namespaceURI === PORTION_NAMESPACE && root.localName === 'portion' ? root.getAttribute('id') : null;
+}
+
+async function labelsIn(zip: JSZip, parts: { document: Document }[]): Promise<FileLabels> {
   const portions = new Map<string, PortionLabels>();
   const labelsOf = (id: string): PortionLabels => {
     const labels = portions.get(id) ?? { part: null, tag: null };
@@ -46,15 +78,15 @@ export async function fileLabelsOf(file: Uint8Array): Promise<FileLabels> {
   };
   let base: string | null = null;
   let label: string | null = null;
-  for (const { document } of await customXmlParts(zip)) {
+  for (const { document } of parts) {
     const root = document.documentElement;
     if (root?.namespaceURI === DOCUMENT_NAMESPACE && root.localName === 'document') {
       base = root.getAttribute('base') || null;
       label = root.getAttribute('label') || null;
     }
-    const id = root?.getAttribute('id') ?? null;
-    if (root?.namespaceURI === PORTION_NAMESPACE && root.localName === 'portion' && id !== null) {
-      labelsOf(id).part = root.getAttribute('label');
+    const id = portionIdOf(document);
+    if (id !== null) {
+      labelsOf(id).part = root?.getAttribute('label') ?? null;
     }
   }
   for (const part of await xmlPartsMatching(zip, PLACEHOLDER_PART)) {

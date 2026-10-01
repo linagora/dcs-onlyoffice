@@ -15,7 +15,7 @@ import { Journal } from './journal.ts';
 import { registerJournalAdmin } from './journal-admin.ts';
 import { LabelJournal, type PortionState } from './label-journal.ts';
 import { type DocumentDecision, DocumentAccessCheck } from './document-access.ts';
-import { StoredLabels } from './document-labels.ts';
+import { StoredLabels, storedPortionPartOf } from './document-labels.ts';
 import { registerDocumentServerRoutes } from './document-server-routes.ts';
 import { EditingSessions } from './editing-sessions.ts';
 import {
@@ -31,13 +31,18 @@ import {
 import { buildEditorConfig, type EditorMode, isEditorLanguage, signEditorConfig } from './editor-config.ts';
 import { type CommandService, requestForceSave } from './onlyoffice.ts';
 import { registerOpentdfRelay } from './opentdf-relay.ts';
-import { renderDocumentListPage, renderEditorPage, renderRestrictedDocumentPage, renderSavingDocumentPage } from './pages.ts';
+import { renderDocumentListPage, renderEditorPage, renderPortionPage, renderRestrictedDocumentPage, renderSavingDocumentPage } from './pages.ts';
 import { registerPluginRoutes } from './plugin-routes.ts';
 import { registerPolicyRelay } from './policy-relay.ts';
 import { labelsForUpload, registerUploads, UPLOAD_LIMIT_MEGABYTES } from './uploads.ts';
 
 interface DocumentParams {
   id: string;
+}
+
+interface PortionParams {
+  id: string;
+  portion: string;
 }
 
 interface EditorRoute {
@@ -208,6 +213,39 @@ export function buildServer(config: PortalConfig): FastifyInstance {
       .type(DOCUMENT_FORMATS[document.format].contentType)
       .header('Content-Disposition', attachment(document.fileName, fileNameOf(document.id, document.format)))
       .send(content);
+  });
+
+  // A protected portion read outside the editor, on its portion page. The
+  // portal decides on the document as it does to open it, and hands the page
+  // the portion's part as stored, envelope and all: the reader's browser
+  // opens the envelope, and OpenTDF decides on the portion at each opening.
+  app.get<{ Params: PortionParams }>('/documents/:id/portions/:portion', async (request, reply) => {
+    const document = await findDocument(config.documentsDirectory, request.params.id);
+    if (document === null) {
+      return reply.code(404).send({ error: 'Document not found' });
+    }
+    const { user } = requireSession(request);
+    const decision = await documentAccess.decideOne(user, document);
+    if (!decision.open) {
+      return refuse(reply, user, decision);
+    }
+    return reply
+      .type('text/html; charset=utf-8')
+      .send(renderPortionPage(user, { document, portionId: request.params.portion, opentdfUrl: config.opentdfPublicUrl }));
+  });
+
+  app.get<{ Params: PortionParams }>('/documents/:id/portions/:portion/part', async (request, reply) => {
+    const document = await findDocument(config.documentsDirectory, request.params.id);
+    if (document === null) {
+      return reply.code(404).send({ error: 'Document not found' });
+    }
+    const { user } = requireSession(request);
+    const decision = await documentAccess.decideOne(user, document);
+    if (!decision.open) {
+      return reply.code(decision.reason === 'clearance' ? 403 : 503).send({ error: 'Access denied' });
+    }
+    const stored = await storedPortionPartOf(await readFile(document.filePath), request.params.portion);
+    return stored ?? reply.code(404).send({ error: 'The stored document holds no such portion' });
   });
 
   app.post<{ Params: DocumentParams }>('/documents/:id/forcesave', async (request, reply) => {

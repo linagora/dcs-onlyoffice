@@ -11,8 +11,14 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     rolldownOptions: {
-      // The panel, and the page of the window it opens at the cursor.
-      input: { index: 'index.html', bubble: 'bubble.html' },
+      // The panel, the page of the window it opens at the cursor, and the
+      // script of the portal's portion pages. The portal renders those pages
+      // itself and cannot know the build's hashes: their script keeps a fixed
+      // name.
+      input: { index: 'index.html', bubble: 'bubble.html', portion: 'src/portion-page.tsx' },
+      output: {
+        entryFileNames: (chunk) => (chunk.name === 'portion' ? 'portion.js' : 'assets/[name]-[hash].js'),
+      },
     },
   },
 });
