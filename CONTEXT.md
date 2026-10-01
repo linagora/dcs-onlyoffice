@@ -30,6 +30,10 @@ _Avoid_: label text, banner
 A Microsoft Purview label defined in one Microsoft 365 tenant, which Office shows and applies that tenant's rules to. It has no categories of its own and nothing for protected portions.
 _Avoid_: Purview label, MIP label, AIP label
 
+**Sensitivity label with encryption**:
+A sensitivity label that encrypts the whole file it is applied to: Office then opens the file only for the people its permissions name. It protects the file outside the platform, where an envelope protects one portion.
+_Avoid_: protection label, protected label
+
 **Label mapping**:
 The correspondence between the labels of the security policy and the sensitivity labels of one Microsoft 365 tenant, which gives a document its sensitivity label and reads the one an uploaded file carries.
 _Avoid_: correspondence table, crosswalk
@@ -51,6 +55,10 @@ _Avoid_: retroactive protection, encryption in place
 **Placeholder**:
 What the document shows of a protected portion: its marking, where the portion sits, which authors cannot edit but through the labelling panel. In a text document it is a locked block; in a workbook, a merged range of locked cells.
 _Avoid_: stub, mask
+
+**Portion page**:
+The page of the portal that shows the text of one protected portion of a stored document, outside the editor, to a person who may open the document and whose clearance allows the portion's label. A placeholder links to it, so that a reader in Word or Excel reads the portion there.
+_Avoid_: viewer, reading page
 
 **Portion label**:
 The label of one protected portion. The file holds it in clear, for everyone and for other labelling tools, and bound in the portion's envelope. An author changing the portion may raise it to any label their clearance allows; only an administrator whose clearance allows it may lower it.
