@@ -66,6 +66,9 @@ test('no portion text reaches the Document Server, in the co-editing exchanges o
   const bobText = markedText('Fictional allied paragraph');
 
   await insertPortion(page, { marking: SPECIAL_FRANCE, text: aliceText });
+  // Bob's insertion counts the portions of his panel: Alice's must be there
+  // first.
+  await expect(pluginPanel(bob).getByTestId('portion-item')).toHaveCount(1);
   await insertPortion(bob, { marking: RELEASABLE_TO_NATO, text: bobText });
   const canary = canaryText('Fictional unencrypted paragraph');
   const frame = await pluginFrame(page);
