@@ -321,6 +321,14 @@ export async function deletePortion(portion: StoredPortion, policy: string, othe
   return writeLabelling({ kind: 'deletion', id: portion.id }, documentLabel, others, editor);
 }
 
+// A portion as a stored file keeps it, read outside the editor, where its
+// placeholder has no handle: the label code its placeholder names, and its
+// part, when the file holds one that can be read.
+export function storedPortionOf(portionId: string, placeholderLabelCode: string, partXml: string | null): StoredPortion {
+  const part = partXml === null ? null : parsePortionPart(partXml);
+  return storedPortion({ id: portionId, labelCode: placeholderLabelCode, internalId: '' }, part?.id === portionId ? part : null);
+}
+
 // The version a change of the portion writes.
 export function nextVersion(portion: StoredPortion): number {
   return (portion.version ?? 1) + 1;
@@ -407,18 +415,7 @@ export async function readDocumentState(editor: EditorType): Promise<DocumentSta
       return labelCode === null ? [] : [{ id: range.title, labelCode, internalId: range.reference }];
     }),
   ];
-  const portions = placeholders.map(({ id, labelCode, internalId }) => {
-    const content = contents.get(id) ?? null;
-    return {
-      id,
-      labelCode,
-      partLabelCode: content?.labelCode ?? null,
-      partLabelXml: content?.labelXml ?? null,
-      version: content?.version ?? null,
-      content: content?.content ?? null,
-      internalId,
-    };
-  });
+  const portions = placeholders.map((placeholder) => storedPortion(placeholder, contents.get(placeholder.id) ?? null));
   const documentPart = snapshot.documentParts.map(parseDocumentPart).find((part) => part !== null) ?? null;
   return {
     portions,
@@ -573,6 +570,21 @@ function parseTag(tag: string): unknown {
     }
     throw error;
   }
+}
+
+// A portion from its placeholder, which names its label and which the editor
+// knows by a handle, and its part, null when the document holds none or it
+// cannot be read.
+function storedPortion(placeholder: { id: string; labelCode: string; internalId: string }, part: PortionPartContent | null): StoredPortion {
+  return {
+    id: placeholder.id,
+    labelCode: placeholder.labelCode,
+    partLabelCode: part?.labelCode ?? null,
+    partLabelXml: part?.labelXml ?? null,
+    version: part?.version ?? null,
+    content: part?.content ?? null,
+    internalId: placeholder.internalId,
+  };
 }
 
 function parsePortionPart(xml: string): PortionPartContent | null {

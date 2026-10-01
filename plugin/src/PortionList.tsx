@@ -68,10 +68,7 @@ export function PortionList({
                     onSelect(portion);
                   }}
                 >
-                  <span class="portion-marking">
-                    <span class="label-swatch" style={{ backgroundColor: label?.marking.color ?? 'transparent' }} />
-                    <span data-testid="portion-marking">{label?.marking.text ?? portion.labelCode}</span>
-                  </span>
+                  <PortionMarking label={label} labelCode={portion.labelCode} />
                   <PortionBody reading={reading} labelWarning={check.warning} />
                 </button>
                 {notice !== null && (
@@ -137,7 +134,18 @@ function labelCheck(portion: StoredPortion, clearLabel: LabelView | null, readin
   return clearCodes.every((code) => code === bound.code) ? { shown: clearLabel, warning: null } : { shown: bound, warning: messages.labelMismatch };
 }
 
-function PortionBody({ reading, labelWarning }: { reading: PortionReading | null; labelWarning: string | null }): JSX.Element {
+// A portion's marking, with its label's colour, or its label code when the
+// label is unknown.
+export function PortionMarking({ label, labelCode }: { label: LabelView | null; labelCode: string }): JSX.Element {
+  return (
+    <span class="portion-marking">
+      <span class="label-swatch" style={{ backgroundColor: label?.marking.color ?? 'transparent' }} />
+      <span data-testid="portion-marking">{label?.marking.text ?? labelCode}</span>
+    </span>
+  );
+}
+
+export function PortionBody({ reading, labelWarning }: { reading: PortionReading | null; labelWarning: string | null }): JSX.Element {
   if (reading === null) {
     return <Notice>{messages.decrypting}</Notice>;
   }
@@ -173,7 +181,7 @@ function PortionText({ text }: { text: string }): JSX.Element {
   );
 }
 
-function Notice({ warning = false, children }: { warning?: boolean; children: string }): JSX.Element {
+export function Notice({ warning = false, children }: { warning?: boolean; children: string }): JSX.Element {
   return (
     <span class={warning ? 'portion-notice warning' : 'portion-notice muted'} data-testid="portion-notice">
       {children}
