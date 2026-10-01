@@ -1,6 +1,6 @@
 import { DOMParser, type Element } from '@xmldom/xmldom';
 import JSZip from 'jszip';
-import { inspectPackage, type PackageInspection } from './docx.ts';
+import { inspectPackage, type PackageInspection, type RelationshipTargets, relationshipTargets } from './docx.ts';
 
 export const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 // ADatP-4778.2 Tables 5-2 and 5-3 for SpreadsheetML, chart styles under the
@@ -36,6 +36,7 @@ const BINDABLE_PART = new RegExp(
     ')$',
 );
 const SPREADSHEET_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const RELATIONSHIP_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const WORKSHEET_PART = /^xl\/worksheets\/sheet\d+\.xml$/;
 // The extension in which ONLYOFFICE writes a sheet's user protected ranges.
 const USER_PROTECTED_RANGES_EXTENSION = '{231B7EB2-2AFC-4442-B178-5FFDF5851E7C}';
@@ -58,10 +59,18 @@ export interface SheetHeadersAndFooters {
 export const HEADER_FOOTER_NAMES = ['oddHeader', 'oddFooter', 'evenHeader', 'evenFooter', 'firstHeader', 'firstFooter'] as const;
 export type HeaderFooterName = (typeof HEADER_FOOTER_NAMES)[number];
 
+// A link on a sheet's cells: the cells it covers, and the address its
+// relationship targets, null for a place in the workbook.
+export interface SheetLink {
+  reference: string | null;
+  target: string | null;
+}
+
 export interface WorksheetInspection {
   part: string;
   userProtectedRanges: UserProtectedRange[];
   mergedCells: string[];
+  links: SheetLink[];
   headersAndFooters: SheetHeadersAndFooters;
   // The text of each cell that holds one, by reference, shared strings
   // resolved.
@@ -91,7 +100,8 @@ export async function inspectXlsx(xlsx: Buffer): Promise<XlsxInspection> {
   const sharedStrings = await readSharedStrings(zip);
   const worksheets: WorksheetInspection[] = [];
   for (const part of Object.keys(zip.files).filter((name) => WORKSHEET_PART.test(name)).sort()) {
-    worksheets.push(readWorksheet(part, parse((await zip.file(part)?.async('string')) ?? ''), sharedStrings));
+    const sheet = parse((await zip.file(part)?.async('string')) ?? '');
+    worksheets.push(readWorksheet(part, sheet, sharedStrings, await relationshipTargets(zip, part)));
   }
   return { ...(await inspectPackage(zip, BINDABLE_PART)), worksheets };
 }
@@ -108,7 +118,7 @@ async function readSharedStrings(zip: JSZip): Promise<string[]> {
   );
 }
 
-function readWorksheet(part: string, sheet: Element, sharedStrings: string[]): WorksheetInspection {
+function readWorksheet(part: string, sheet: Element, sharedStrings: string[], targets: RelationshipTargets): WorksheetInspection {
   const extensions = elements(sheet, 'ext').filter((extension) => extension.getAttribute('uri') === USER_PROTECTED_RANGES_EXTENSION);
   const cellTexts = new Map<string, string>();
   for (const cell of elements(sheet, 'c')) {
@@ -137,6 +147,10 @@ function readWorksheet(part: string, sheet: Element, sharedStrings: string[]): W
         users: elements(range, 'user').map((user) => user.getAttribute('id') ?? ''),
       })),
     mergedCells: elements(sheet, 'mergeCell').map((merge) => merge.getAttribute('ref') ?? ''),
+    links: elements(sheet, 'hyperlink').map((link) => ({
+      reference: link.getAttribute('ref'),
+      target: targets.get(link.getAttributeNS(RELATIONSHIP_NAMESPACE, 'id')) ?? null,
+    })),
     cellTexts,
   };
 }

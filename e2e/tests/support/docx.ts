@@ -6,6 +6,14 @@ export interface ContentControl {
   tag: string | null;
   lock: string | null;
   text: string;
+  links: ContentControlLink[];
+}
+
+// A link in a content control's content: the address its relationship
+// targets, null for a place in the document, and the text it spans.
+export interface ContentControlLink {
+  target: string | null;
+  text: string;
 }
 
 export interface PortionPart {
@@ -86,6 +94,9 @@ export interface DocxInspection extends PackageInspection {
   headersAndFooters: HeaderFooter[];
 }
 
+// The targets of a part's relationships, by their ids.
+export type RelationshipTargets = Map<string | null, string | null>;
+
 export interface CustomProperty {
   fmtid: string | null;
   name: string;
@@ -133,11 +144,12 @@ const PACKAGE_PART = /^((.+\/)?_rels\/[^/]*\.rels|\[Content_Types\]\.xml|customX
 export async function inspectDocx(docx: Buffer): Promise<DocxInspection> {
   const zip = await JSZip.loadAsync(docx);
   const document = parse(await readPart(zip, 'word/document.xml'));
+  const targets = await relationshipTargets(zip, 'word/document.xml');
   return {
     ...(await inspectPackage(zip, BINDABLE_PART)),
     bodyText: textOf(document),
-    contentControls: elements(document, WORD_NAMESPACE, 'sdt').map(readContentControl),
-    headersAndFooters: await readHeadersAndFooters(zip, document),
+    contentControls: elements(document, WORD_NAMESPACE, 'sdt').map((sdt) => readContentControl(sdt, targets)),
+    headersAndFooters: await readHeadersAndFooters(zip, document, targets),
   };
 }
 
@@ -207,24 +219,38 @@ export function sensitivityLabelProperties(inspected: PackageInspection, labelId
   );
 }
 
-function readContentControl(sdt: Element): ContentControl {
+function readContentControl(sdt: Element, targets: RelationshipTargets): ContentControl {
   const properties = elements(sdt, WORD_NAMESPACE, 'sdtPr')[0];
+  const content = elements(sdt, WORD_NAMESPACE, 'sdtContent');
   return {
     alias: properties === undefined ? null : wordValue(properties, 'alias'),
     tag: properties === undefined ? null : wordValue(properties, 'tag'),
     lock: properties === undefined ? null : wordValue(properties, 'lock'),
-    text: elements(sdt, WORD_NAMESPACE, 'sdtContent').map(textOf).join(''),
+    text: content.map(textOf).join(''),
+    links: content
+      .flatMap((element) => elements(element, WORD_NAMESPACE, 'hyperlink'))
+      .map((link) => ({ target: targets.get(link.getAttributeNS(RELATIONSHIP_NAMESPACE, 'id')) ?? null, text: paragraphText(link) })),
   };
 }
 
-async function readHeadersAndFooters(zip: JSZip, document: Element): Promise<HeaderFooter[]> {
-  const relationships = parse(await readPart(zip, 'word/_rels/document.xml.rels'));
-  const targets = new Map(
+// The targets of a part's relationships, by their ids; none when the part
+// has no relationship part.
+export async function relationshipTargets(zip: JSZip, part: string): Promise<RelationshipTargets> {
+  const folder = part.lastIndexOf('/');
+  const xml = await zip.file(`${part.slice(0, folder)}/_rels/${part.slice(folder + 1)}.rels`)?.async('string');
+  if (xml === undefined) {
+    return new Map();
+  }
+  const relationships = parse(xml);
+  return new Map(
     elements(relationships, PACKAGE_RELATIONSHIP_NAMESPACE, 'Relationship').map((relationship) => [
       relationship.getAttribute('Id'),
       relationship.getAttribute('Target'),
     ]),
   );
+}
+
+async function readHeadersAndFooters(zip: JSZip, document: Element, targets: RelationshipTargets): Promise<HeaderFooter[]> {
   const found: HeaderFooter[] = [];
   for (const kind of ['header', 'footer'] as const) {
     for (const reference of elements(document, WORD_NAMESPACE, `${kind}Reference`)) {
@@ -233,13 +259,18 @@ async function readHeadersAndFooters(zip: JSZip, document: Element): Promise<Hea
         throw new Error(`A ${kind} reference names no part`);
       }
       const part = parse(await readPart(zip, `word/${target}`));
-      found.push({ kind, type: reference.getAttributeNS(WORD_NAMESPACE, 'type'), blocks: childElements(part).flatMap(readBlock) });
+      const partTargets = await relationshipTargets(zip, `word/${target}`);
+      found.push({
+        kind,
+        type: reference.getAttributeNS(WORD_NAMESPACE, 'type'),
+        blocks: childElements(part).flatMap((element) => readBlock(element, partTargets)),
+      });
     }
   }
   return found;
 }
 
-function readBlock(element: Element): HeaderFooterBlock[] {
+function readBlock(element: Element, targets: RelationshipTargets): HeaderFooterBlock[] {
   if (element.namespaceURI !== WORD_NAMESPACE) {
     return [];
   }
@@ -248,7 +279,7 @@ function readBlock(element: Element): HeaderFooterBlock[] {
       return [{ paragraph: paragraphText(element) }];
     case 'sdt': {
       const color = elements(element, WORD_NAMESPACE, 'sdtContent').flatMap((content) => elements(content, WORD_NAMESPACE, 'color'))[0];
-      return [{ control: readContentControl(element), color: color?.getAttributeNS(WORD_NAMESPACE, 'val')?.toUpperCase() ?? null }];
+      return [{ control: readContentControl(element, targets), color: color?.getAttributeNS(WORD_NAMESPACE, 'val')?.toUpperCase() ?? null }];
     }
     default:
       return [];
@@ -321,6 +352,13 @@ function isPageMarking(block: HeaderFooterBlock): block is HeaderFooterControl {
 }
 
 // A content control's tag, parsed when it is JSON, as the plugin's tags are.
+// The id of the portion that a content control's tag names, null for any
+// other content control.
+export function portionIdOfTag(tag: string | null): string | null {
+  const parsed = parsedTag(tag);
+  return typeof parsed === 'object' && parsed !== null && 'id' in parsed && typeof parsed.id === 'string' ? parsed.id : null;
+}
+
 export function parsedTag(tag: string | null): unknown {
   if (tag === null) {
     return null;

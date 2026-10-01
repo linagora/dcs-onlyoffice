@@ -1,7 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 import JSZip from 'jszip';
+import { PORTAL } from './deployment.ts';
 import { browserFetch, openNewDocument, requestForceSave } from './documents.ts';
-import { type DocxInspection, inspectDocx, type PackageInspection } from './docx.ts';
+import { type ContentControlLink, type DocxInspection, inspectDocx, type PackageInspection } from './docx.ts';
 import type { MarkedText } from './marker.ts';
 import { pluginPanel } from './plugin.ts';
 import { inspectXlsx, type XlsxInspection } from './xlsx.ts';
@@ -116,6 +117,29 @@ async function forceSaved<T>(page: Page, documentId: string, inspect: (file: Buf
     throw new Error('No saved document');
   }
   return inspected;
+}
+
+// A portion of a stored document, as its portion page names it.
+interface PortionOfDocument {
+  documentId: string;
+  portionId: string;
+}
+
+// The path of a stored portion's portion page on the portal.
+export function portionPagePath(portion: PortionOfDocument): string {
+  return `/documents/${portion.documentId}/portions/${portion.portionId}`;
+}
+
+// The public address of a stored portion's portion page, which its
+// placeholder links to.
+export function portionPageAddress(portion: PortionOfDocument): string {
+  return `${PORTAL}${portionPagePath(portion)}`;
+}
+
+// The links of a text document's placeholder: one, over its whole text, to
+// its portion's page.
+export function placeholderLinks(portion: PortionOfDocument, placeholder: string): ContentControlLink[] {
+  return [{ target: portionPageAddress(portion), text: placeholder }];
 }
 
 // A portion as its document's saved file holds it: the code of its label and

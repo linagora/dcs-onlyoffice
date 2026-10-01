@@ -15,6 +15,9 @@ const INIT_ENV_SCRIPT = fileURLToPath(new URL('../../../deploy/scripts/init-env.
 // standalone profile's default.
 export const DOMAIN: string = settingOf('DOMAIN') ?? 'dcs.localhost';
 
+// The portal's public address.
+export const PORTAL: string = `https://portail.${DOMAIN}`;
+
 // Whether browsers resolve the stack's host names to this machine by
 // themselves, as they resolve every name under localhost.
 const RESOLVED_BY_BROWSERS: boolean = DOMAIN === 'localhost' || DOMAIN.endsWith('.localhost');

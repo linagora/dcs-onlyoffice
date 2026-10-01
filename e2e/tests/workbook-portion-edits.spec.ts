@@ -5,7 +5,7 @@ import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { type MarkedText, markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
-import { forceSavedXlsx } from './support/portions.ts';
+import { forceSavedXlsx, portionPageAddress } from './support/portions.ts';
 import { cellValue, firstPortionId, insertWorkbookPortion, restrictedWorkbook, typeIntoCell } from './support/workbooks.ts';
 
 const DIFFUSION_RESTREINTE = 'DIFFUSION RESTREINTE';
@@ -58,6 +58,8 @@ test('a co-author changes a portion of a workbook, which its author sees being c
     const saved = await forceSavedXlsx(page, documentId, (xlsx) => xlsx.portionParts[0]?.version === '3');
     expect(saved.portionParts).toEqual([expect.objectContaining({ id: portionId, version: '3', label: SPECIAL_FRANCE_CODE, encoding: 'ztdf' })]);
     expect(saved.worksheets[0]?.userProtectedRanges).toEqual([{ name: portionId, reference: CELLS, users: [] }]);
+    // Each change wrote the placeholder's link again, which stays one.
+    expect(saved.worksheets[0]?.links).toEqual([{ reference: CELLS, target: portionPageAddress({ documentId, portionId }) }]);
     await expect
       .poll(() => portionJournal(since, 'Portion changed in the panel', portionId))
       .toEqual([
@@ -107,6 +109,7 @@ test('a co-author deletes a portion of a workbook, whose cells take a value agai
     const saved = await forceSavedXlsx(page, documentId, (xlsx) => xlsx.portionParts.length === 0);
     expect(saved.worksheets[0]?.userProtectedRanges).toEqual([]);
     expect(saved.worksheets[0]?.mergedCells).toEqual([]);
+    expect(saved.worksheets[0]?.links).toEqual([]);
     await expect
       .poll(() => portionJournal(since, 'Portion deleted in the panel', portionId))
       .toEqual([expect.objectContaining({ documentId, user: 'bob', before: { label: DIFFUSION_RESTREINTE_CODE, version: 1 } })]);

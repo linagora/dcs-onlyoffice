@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { CHROMIUM_RESOLVER_ARGS, DOMAIN, FIREFOX_RESOLVER_PREFS } from './tests/support/deployment.ts';
+import { CHROMIUM_RESOLVER_ARGS, FIREFOX_RESOLVER_PREFS, PORTAL } from './tests/support/deployment.ts';
 
 // The stack is reached through its public host names. Under localhost, the
 // browsers resolve them to this machine by themselves, which the suite then
@@ -15,7 +15,7 @@ export default defineConfig({
   retries: process.env.CI === undefined ? 0 : 1,
   reporter: process.env.CI === undefined ? 'list' : [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: `https://portail.${DOMAIN}`,
+    baseURL: PORTAL,
     ignoreHTTPSErrors: true,
     // CI keeps a trace and a screenshot of every test as evidence for the stop
     // report (about 10 MB of trace per test); local runs keep failures only.

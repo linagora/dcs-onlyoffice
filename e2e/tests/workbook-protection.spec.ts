@@ -4,7 +4,7 @@ import { openDocument } from './support/documents.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { commentOnCells, mergeCells, pluginFrame, pluginPanel } from './support/plugin.ts';
-import { forceSavedXlsx } from './support/portions.ts';
+import { forceSavedXlsx, portionPageAddress } from './support/portions.ts';
 import {
   cellValue,
   firstPortionId,
@@ -54,6 +54,7 @@ test('the French officer protects cells already filled, which become a SPECIAL F
   expect(saved.portionParts[0]).toMatchObject({ id: portionId, label: SPECIAL_FRANCE_CODE, encoding: 'ztdf' });
   expect(saved.worksheets[0]?.userProtectedRanges).toEqual([{ name: portionId, reference: SUPPLY_ROWS.reference, users: [] }]);
   expect(saved.worksheets[0]?.mergedCells).toContain(SUPPLY_ROWS.reference);
+  expect(saved.worksheets[0]?.links).toEqual([{ reference: SUPPLY_ROWS.reference, target: portionPageAddress({ documentId, portionId }) }]);
   expect(everySheetShows(saved, WITH_MORE_RESTRICTIVE_PORTIONS_CENTRE)).toBe(true);
   // Of the two rows, only the placeholder's marking is left.
   const rowTexts = [...(saved.worksheets[0]?.cellTexts ?? [])].filter(([cell]) => /^[A-D][78]$/.test(cell));

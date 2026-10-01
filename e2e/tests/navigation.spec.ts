@@ -1,4 +1,5 @@
 import { openNewDocument } from './support/documents.ts';
+import { portionIdOfTag } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { executeEditorMethod, highlightedPortion, pluginFrame, pluginPanel } from './support/plugin.ts';
@@ -29,11 +30,7 @@ function contentControlsOf(value: unknown): ContentControlInfo[] {
 }
 
 function portionIdOf(control: ContentControlInfo | null): string | null {
-  if (control === null) {
-    return null;
-  }
-  const tag: unknown = JSON.parse(control.Tag);
-  return typeof tag === 'object' && tag !== null && 'id' in tag && typeof tag.id === 'string' ? tag.id : null;
+  return control === null ? null : portionIdOfTag(control.Tag);
 }
 
 test('a click on a portion in the panel selects its block in the document', async ({ page }) => {

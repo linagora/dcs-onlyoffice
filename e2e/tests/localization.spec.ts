@@ -1,8 +1,9 @@
 import { openNewDocument, waitForEditorReady } from './support/documents.ts';
+import { parsedTag } from './support/docx.ts';
 import { expect, test } from './support/fixtures.ts';
 import { markedText } from './support/marker.ts';
 import { pluginPanel } from './support/plugin.ts';
-import { forceSavedDocx } from './support/portions.ts';
+import { forceSavedDocx, placeholderLinks } from './support/portions.ts';
 import { selectCells, SUPPLY_ROWS } from './support/workbooks.ts';
 
 const SPECIAL_FRANCE = 'DIFFUSION RESTREINTE – SPÉCIAL FRANCE';
@@ -37,8 +38,16 @@ test('with the editor in French, the panel, the Insert tab button and new portio
   await expect(panel.getByTestId('portion-item')).toHaveCount(1);
 
   const docx = await forceSavedDocx(page, documentId, (saved) => saved.contentControls.length === 1);
-  expect(docx.contentControls).toEqual([
-    { alias: 'Portion protégée', tag: expect.any(String), lock: 'sdtContentLocked', text: `${SPECIAL_FRANCE} – portion protégée` },
+  const placeholder = `${SPECIAL_FRANCE} – portion protégée`;
+  const portionId = docx.portionParts[0]?.id ?? '';
+  expect(docx.contentControls.map((control) => ({ ...control, tag: parsedTag(control.tag) }))).toEqual([
+    {
+      alias: 'Portion protégée',
+      tag: expect.objectContaining({ id: portionId }),
+      lock: 'sdtContentLocked',
+      text: placeholder,
+      links: placeholderLinks({ documentId, portionId }, placeholder),
+    },
   ]);
 });
 
