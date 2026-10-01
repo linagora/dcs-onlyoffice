@@ -65,8 +65,10 @@ export async function customXmlParts(zip: JSZip): Promise<{ name: string; docume
       }
     }
   }
+  // In the order of their numbers, as Office and ONLYOFFICE number the parts
+  // they write: customXml/item10.xml comes after customXml/item9.xml.
   const parts: { name: string; document: Document }[] = [];
-  for (const name of [...names].sort()) {
+  for (const name of [...names].sort((first, second) => first.localeCompare(second, 'en', { numeric: true }))) {
     const xml = await zip.file(name)?.async('string');
     if (xml !== undefined) {
       parts.push({ name, document: parsePackageXml(xml) });

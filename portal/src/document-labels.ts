@@ -59,7 +59,9 @@ export async function storedPortionPartOf(file: Uint8Array, portionId: string): 
   if (placeholderLabelCode === null) {
     return null;
   }
-  const part = parts.find(({ document }) => portionIdOf(document) === portionId);
+  // Of several parts that name the portion, the last counts, as for its
+  // label and in the panel.
+  const part = parts.findLast(({ document }) => portionIdOf(document) === portionId);
   return { placeholderLabelCode, part: part === undefined ? null : new XMLSerializer().serializeToString(part.document) };
 }
 
