@@ -46,7 +46,7 @@ All identifiers in the examples are fictional: tenant `00000000-0000-0000-0000-0
 | Track | Feasible | Main cost | Revocation after a clearance change | Biggest limit |
 |---|---|---|---|---|
 | A. DLP on labels | Yes, now (Tested) | DLP policies in the tenant; nothing new in the platform | Not applicable: nothing is encrypted | Acts only in Microsoft 365 locations and on onboarded devices |
-| B. Labels with encryption | Yes | Group sync, a MIP SDK sidecar or a metered Graph call, encrypting labels in the tenant | Up to about three hours with offline access Never, longer otherwise | Rights follow Entra groups, not the platform's decision; Custom XML parts may stop SharePoint from processing the file |
+| B. Labels with encryption | Yes | Group sync, a MIP SDK sidecar or a metered Graph call, encrypting labels in the tenant | Up to about three hours with offline access Never, longer otherwise | Rights follow Entra groups, not the platform's decision; encrypted in Word, a platform file is no longer processed by SharePoint (Tested) |
 | C. DKE | Yes, desktop only | E5-class licences, a key service, a MIP SDK sidecar | At each decrypt request, if Office does not cache (**UNVERIFIED**) | No Office for the web, co-authoring, search, eDiscovery or content DLP |
 | D. Reading portions | Yes, with links (Tested on Mac and the web); an add-in is optional | A portal page per portion; optionally a small task pane | At each opening, by OpenTDF | The text shows in a browser tab or task pane, never in the document |
 
@@ -64,8 +64,9 @@ All identifiers in the examples are fictional: tenant `00000000-0000-0000-0000-0
    the MIP SDK (C++, .NET, Java preview; Ubuntu, RHEL, Debian; no Node.js binding) or Graph `assignSensitivityLabel` on a
    SharePoint or OneDrive copy (protected, metered, USD 0.00185 per call). SharePoint "can't process some files"
    encrypted in Office desktop apps that hold Custom XML parts, as every platform file does; whether this applies to the
-   MIP SDK or Graph is **UNVERIFIED**. The tenant trial of a label with encryption has not run yet: the label had not
-   reached Word for Mac on the evening it was published ([section 11](#11-tenant-trials)).
+   MIP SDK or Graph is **UNVERIFIED**. **Tested**: encrypted in Word for Mac, a platform file is no longer processed:
+   Office for the web refuses to open it, even for whoever encrypted it, search does not see its words and OneDrive shows
+   no label ([section 11](#11-tenant-trials)).
 3. **C, DKE, decides per request, at the highest cost.** DKE needs Microsoft 365 E5-class licences, not Business
    Premium; Word on Windows 2307+ and Mac 16.85+, not Office for the web; no co-authoring, AutoSave or SharePoint
    processing (Guidance). Microsoft's reference key service authorises each decrypt call with a replaceable authorizer,
@@ -267,7 +268,8 @@ some files that are labeled and encrypted from Office desktop apps when these fi
 by custom add-ins, or custom XML parts", while "Files that are labeled and encrypted only in Office for the web aren't
 affected" (Guidance, [limitations][pv-spo-limits]). An uploader needs at least the View right, otherwise "the upload is
 successful but the service doesn't recognize the label" ([SharePoint and OneDrive][pv-spo]). *Inference*: every platform
-file has Custom XML parts; whether SharePoint processes one encrypted by the MIP SDK or by Graph is **UNVERIFIED**.
+file has Custom XML parts. **Tested**: one encrypted in Word for Mac is not processed ([section 11](#11-tenant-trials));
+whether SharePoint processes one encrypted by the MIP SDK or by Graph is **UNVERIFIED**.
 
 ### 4.4 Co-authoring of encrypted files
 
@@ -569,15 +571,16 @@ placeholder's cell link after a warning, and Excel for the web opens it in a new
 
 ## 11. Tenant trials
 
-On 2026-10-01 the trials of [#159](https://github.com/linagora/dcs-onlyoffice/issues/159) ran in a Microsoft 365
-Business Premium trial tenant whose four sensitivity labels without encryption map the demo policy's labels, as
-[microsoft-365.md](../microsoft-365.md) describes, with co-authoring of labelled files off and Defender for Office 365's
-Built-in protection on. The platform files were a DOCX and an XLSX downloaded from the hosted stack's portal, each with
-the base label DIFFUSION RESTREINTE, one portion DIFFUSION RESTREINTE – SPÉCIAL FRANCE whose placeholder links to its
-portion page, a signed binding, and the sensitivity label the platform writes: DIFFUSION RESTREINTE, since the
-informative category that a more restrictive portion adds to the document label has no sensitivity label
-([ADR 0005](../adr/0005-a-document-sensitivity-label-follows-its-document-label.md)). They were opened from disk in Word
-and Excel for Mac, and from OneDrive in Word and Excel for the web. Windows was not tried. What follows is Tested.
+On 2026-10-01 and 2026-10-02 the trials of [#159](https://github.com/linagora/dcs-onlyoffice/issues/159) ran in a
+Microsoft 365 Business Premium trial tenant whose four sensitivity labels without encryption map the demo policy's
+labels, as [microsoft-365.md](../microsoft-365.md) describes, with co-authoring of labelled files off and Defender
+for Office 365's Built-in protection on. The platform files were a DOCX and an XLSX downloaded from the hosted
+stack's portal, each with the base label DIFFUSION RESTREINTE, one portion DIFFUSION RESTREINTE – SPÉCIAL FRANCE
+whose placeholder links to its portion page, a signed binding, and the sensitivity label the platform writes:
+DIFFUSION RESTREINTE, since the informative category that a more restrictive portion adds to the document label has
+no sensitivity label ([ADR 0005](../adr/0005-a-document-sensitivity-label-follows-its-document-label.md)). They
+were opened from disk in Word and Excel for Mac, and from OneDrive in Word and Excel for the web. Windows was not
+tried. What follows is Tested.
 
 | Trial | Seen | Documentation |
 |---|---|---|
@@ -589,14 +592,17 @@ and Excel for Mac, and from OneDrive in Word and Excel for the web. Windows was 
 | Portion page for a tenant account | A tenant test account that followed the link from Word for the web, in a private window, reached the portal's sign-in page; signed in with a platform account cleared for the portion, the page showed it | The portal is first-party: its sign-in and relay work as they are (*Inference*, [7.1](#71-links-instead-of-an-add-in-d1)) |
 | DLP rule (track A) | About a quarter of an hour after the rule was turned on, sharing the platform document with an address outside the organisation was refused, with a message saying that the item contains sensitive information and cannot be shared with people outside the organisation. Word for the web showed the policy tip. OneDrive's list had no sensitivity column; its details pane showed the label | Guests are blocked "right after detection"; policy tips in SharePoint and OneDrive ([8](#8-dlp-with-sensitivity-labels-question-7)) |
 | Save in Word for the web, without encryption | The copy keeps the platform's three Custom XML parts and their relationships byte for byte, the placeholder's link and the seven `MSIP_Label_*` values. Word for the web wrote 18 other parts again and dropped one; SharePoint added a content type schema, form templates and a properties part as Custom XML parts, a `ContentTypeId` custom property and `[trash]` entries. The policy service reports the copy as altered, with 28 parts changed since signing | None found |
-| Label with encryption (track B) | Published to the administrator and a new test group; it did not appear in Word for Mac that evening, so no document was encrypted | "allow 24 hours" for labels to propagate; Office for the web "within the hour"; "24-48 hours" for configurations that depend on a new group ([when labels take effect][pv-create-when]) |
-| Removal from the group | Not measured: no document was encrypted | Up to three hours ([4.2](#42-how-fast-a-removal-stops-someone)) |
+| Publishing the label with encryption | Published to the administrator and to a test group created the same day. About 13 hours later it showed, in Word for the web and, after signing in again, in Word for Mac, for the administrator, whom the policy names, but not for a test account that the policy reaches through the group | "allow 24 hours" for labels to propagate; Office for the web "within the hour"; "24-48 hours" for configurations that depend on a new group ([when labels take effect][pv-create-when]) |
+| Label with encryption applied in Word for Mac (track B) | The administrator encrypted the platform document and saved it to OneDrive, which then served an encrypted container. OneDrive's details pane showed no sensitivity label. Word for the web refused to open it, for a test account in the group and for the administrator alike, saying that the document is protected by Information Rights Management and holds special properties that Word does not support in a browser, and is to be opened in Word desktop. Search did not find its words | SharePoint and OneDrive "can't process some files that are labeled and encrypted from Office desktop apps when these files contain ... custom XML parts" ([4.3](#43-what-word-supports)) |
+| Encryption removed in Word for Mac | Labelled DIFFUSION RESTREINTE again and saved as a copy, the document is a plain package again. The platform's three Custom XML parts keep their content byte for byte under other part names; the placeholder's link stays; the `MSIP_Label_*` properties get a new `ActionId` and `SetDate`, and a `Tag`. The policy service reports the copy as altered, with 33 parts changed since signing | None found |
+| Removal from the group | Not measured: no reader could open the file encrypted in Word for Mac in Word for the web, where the trial measures the delay | Up to three hours ([4.2](#42-how-fast-a-removal-stops-someone)) |
 
-Still to try: a platform document encrypted by the label, applied in Word for Mac first, since the limitation on Custom
-XML parts concerns files encrypted in desktop apps ([4.3](#43-what-word-supports)), or else in Word for the web; whether
-it opens in Word and Office for the web with its placeholders and links, whether SharePoint processes it, what removing
-the encryption keeps of the platform's parts, and the delay before a removal from the group stops a reader who opens it
-again in Word for the web.
+*Inference*: a platform file encrypted in a desktop app also escapes track A's DLP rule, since SharePoint does not see
+its label; not tried.
+
+Still to try: the label applied in Word for the web, whose files Microsoft says SharePoint processes; whether a reader
+in the group then opens the platform document in Word for the web with its placeholders and links, and the delay before
+a removal from the group stops that reader.
 
 Deviation found: the editors' own download goes around the portal, with no access decision, signature check or journal
 entry ([#165](https://github.com/linagora/dcs-onlyoffice/issues/165)).
