@@ -313,7 +313,7 @@ The CI runs the type checks and the API tests, then starts the `standalone` stac
 
 ## Roadmap
 
-Iteration 5 is done: the Microsoft Purview sensitivity label written at each save and read at upload, uploads, the one-command start and the demo walkthrough. Two checks by hand remain, the demo on a hosted stack with corporate accounts and a look in Microsoft Word at the sensitivity label of stored documents. Iteration 6, workbooks in the spreadsheet editor, comes next.
+Iterations 6 to 9 are done: workbooks, uploaded or created on the platform, with their protected portions, page and screen markings; the protection of existing content; a binding signature that covers every part through which a stored file can change, names its document and its latest save, and is trusted through certificate authorities and their revocation lists; and the administrators' journal, with revocations that apply at once. Iteration 10 is under way: portion pages, which every placeholder links to, are done, while trying Microsoft 365's protection on platform documents in a demo tenant (#159), and recording the track the next iteration builds on it (#160), remain. Two other checks by hand remain: the platform's workbooks in Microsoft Excel (#105), and the demo walkthrough on a hosted stack with corporate accounts (#142).
 
 | Iteration | Scope | Status |
 | --- | --- | --- |
@@ -322,7 +322,11 @@ Iteration 5 is done: the Microsoft Purview sensitivity label written at each sav
 | 3 | Encryption of portions with OpenTDF and hybrid post-quantum key encapsulation, clearance directory, access decisions | Done |
 | 4 | Editing existing portions, portion versions, header and footer markings, signed ADatP-4778 binding | Done |
 | 5 | Microsoft Purview sensitivity labels, uploads, one-command start, demo walkthrough | Done |
-| 6 | Workbooks in the spreadsheet editor | Planned |
+| 6 | Workbooks in the spreadsheet editor: base label, protected portions in cells, page marking, co-editing | Done |
+| 7 | Workbook uploads, protection of existing content, screen marking, binding of every part that can hold content | Done |
+| 8 | Binding signature: every part through which a file can change, its document and latest save, certificate authorities and revocation lists | Done |
+| 9 | Administrators' journal, revocations that apply at once | Done |
+| 10 | Portion pages linked from placeholders, Microsoft 365 protection tried | In progress |
 
 ## Standards
 
