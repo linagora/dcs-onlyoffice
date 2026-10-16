@@ -83,7 +83,10 @@ export function buildEditorConfig(
       key: document.key,
       title: document.fileName,
       url: internalDocumentUrl(config, document.id, 'content'),
-      permissions: { edit: mode === 'edit', download: true },
+      // A stored document leaves through the portal's Download link only:
+      // the editor's own download would come from the Document Server, past
+      // the portal's access decision and signature check.
+      permissions: { edit: mode === 'edit', download: false },
     },
     documentType: DOCUMENT_FORMATS[document.format].documentType,
     editorConfig: {
